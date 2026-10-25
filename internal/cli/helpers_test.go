@@ -4,7 +4,6 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -21,18 +20,15 @@ import (
 	"github.com/Topher-the-Geek/vamos/internal/worker"
 	"github.com/google/go-containerregistry/pkg/registry"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
-	"github.com/google/go-containerregistry/pkg/v1/mutate"
 	"github.com/spf13/afero"
-	"go.podman.io/buildah"
 	"go.podman.io/storage"
 )
 
-// pullBusybox declares the base image for tests, as the target "busybox", in one line.
-// Tests that build pull it once, and later runs find it in the local container store.
-const pullBusybox = `pull(name="busybox", image="docker.io/library/busybox", tag="1.36")` + "\n"
-
-// projectDir is where in-memory test projects live.
-const projectDir = testenv.ProjectDir
+// The constants of testenv, as this package's tests name them.
+const (
+	pullBusybox = testenv.PullBusybox
+	projectDir  = testenv.ProjectDir
+)
 
 // The helpers of testenv, as this package's tests name them.
 var (
@@ -43,19 +39,7 @@ var (
 )
 
 func TestMain(m *testing.M) {
-	// buildah re-executes the test binary to run build steps, and a worker in a test runs it as an attempt.
-	if buildah.InitReexec() || worker.ChildFromEnv() {
-		return
-	}
-	if os.Getenv("BUILDAH_ISOLATION") == "" {
-		os.Setenv("BUILDAH_ISOLATION", "chroot")
-	}
-	code := m.Run()
-	if err := testenv.RemoveSuiteStores(); err != nil {
-		fmt.Fprintf(os.Stderr, "removing the suite's stores: %v\n", err)
-		code = 1
-	}
-	os.Exit(code)
+	testenv.Main(m, worker.ChildFromEnv)
 }
 
 // privateStores is the stores of the test that asked for its own, while it runs; see usePrivateStores.
@@ -112,33 +96,26 @@ func insecureRegistry(t *testing.T, handler http.Handler) (*httptest.Server, str
 // Cached layers' images are named.
 func unnamedImages(t *testing.T) map[string]bool {
 	t.Helper()
-	return imageIDs(t, func(img storage.Image) bool { return len(img.Names) == 0 })
+	ids, err := stores(t).UnnamedImages()
+	must(t, err)
+	return ids
 }
 
 // imageIDs returns the IDs of the images in the local container store for which keep is true.
 func imageIDs(t *testing.T, keep func(storage.Image) bool) map[string]bool {
 	t.Helper()
-	ids := map[string]bool{}
-	withStore(t, func(store storage.Store) {
-		images, err := store.Images()
-		must(t, err)
-		for _, img := range images {
-			if keep(img) {
-				ids[img.ID] = true
-			}
-		}
-	})
+	ids, err := stores(t).ImageIDs(keep)
+	must(t, err)
 	return ids
 }
 
-// withStore calls use with the test's container store, open only until use returns,
-// since each vamos run opens and shuts it too.
+// withStore calls use with the test's container store, open only until use returns.
 func withStore(t *testing.T, use func(storage.Store)) {
 	t.Helper()
-	store, err := storage.GetStore(stores(t).Options)
-	must(t, err)
-	defer store.Shutdown(false)
-	use(store)
+	must(t, stores(t).WithStore(func(store storage.Store) error {
+		use(store)
+		return nil
+	}))
 }
 
 // assertNoNewImages fails the test if the local container store has unnamed images that aren't in before.
@@ -290,25 +267,14 @@ func imagePaths(t *testing.T, img v1.Image, dir string) []string {
 // It reports whether visit did so.
 func walkImage(t *testing.T, img v1.Image, visit func(*tar.Header, io.Reader) bool) bool {
 	t.Helper()
-	rc := mutate.Extract(img)
-	defer rc.Close()
-	tr := tar.NewReader(rc)
-	for {
-		hdr, err := tr.Next()
-		if errors.Is(err, io.EOF) {
-			return false
-		} else if err != nil {
-			t.Fatal(err)
-		}
-		if visit(hdr, tr) {
-			return true
-		}
-	}
+	found, err := testenv.WalkImage(img, visit)
+	must(t, err)
+	return found
 }
 
 // imagePath returns the absolute path within the image of a layer entry.
 func imagePath(hdr *tar.Header) string {
-	return "/" + strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(hdr.Name, "./"), "/"), "/")
+	return testenv.ImagePath(hdr.Name)
 }
 
 // fakeDocker serves the parts of the Docker Engine API that loading an image uses, on an amd64 machine,

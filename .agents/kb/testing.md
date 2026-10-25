@@ -34,7 +34,8 @@ for TypeScript MCP this is `npm run check`;
 for FastMCP activate `.venv`, then run `ruff check .`, `ruff format --check .`, `pyright` and `pytest`.
 The other projects' guides are linked from [development.md](development.md).
 
-Most behavior tests drive the real CLI using `vamos` in [helpers_test.go](../../internal/cli/helpers_test.go).
+What layers and tasks take in and give out is specified as [behavior specifications](#behavior-specifications).
+Most other behavior tests drive the real CLI using `vamos` in [helpers_test.go](../../internal/cli/helpers_test.go).
 Use `.succeeds(t)` and `.failsWith(t, usage, wants...)`; `usage` is true only for command-line mistakes.
 Inspect resulting commands, files and tags.
 Do not mock the core: push uses an in-process registry,
@@ -53,8 +54,8 @@ Do not add `testdata/` directories.
 Workspace cases need `WORKSPACE` plus each package's BUILD file.
 BUILD snippets start with `pullBusybox`; image commands usually name `app`.
 Tests that build call `requireBuildah(t)`.
-Every `TestMain` that uses buildah must call `buildah.InitReexec()` first,
-and `testenv.RemoveSuiteStores` after the tests.
+Every `TestMain` that uses buildah is `testenv.Main(m)`, which calls `buildah.InitReexec()` first
+and `testenv.RemoveSuiteStores` after the tests; packages whose tests run a worker pass it `worker.ChildFromEnv`.
 Table cases use keyed struct literals, one field per line.
 
 On failure, check output absence with `assertNoFiles` and image cleanup with `assertNoNewImages`.
@@ -82,3 +83,42 @@ over plain HTTP marks it insecure with `testenv.InsecureRegistry`, or `insecureR
 which write a `registries.conf` and call `sysregistriesv2.InvalidateCache`,
 because containers/image caches registry configuration.
 Trace importer coverage skips without `trace_processor_shell`.
+
+## Behavior specifications
+
+[features](../../features/) specifies the behavior of layers and tasks in Gherkin, one `.feature` file for each,
+and godog runs them through `TestFeatures` in [features_test.go](../../features/features_test.go).
+Scenarios run the command line in process, through `cli.NewRootCommand`, on an in-memory project and the suite's stores.
+They observe only what a user can:
+the command's output and error, the image it saved, the folder it exported and the images left in the store.
+Observe a layer's image with `I save` and a task's files with `I export`.
+Add a behavior as a scenario under the `Rule` it illustrates;
+a rule states one sentence of the contract, in the words of the [BUILD reference](../../docs/reference/build.md).
+Use a Scenario Outline when cases differ only in short values, titled `<case>`, a column that names each row:
+each row runs as a subtest named by the title with the row's values.
+Keep in Go tests the cases that need a registry, owners, paths that must not exist on the host
+or long tables of expansions, such as `TestSteps` and `TestTaskOutputLinks`,
+and the mistakes that loading a BUILD file catches.
+
+Steps are methods of `world` in [steps_test.go](../../features/steps_test.go),
+the state of one scenario, which `InitializeScenario` makes for each.
+Reuse a step before adding one, and phrase a new one as what a user does or sees, not as how it is checked.
+Steps return errors, rather than failing a `*testing.T`, so that godog reports the step and its line.
+A scenario's BUILD file is a doc string, appended to the pull of `Given a project that pulls busybox`;
+delimit it with ```` ``` ```` when it holds Starlark's `"""`.
+Each non-blank line of `it fails with`'s doc string must appear in the error.
+Table cells write a newline as `\n`,
+and `{{nonce}}` becomes a value new to each scenario, for actions that must run rather than come from the cache.
+Tag a feature or scenario `@buildah` when it builds:
+`TestFeatures` leaves those scenarios out with `-short` or where buildah can't build,
+and fails if `VAMOS_REQUIRE_INTEGRATION` is set.
+It reports itself skipped when that leaves no scenario to run, and fails when `-godog.tags` matches none.
+
+godog's options are flags prefixed `godog.`:
+`go test ./features -godog.tags=@task` runs the task scenarios,
+though not `-godog.concurrency` above 1, since scenarios share the suite's container store,
+and godog prints each step as it runs, in its default `pretty` format;
+`-godog.no-colors` drops the colors and `-godog.format=progress` prints a character a step.
+`-run 'TestFeatures/<scenario>'` selects one scenario, though godog's summary then counts the others as undefined.
+The devcontainer's `alexkrechik.cucumberautocomplete` extension links steps to their definitions,
+which the workspace's `cucumberautocomplete.steps` setting locates.

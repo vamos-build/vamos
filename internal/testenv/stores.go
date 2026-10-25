@@ -25,11 +25,29 @@ const RequireIntegrationEnv = "VAMOS_REQUIRE_INTEGRATION"
 // the test fails if RequireIntegrationEnv is set, and is skipped otherwise.
 func unavailable(t *testing.T, what string, err error) {
 	t.Helper()
+	skip, fail := verdict(what, err)
+	require(t, skip, fail)
+}
+
+// verdict is unavailable's decision, for a runner without a *testing.T:
+// why the test fails if RequireIntegrationEnv is set, and otherwise why it is skipped.
+func verdict(what string, err error) (skip string, fail error) {
 	msg := fmt.Sprintf("%s isn't possible here: %v", what, err)
 	if os.Getenv(RequireIntegrationEnv) != "" {
-		t.Fatalf("%s, but %s is set", msg, RequireIntegrationEnv)
+		return "", fmt.Errorf("%s, but %s is set", msg, RequireIntegrationEnv)
 	}
-	t.Skip(msg)
+	return msg, nil
+}
+
+// require skips or fails t as skip and fail say, if either does.
+func require(t *testing.T, skip string, fail error) {
+	t.Helper()
+	if fail != nil {
+		t.Fatal(fail)
+	}
+	if skip != "" {
+		t.Skip(skip)
+	}
 }
 
 // RequireBuildah skips tests that build images with -short,
@@ -39,12 +57,21 @@ func unavailable(t *testing.T, what string, err error) {
 // The test binary's TestMain must call buildah.InitReexec first, as for any test that builds.
 func RequireBuildah(t *testing.T) {
 	t.Helper()
+	skip, fail := Buildah()
+	require(t, skip, fail)
+}
+
+// Buildah decides, as RequireBuildah does, whether a test that builds images runs here,
+// for a runner without a *testing.T, such as godog's hooks:
+// skip says why it is skipped, and fail why it fails; both are empty if it runs.
+func Buildah() (skip string, fail error) {
 	if testing.Short() {
-		t.Skip("builds an image; skipped with -short")
+		return "builds an image; skipped with -short", nil
 	}
 	if err := buildahAvailable(); err != nil {
-		unavailable(t, "building an image", err)
+		return verdict("building an image", err)
 	}
+	return "", nil
 }
 
 // buildahAvailable probes, once, whether images can be built here: it needs root,
@@ -118,6 +145,41 @@ type Stores struct {
 	Options storage.StoreOptions // the store's, which a local executor opens it with
 }
 
+// UnnamedImages returns the IDs of the images in the container store that have no name,
+// such as an image a failed target might leave behind; cached layers' images are named.
+func (s *Stores) UnnamedImages() (map[string]bool, error) {
+	return s.ImageIDs(func(img storage.Image) bool { return len(img.Names) == 0 })
+}
+
+// ImageIDs returns the IDs of the images in the container store for which keep is true.
+func (s *Stores) ImageIDs(keep func(storage.Image) bool) (map[string]bool, error) {
+	ids := map[string]bool{}
+	err := s.WithStore(func(store storage.Store) error {
+		images, err := store.Images()
+		if err != nil {
+			return err
+		}
+		for _, img := range images {
+			if keep(img) {
+				ids[img.ID] = true
+			}
+		}
+		return nil
+	})
+	return ids, err
+}
+
+// WithStore calls use with the container store, open only until use returns,
+// since each vamos run opens and shuts it too.
+func (s *Stores) WithStore(use func(storage.Store) error) error {
+	store, err := storage.GetStore(s.Options)
+	if err != nil {
+		return err
+	}
+	defer store.Shutdown(false)
+	return use(store)
+}
+
 // suiteStores makes the stores that a test binary's tests share, once.
 var suiteStores = sync.OnceValues(func() (*Stores, error) {
 	suiteMade.Store(true)
@@ -133,6 +195,12 @@ func SuiteStores(t *testing.T) *Stores {
 		t.Fatal(err)
 	}
 	return s
+}
+
+// Suite returns the stores that SuiteStores does, or why they couldn't be made,
+// for a runner without a *testing.T, such as godog's steps.
+func Suite() (*Stores, error) {
+	return suiteStores()
 }
 
 // PrivateStores returns stores for the test alone, removed once it ends.

@@ -61,6 +61,7 @@ and the distinction between an unset TLS override and explicit `--tls-verify=fal
 For host/container path isolation, start with `cache.Checkout`,
 `fileset.Walk`, `targetState.addSource` and `collectOutput`.
 Their symbol comments own link handling and directory metadata rules.
-The end-to-end guards are `TestDestinationModes`, `TestTaskOutputLinks`
-and `TestTaskFailures` in [build_test.go](../../internal/cli/build_test.go),
+The end-to-end guards are `TestDestinationModes` and `TestTaskOutputLinks`
+in [build_test.go](../../internal/cli/build_test.go),
+the rule that output which can't be selected fails, in [task.feature](../../features/task.feature),
 and [export_test.go](../../internal/finish/export_test.go).

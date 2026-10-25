@@ -11,24 +11,37 @@ import (
 // ProjectDir is where in-memory test projects live.
 const ProjectDir = "/project"
 
+// PullBusybox declares the base image for tests, as the target "busybox", in one line.
+// Tests that build pull it once into their suite's store, and later builds find it there.
+const PullBusybox = `pull(name="busybox", image="docker.io/library/busybox", tag="1.36")` + "\n"
+
 // Project returns an in-memory filesystem holding files, keyed by their path within ProjectDir.
 func Project(t *testing.T, files map[string]string) afero.Fs {
 	t.Helper()
+	fsys, err := MemProject(files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return fsys
+}
+
+// MemProject is Project for a runner without a *testing.T, such as godog's steps.
+func MemProject(files map[string]string) (afero.Fs, error) {
 	fsys := afero.NewMemMapFs()
 	if err := fsys.MkdirAll(ProjectDir, 0o755); err != nil {
-		t.Fatal(err)
+		return nil, err
 	}
 	for name, content := range files {
 		path := filepath.Join(ProjectDir, name)
 		// MemMapFs would make missing folders with no permissions.
 		if err := fsys.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			t.Fatal(err)
+			return nil, err
 		}
 		if err := afero.WriteFile(fsys, path, []byte(content), 0o644); err != nil {
-			t.Fatal(err)
+			return nil, err
 		}
 	}
-	return fsys
+	return fsys, nil
 }
 
 // DiskProject is like Project, but keeps the files on disk, under root/project,

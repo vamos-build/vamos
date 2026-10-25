@@ -32,25 +32,12 @@ import (
 
 	"github.com/containerd/platforms"
 	"github.com/google/go-containerregistry/pkg/registry"
-	"go.podman.io/buildah"
 	"go.podman.io/image/v5/types"
 	"go.podman.io/storage"
 )
 
 func TestMain(m *testing.M) {
-	// buildah re-executes the test binary to run build steps, and a worker runs it as an attempt's subprocess.
-	if buildah.InitReexec() || ChildFromEnv() {
-		return
-	}
-	if os.Getenv("BUILDAH_ISOLATION") == "" {
-		os.Setenv("BUILDAH_ISOLATION", "chroot")
-	}
-	code := m.Run()
-	if err := testenv.RemoveSuiteStores(); err != nil {
-		fmt.Fprintf(os.Stderr, "removing the suite's stores: %v\n", err)
-		code = 1
-	}
-	os.Exit(code)
+	testenv.Main(m, ChildFromEnv)
 }
 
 // fixture is a coordinator with stores in memory, served over HTTP, with a cache registry of its own.

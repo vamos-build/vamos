@@ -25,6 +25,10 @@
 		"[python]": {
 			"editor.defaultFormatter": "charliermarsh.ruff"
 		},
+		"cucumberautocomplete.steps": [
+			"features/*_test.go"
+		],
+		"cucumberautocomplete.syncfeatures": "features/*.feature",
 		"editor.codeActionsOnSave": {
 			"source.organizeImports": "explicit"
 		},

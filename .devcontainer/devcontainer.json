@@ -11,6 +11,7 @@
   "customizations": {
     "vscode": {
       "extensions": [
+        "alexkrechik.cucumberautocomplete",
         "anthropic.claude-code",
         "charliermarsh.ruff",
         "dbaeumer.vscode-eslint",
