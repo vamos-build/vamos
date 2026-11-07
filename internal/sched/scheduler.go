@@ -234,8 +234,7 @@ func (s *Scheduler) failed(ref graph.Ref, err error) error {
 		graph:   s.graph,
 		cause:   err,
 	}
-	var logged *loggedError
-	if errors.As(err, &logged) {
+	if logged, ok := errors.AsType[*loggedError](err); ok {
 		f.Log = logged.log
 	}
 	return f
@@ -1232,9 +1231,8 @@ func (s *Scheduler) prepareIndex(ref graph.Ref) func(context.Context) completion
 // Failed returns the outcome of a job that err ended: its failure, as data if the scheduler made it so,
 // or else by its message alone, and cancelled if the job's cancellation is what caused it.
 func Failed(err error) api.Outcome {
-	var f *failure
 	outcome := api.Outcome{Cancelled: errors.Is(err, context.Canceled)}
-	if errors.As(err, &f) {
+	if f, ok := errors.AsType[*failure](err); ok {
 		outcome.Failure = &f.Failure
 	} else {
 		outcome.Failure = &api.Failure{Message: err.Error()}

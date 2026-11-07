@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"maps"
 	"strings"
 	"testing"
 
@@ -190,12 +191,8 @@ func TestMatchFiles(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			all := map[string]entry{}
-			for path, e := range entries {
-				all[path] = e
-			}
-			for path, e := range tc.extra {
-				all[path] = e
-			}
+			maps.Copy(all, entries)
+			maps.Copy(all, tc.extra)
 			err := errors.Join(
 				matchFiles(all, tc.want, tc.exactly),
 				matchLinks(all, tc.links, tc.linksExactly),

@@ -28,7 +28,7 @@ func FakeDocker(t *testing.T, network, reply, machine string) func() [][]byte {
 	switch network {
 	case "unix":
 		// Unix socket paths are limited to about 100 bytes, so avoid t.TempDir's long names.
-		dir, mkErr := os.MkdirTemp("", "vamos-docker-")
+		dir, mkErr := os.MkdirTemp("", "vamos-docker-") //nolint:usetesting // see above
 		if mkErr != nil {
 			t.Fatal(mkErr)
 		}

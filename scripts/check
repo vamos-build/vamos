@@ -1,0 +1,49 @@
+#!/bin/sh
+# Run the repository's checks, stopping at the first that fails.
+# See .agents/kb/testing.md for when to run which tier.
+#
+#   scripts/check         build, golangci-lint (go vet, gofmt and the linters .golangci.yml enables), govulncheck,
+#                         short tests
+#   scripts/check full    all of that, then the full test suite, which builds images: needs root and network
+set -eu
+
+usage='usage: scripts/check [full]'
+tier=${1:-}
+case $tier in
+    '' | full) ;;
+    *) echo "$usage" >&2; exit 2 ;;
+esac
+[ $# -le 1 ] || { echo "$usage" >&2; exit 2; }
+
+cd -- "$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+
+for tool in go golangci-lint govulncheck; do
+    command -v "$tool" >/dev/null || {
+        echo "scripts/check: $tool isn't installed; the devcontainer has it, so rebuild it" >&2
+        exit 1
+    }
+done
+
+step() {
+    printf '==> %s\n' "$1"
+}
+
+step 'build'
+go build -o vamos .
+
+step 'lint'
+golangci-lint run
+
+# Fails only for a vulnerability that vamos's code reaches; it needs the network, for vuln.go.dev.
+step 'vulnerabilities'
+govulncheck ./...
+
+step 'short tests'
+go test -short ./...
+
+if [ "$tier" = full ]; then
+    step 'full tests'
+    go test ./...
+fi
+
+echo 'All checks passed.'

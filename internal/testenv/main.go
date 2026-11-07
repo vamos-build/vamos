@@ -22,7 +22,9 @@ func Main(m *testing.M, children ...func() bool) {
 		}
 	}
 	if os.Getenv("BUILDAH_ISOLATION") == "" {
-		os.Setenv("BUILDAH_ISOLATION", "chroot")
+		if err := os.Setenv("BUILDAH_ISOLATION", "chroot"); err != nil {
+			panic(err)
+		}
 	}
 	code := m.Run()
 	if err := RemoveSuiteStores(); err != nil {

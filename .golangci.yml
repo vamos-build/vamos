@@ -1,0 +1,72 @@
+# golangci-lint's configuration, which scripts/check runs.
+# Each linter here is one the repository passes; enabling another means fixing what it reports, in the same commit.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - bodyclose # HTTP response bodies left open
+    - copyloopvar # copies of loop variables, needless since Go 1.22
+    - errcheck # unchecked errors, but for the cleanup excluded below
+    - errorlint # error comparisons and type assertions that miss wrapped errors, and %v where %w was meant
+    - govet # go vet's own analyzers
+    - ineffassign # assignments that nothing reads
+    - lll # lines over 120 columns, counting a tab as four, as development.md asks
+    - misspell # misspelled English in comments and strings
+    - modernize # code that newer Go and its library say more simply
+    - nilerr # returning nil, or an error, after checking the opposite
+    - staticcheck # bugs, deprecated APIs, simplifications and style
+    - unused # unused code, test helpers included
+    - usetesting # os and context calls that testing.T has a better form of
+  settings:
+    errcheck:
+      # Cleanup, and writes whose failure has nowhere to go: a failed Close that matters, such as of a file just
+      # written, is checked where it happens; a reply's reader may have gone.
+      exclude-functions:
+        - os.Remove
+        - os.RemoveAll
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - (net/http.ResponseWriter).Write
+        - io.WriteString
+        # Deferred cleanup of a policy or a store, after whatever error the function returns.
+        - (*go.podman.io/image/v5/signature.PolicyContext).Destroy
+        - (go.podman.io/storage.Store).Shutdown
+        # Fails only for a flag that doesn't exist, which --help shows.
+        - (*github.com/spf13/pflag.FlagSet).MarkHidden
+    lll:
+      line-length: 120
+      tab-width: 4
+    misspell:
+      # Misspelled on purpose, by the features that check vamos's "did you mean" suggestions.
+      ignore-rules:
+        - langauges
+        - mkae
+    staticcheck:
+      checks:
+        # golangci-lint's defaults,
+        - all
+        - -ST1000
+        - -ST1003
+        - -ST1016
+        - -ST1020
+        - -ST1021
+        - -ST1022
+        # and not De Morgan's law, which turns !(a || b) into !a && !b however it reads.
+        - -QF1001
+  exclusions:
+    rules:
+      # errcheck matches functions by exact type, and Close has too many receivers to list.
+      - linters: [errcheck]
+        text: "Error return value of `[^`]+\\.Close` is not checked"
+    # The examples are other projects, with checks of their own; ./... reaches into their node_modules.
+    paths:
+      - ^examples/
+
+formatters:
+  enable:
+    - gofmt
+  exclusions:
+    paths:
+      - ^examples/

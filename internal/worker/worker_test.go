@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
@@ -104,7 +105,7 @@ func startWorker(t *testing.T, f *fixture, configure ...func(*Config)) (*Worker,
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		w.Run(ctx)
+		_ = w.Run(ctx) // it ends when the test cancels ctx
 	}()
 	t.Cleanup(func() {
 		cancel()
@@ -151,7 +152,7 @@ func tagsOf(h http.Handler, repo string) []string {
 	var list struct {
 		Tags []string `json:"tags"`
 	}
-	json.Unmarshal(rec.Body.Bytes(), &list)
+	_ = json.Unmarshal(rec.Body.Bytes(), &list) // an error, for a repository it doesn't know, lists no tags
 	return list.Tags
 }
 
@@ -412,7 +413,7 @@ func TestWorkerFencesItself(t *testing.T) {
 	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if hanging.Load() && strings.HasSuffix(r.URL.Path, "/heartbeat") {
 			// The body is read first: the server notices the client leaving only once it has read the request.
-			io.Copy(io.Discard, r.Body)
+			_, _ = io.Copy(io.Discard, r.Body)
 			<-r.Context().Done()
 			return
 		}
@@ -440,13 +441,16 @@ func TestWorkerFencesItself(t *testing.T) {
 	wctx, stopWatch := context.WithCancel(ctx)
 	defer stopWatch()
 	building := make(chan struct{})
-	go f.c.Watch(wctx, id, 0, func(e api.Event) error {
-		if e.Kind == api.EventStatus && e.Status == "building" && len(e.Nodes) == 1 && e.Nodes[0] == 1 {
-			close(building)
-			return context.Canceled
-		}
-		return nil
-	})
+	go func() {
+		// It ends with fn's context.Canceled once the layer is building.
+		_ = f.c.Watch(wctx, id, 0, func(e api.Event) error {
+			if e.Kind == api.EventStatus && e.Status == "building" && len(e.Nodes) == 1 && e.Nodes[0] == 1 {
+				close(building)
+				return context.Canceled
+			}
+			return nil
+		})
+	}()
 	select {
 	case <-building:
 	case <-time.After(2 * time.Minute):
@@ -499,9 +503,7 @@ func TestWorkerRenewsBeforeStarting(t *testing.T) {
 		if rec.Code == http.StatusOK && delayed.CompareAndSwap(false, true) {
 			time.Sleep(testLease + testLease/4) // the first assignment arrives once its lease has passed
 		}
-		for k, v := range rec.Header() {
-			w.Header()[k] = v
-		}
+		maps.Copy(w.Header(), rec.Header())
 		w.WriteHeader(rec.Code)
 		w.Write(rec.Body.Bytes())
 	}))

@@ -98,7 +98,7 @@ func TestImportRules(t *testing.T) {
 			if err != nil {
 				t.Fatalf("go list: %v", err)
 			}
-			for _, dep := range strings.Fields(string(out)) {
+			for dep := range strings.FieldsSeq(string(out)) {
 				if dep == module+rule.pkg {
 					continue
 				}

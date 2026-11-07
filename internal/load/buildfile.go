@@ -33,6 +33,7 @@ type workspace struct {
 	root         string                // absolute: the directory holding the WORKSPACE file, or else the only package
 	current      string                // the package of -C, whose targets are named without a label
 	packages     map[string]*buildFile // those loaded, by package
+	stored       []string              // the keys of packages, in the order loaded
 	loading      []*buildFile          // BUILD files running, innermost last, which others may name targets of
 	modules      map[string]*module    // .star files loaded, by label
 	execPlatform *platformValue        // the executor's, which run() steps run on without emulation, as EXEC_PLATFORM
@@ -325,7 +326,14 @@ func (w *workspace) load(pkg string) (*buildFile, error) {
 	f := &buildFile{pkg: pkg, dir: dir, path: buildPath, decls: map[string]*declaration{}}
 	w.loading = append(w.loading, f)
 	defer func() { w.loading = w.loading[:len(w.loading)-1] }()
+	stored := len(w.stored)
 	if err := w.exec(f, src); err != nil {
+		// The packages this one loaded may name its targets, which are now never declared, so they go with it:
+		// one named again is loaded again, and fails on this one.
+		for _, p := range w.stored[stored:] {
+			delete(w.packages, p)
+		}
+		w.stored = w.stored[:stored]
 		var nested *loadError
 		if !errors.As(err, &nested) {
 			nested = &loadError{err}
@@ -333,6 +341,7 @@ func (w *workspace) load(pkg string) (*buildFile, error) {
 		return nil, nested
 	}
 	w.packages[pkg] = f
+	w.stored = append(w.stored, pkg)
 	return f, nil
 }
 
@@ -376,7 +385,7 @@ func (w *workspace) checkPackageDir(pkg string) error {
 		return nil
 	}
 	current := w.root
-	for _, component := range strings.Split(pkg, "/") {
+	for component := range strings.SplitSeq(pkg, "/") {
 		current = filepath.Join(current, component)
 		info, _, err := lstat(w.fs, current)
 		if errors.Is(err, fs.ErrNotExist) {
@@ -466,11 +475,10 @@ func (w *workspace) exec(f *buildFile, src []byte) error {
 // describeExecError returns err, from running a BUILD or .star file, as it is reported: as one line saying where.
 // An error in another package's BUILD file already says where it is.
 func describeExecError(err error) error {
-	var nested *loadError
-	if errors.As(err, &nested) {
+	if nested, ok := errors.AsType[*loadError](err); ok {
 		return nested
 	}
-	if evalErr, ok := err.(*starlark.EvalError); ok {
+	if evalErr, ok := errors.AsType[*starlark.EvalError](err); ok {
 		return errors.New(describeEvalError(evalErr))
 	}
 	return err
@@ -1409,12 +1417,11 @@ func describeNames(kind string, names []string) string {
 // describeEvalError reports e at the innermost position within a BUILD file,
 // in the one-line "file:line:col: message" form of compiler errors.
 func describeEvalError(e *starlark.EvalError) string {
-	var at *posError
-	if errors.As(e, &at) {
+	if at, ok := errors.AsType[*posError](e); ok {
 		return at.Error()
 	}
-	for i := len(e.CallStack) - 1; i >= 0; i-- {
-		if pos := e.CallStack[i].Pos; pos.Filename() != "<builtin>" && pos.IsValid() {
+	for _, frame := range slices.Backward(e.CallStack) {
+		if pos := frame.Pos; pos.Filename() != "<builtin>" && pos.IsValid() {
 			return fmt.Sprintf("%s: %s", pos, e.Msg)
 		}
 	}

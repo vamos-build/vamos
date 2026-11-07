@@ -105,7 +105,10 @@ func (f *fakeRunner) Run(ctx context.Context, req Request, ev Output) (*Report, 
 		return nil, err
 	}
 	defer log.Discard()
-	log.Writer(cache.StreamStdout, io.Discard).Write([]byte("ran " + req.Key.Encoded()[:8] + "\n"))
+	line := []byte("ran " + req.Key.Encoded()[:8] + "\n")
+	if _, err := log.Writer(cache.StreamStdout, io.Discard).Write(line); err != nil {
+		return nil, err
+	}
 	result := &cache.ActionResult{Epoch: req.Epoch.Unix()}
 	if result.Log, err = log.Save(ctx, f.content); err != nil {
 		return nil, err
@@ -143,7 +146,9 @@ func (f *fakeRunner) Run(ctx context.Context, req Request, ev Output) (*Report, 
 // memFile returns a filesystem holding the file /f with content.
 func memFile(content string) afero.Fs {
 	fsys := afero.NewMemMapFs()
-	afero.WriteFile(fsys, "/f", []byte(content), 0o644)
+	if err := afero.WriteFile(fsys, "/f", []byte(content), 0o644); err != nil {
+		panic(err) // a filesystem in memory can't refuse it
+	}
 	return fsys
 }
 
@@ -1195,9 +1200,7 @@ func (r *movingRecords) Tag(ctx context.Context, name string) (*cache.TagRecord,
 	moved := *record
 	moved.Digest = r.to
 	moved.Instances = map[string]cache.TagInstance{}
-	for platform, i := range record.Instances {
-		moved.Instances[platform] = i // complete, for another index: not what the pin asks
-	}
+	maps.Copy(moved.Instances, record.Instances) // complete, for another index: not what the pin asks
 	return &moved, nil
 }
 

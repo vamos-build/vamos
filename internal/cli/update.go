@@ -287,8 +287,7 @@ func pinText(p load.Pin) string {
 // registry's own, whose status containers/image doesn't keep, fails the update rather than change a pin on a failure
 // that may pass.
 func listingRefused(err error) bool {
-	var unauthorized docker.ErrUnauthorizedForCredentials
-	if errors.As(err, &unauthorized) {
+	if _, ok := errors.AsType[docker.ErrUnauthorizedForCredentials](err); ok {
 		return true
 	}
 	var coded errcode.ErrorCoder // errcode.Error, or errcode.ErrorCode for a code without a message

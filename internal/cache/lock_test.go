@@ -123,7 +123,7 @@ func holdInSubprocess(t *testing.T, dir string, prune bool) func() {
 			break
 		}
 		if time.Since(start) > 10*time.Second {
-			cmd.Process.Kill()
+			_ = cmd.Process.Kill() // the test fails either way
 			t.Fatalf("the helper didn't take the lock in time:\n%s", out)
 		}
 		time.Sleep(10 * time.Millisecond)

@@ -235,7 +235,10 @@ func fakeRun(f *fixture, gate func(a *remote.Assignment, killed func() bool) err
 			return remote.AttemptReport{Failure: sched.FailureOf(err)}
 		}
 		defer log.Discard()
-		log.Writer(cache.StreamStdout, io.Discard).Write([]byte("ran " + req.Key.Encoded()[:8] + "\n"))
+		line := []byte("ran " + req.Key.Encoded()[:8] + "\n")
+		if _, err := log.Writer(cache.StreamStdout, io.Discard).Write(line); err != nil {
+			return remote.AttemptReport{Failure: sched.FailureOf(err)}
+		}
 		result := &cache.ActionResult{Epoch: req.Epoch.Unix()}
 		if result.Log, err = log.Save(ctx, f.m); err != nil {
 			return remote.AttemptReport{Failure: sched.FailureOf(err)}
@@ -1244,7 +1247,7 @@ func TestPruneRefusedWhileHeld(t *testing.T) {
 	startWorker(t, f, amd64, 4, fakeRun(f, nil))
 	ctx := t.Context()
 	time.Sleep(f.c.cfg.Lease) // the hold after starting
-	id, err := f.c.Submit(ctx, api.Request{Graph: ptr(testGraph(t, f, "held"))})
+	id, err := f.c.Submit(ctx, api.Request{Graph: new(testGraph(t, f, "held"))})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1271,9 +1274,6 @@ func TestPruneRefusedWhileHeld(t *testing.T) {
 		return err == nil
 	})
 }
-
-// ptr returns a pointer to v.
-func ptr[T any](v T) *T { return &v }
 
 // orderedStores wraps the fixture's stores to record the order of a prune's clears.
 type orderedStores struct {

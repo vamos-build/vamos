@@ -169,7 +169,9 @@ func TestSharingNoAttachToCancelled(t *testing.T) {
 	}()
 	waitFor(t, func() bool { return b.runs.Load() == 1 })
 	cancelFirst()
-	<-done
+	if err := <-done; err == nil {
+		t.Error("the cancelled attempt succeeded")
+	}
 	second := make(chan *cache.ActionResult, 1)
 	go func() {
 		r, err := s.attempt(t.Context(), testRequest(false), &outputs{})
@@ -283,7 +285,11 @@ func TestSharingOutputReachesAttached(t *testing.T) {
 	s := NewSharing(b, content, content)
 	starter, attacher := &outputs{}, &outputs{}
 	var wg sync.WaitGroup
-	wg.Go(func() { s.attempt(t.Context(), testRequest(false), starter) })
+	wg.Go(func() {
+		if _, err := s.attempt(t.Context(), testRequest(false), starter); err != nil {
+			t.Errorf("the first job failed: %v", err)
+		}
+	})
 	waitFor(t, func() bool { return starter.String() == "started\n" })
 	attached := make(chan struct{})
 	wg.Go(func() {
@@ -462,8 +468,7 @@ func TestSharingPublishFails(t *testing.T) {
 				if tc.resolve {
 					continue
 				}
-				var logged *loggedError
-				if !errors.As(err, &logged) {
+				if logged, ok := errors.AsType[*loggedError](err); !ok {
 					t.Errorf("the failure %v carries no log, want the attempt's", err)
 				} else if log, err := m.Read(t.Context(), *logged.log, cache.MaxLogSize); err != nil ||
 					!strings.Contains(string(log), "done") {

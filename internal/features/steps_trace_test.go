@@ -421,7 +421,7 @@ func (w *world) ThenPerfettoReadsTheTraceAsVamosMeansIt() {
 				continue // the column names
 			}
 			var row []string
-			for _, field := range strings.Split(line, ",") {
+			for field := range strings.SplitSeq(line, ",") {
 				row = append(row, strings.Trim(field, `"`))
 			}
 			rows = append(rows, row)

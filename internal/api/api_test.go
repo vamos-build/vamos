@@ -56,7 +56,7 @@ func TestCheckType(t *testing.T) {
 		Other []any
 	}
 	var problems []string
-	checkType(reflect.TypeOf(value{}), "value", map[reflect.Type]bool{}, &problems)
+	checkType(reflect.TypeFor[value](), "value", map[reflect.Type]bool{}, &problems)
 	want := []string{
 		"value.Extra[] is an interface, interface {}, which could hold anything",
 		"value.Other[] is an interface, interface {}, which could hold anything",
@@ -88,8 +88,7 @@ func checkType(typ reflect.Type, path string, seen map[reflect.Type]bool, proble
 			return
 		}
 		seen[typ] = true
-		for i := range typ.NumField() {
-			f := typ.Field(i)
+		for f := range typ.Fields() {
 			name := fmt.Sprintf("%s.%s", path, f.Name)
 			for _, hint := range []string{"Path", "Dir", "File", "Fd", "Handle"} {
 				// Files is a tree's content reference, not a file.

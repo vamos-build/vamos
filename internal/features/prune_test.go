@@ -8,8 +8,8 @@ import (
 
 // newPruneWorld starts a scenario of the prune feature, from its background: stores of its own, since prune empties
 // them, and a project whose layers and task are built on the image of a registry of its own, base:v1, so that it
-// needn't pull busybox, which its lockfile pins. prune removes cached layer images and other build results, while keeping pulled images and
-// recorded tag resolutions.
+// needn't pull busybox, which its lockfile pins.
+// prune removes cached layer images and other build results, while keeping pulled images and recorded tag resolutions.
 func newPruneWorld(t *testing.T) *world {
 	t.Helper()
 	w := newBuildingWorld(t)

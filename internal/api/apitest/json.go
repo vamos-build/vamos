@@ -45,11 +45,11 @@ func roundTripError(err error) error {
 	case err == nil:
 		return nil
 	case errors.Is(err, api.ErrNoJob):
-		return fmt.Errorf("%w: %s", api.ErrNoJob, err)
+		return fmt.Errorf("%w: %s", api.ErrNoJob, err.Error())
 	case errors.Is(err, api.ErrRunning):
-		return fmt.Errorf("%w: %s", api.ErrRunning, err)
+		return fmt.Errorf("%w: %s", api.ErrRunning, err.Error())
 	case errors.Is(err, api.ErrFellBehind):
-		return fmt.Errorf("%w: %s", api.ErrFellBehind, err)
+		return fmt.Errorf("%w: %s", api.ErrFellBehind, err.Error())
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 		return err // the caller's own context ended the call
 	}
@@ -71,16 +71,29 @@ func (j *JSON) Submit(ctx context.Context, req api.Request) (api.JobID, error) {
 // Watch watches the job id on ex, passing each event to fn through JSON.
 // An error of fn is the watcher's own and crosses no transport, so it is returned as it is.
 func (j *JSON) Watch(ctx context.Context, id api.JobID, from int64, fn func(api.Event) error) error {
-	var fnErr error
+	var failed *fnError
 	err := j.ex.Watch(ctx, roundTrip(id), from, func(e api.Event) error {
-		fnErr = fn(roundTrip(e))
-		return fnErr
+		if err := fn(roundTrip(e)); err != nil {
+			failed = &fnError{err}
+			return failed
+		}
+		return nil
 	})
-	if err != nil && fnErr != nil && err == fnErr {
-		return fnErr
+	// Only fn's error itself, not one the executor wrapped, which the contract forbids, and errors.Is would let pass.
+	// ex is given a pointer, which == compares whatever fn's error is.
+	if failed != nil && err == error(failed) { //nolint:errorlint // identity is the point
+		return failed.err
 	}
 	return roundTripError(err)
 }
+
+// fnError is an error of a watcher's fn, as JSON hands it to the executor it wraps.
+type fnError struct {
+	err error
+}
+
+func (e *fnError) Error() string { return e.err.Error() }
+func (e *fnError) Unwrap() error { return e.err }
 
 // Cancel cancels the job id on ex.
 func (j *JSON) Cancel(ctx context.Context, id api.JobID) error {

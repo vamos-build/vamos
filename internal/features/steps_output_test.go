@@ -119,7 +119,7 @@ func (w *world) fails(usage bool, wants []string) {
 	for _, want := range wants {
 		want = w.atPlaceholders(want)
 		if !strings.Contains(w.err.Error(), want) {
-			errs = append(errs, fmt.Errorf("error = %q, want it to contain %q", w.err, want))
+			errs = append(errs, fmt.Errorf("error = %q, want it to contain %q", w.err.Error(), want))
 		}
 	}
 	if printed := w.triedToReport("Usage:"); printed && !usage {
@@ -300,7 +300,7 @@ func (w *world) ThenItLastReports(want string) {
 func (w *world) ThenItReportsInOrder(wants ...string) {
 	w.t.Helper()
 	var got []string
-	for _, line := range strings.Split(strings.TrimSuffix(w.stdout, "\n"), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSuffix(w.stdout, "\n"), "\n") {
 		if strings.HasPrefix(line, imageBuilt) || strings.HasPrefix(line, "Index built! ") ||
 			strings.HasPrefix(line, filesExported) {
 			got = append(got, line)

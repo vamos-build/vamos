@@ -67,7 +67,8 @@ func (f Fixture) requireBuilds(t *testing.T) {
 // Contract checks that executors that f makes keep the contract of api.Executor:
 // capabilities, a graph run watched to its terminal event and read back, refusals before any work,
 // unknown jobs, cancellation, push, publish and prune,
-// that values cross by copy, and that a watch stops when its context ends.
+// that values cross by copy, and that a watch stops when its context ends,
+// or when its fn fails, with fn's error as it is.
 func Contract(t *testing.T, f Fixture) {
 	t.Run("capabilities", func(t *testing.T) { testCapabilities(t, f) })
 	t.Run("graph job", func(t *testing.T) { testGraphJob(t, f) })
@@ -84,6 +85,7 @@ func Contract(t *testing.T, f Fixture) {
 	t.Run("values owned", func(t *testing.T) { testValuesOwned(t, f) })
 	t.Run("delivery values owned", func(t *testing.T) { testDeliveryValuesOwned(t, f) })
 	t.Run("watch cancelled", func(t *testing.T) { testWatchCancelled(t, f) })
+	t.Run("watcher fails", func(t *testing.T) { testWatcherFails(t, f) })
 }
 
 // unreadableJob submits to ex a graph job, traced, whose graph ex doesn't have,
@@ -127,7 +129,7 @@ func testValuesOwned(t *testing.T, f Fixture) {
 	req.Graph = cache.Blob{Digest: digest.FromString("changed"), Size: 7}
 	req.Trace.Parent = "changed"
 	events := watchAll(t, ex, id, 0)
-	last := events[len(events)-1]
+	last := lastEvent(t, events)
 	if last.Outcome == nil || last.Outcome.Failure == nil ||
 		!strings.Contains(last.Outcome.Failure.Message, submitted.Digest.String()) {
 		t.Fatalf("last event = %+v, want a failure naming the graph submitted, %s, not the one the request was "+
@@ -297,6 +299,26 @@ func testWatchCancelled(t *testing.T, f Fixture) {
 	}
 }
 
+// testWatcherFails checks that a watch whose fn fails stops there, with fn's error as it is,
+// even one that wraps an error the executor gives meaning to.
+func testWatcherFails(t *testing.T, f Fixture) {
+	ex := f.New(t)
+	id, _ := unreadableJob(t, f, ex, "failing watcher")
+	if events := watchAll(t, ex, id, 0); len(events) < 2 {
+		t.Fatalf("the job has %d events, want at least 2 for the test to mean anything", len(events))
+	}
+	for _, stop := range []error{errors.New("stop"), fmt.Errorf("stop: %w", api.ErrExpired)} {
+		delivered := 0
+		err := ex.Watch(t.Context(), id, 0, func(api.Event) error { delivered++; return stop })
+		if err != stop { //nolint:errorlint // returned as it is, not wrapped
+			t.Errorf("Watch with fn failing with %v = %v, want it as it is", stop, err)
+		}
+		if delivered != 1 {
+			t.Errorf("Watch with fn failing with %v delivered %d events, want it to stop after 1", stop, delivered)
+		}
+	}
+}
+
 // insecure calls f.Insecure for host, failing the test if the fixture has none.
 func (f Fixture) insecure(t *testing.T, host string) {
 	t.Helper()
@@ -368,6 +390,15 @@ func watchAll(t *testing.T, ex api.Executor, id api.JobID, from int64) []api.Eve
 	return events
 }
 
+// lastEvent returns the last of events, a watch to the terminal event, failing the test if there are none.
+func lastEvent(t *testing.T, events []api.Event) api.Event {
+	t.Helper()
+	if len(events) == 0 {
+		t.Fatal("no events delivered")
+	}
+	return events[len(events)-1]
+}
+
 // testGraphJob runs a graph and checks the events delivered, their positions, the outcome and what reads it back.
 func testGraphJob(t *testing.T, f Fixture) {
 	f.requireBuilds(t)
@@ -397,7 +428,7 @@ func testGraphJob(t *testing.T, f Fixture) {
 	if want := "[1]: building"; !slices.Contains(statuses, want) {
 		t.Errorf("statuses = %q, want them to include %q", statuses, want)
 	}
-	last := events[len(events)-1]
+	last := lastEvent(t, events)
 	if last.Kind != api.EventDone || last.Outcome == nil {
 		t.Fatalf("last event = %+v, want the terminal event with an outcome", last)
 	}
@@ -682,7 +713,10 @@ func testRetention(t *testing.T, f Fixture) {
 
 	// Watching from the expired position meets a gap, then the retained events to the terminal one.
 	events := watchAll(t, ex, id, expired)
-	if len(events) < 2 || events[0].Kind != api.EventGap || events[0].First <= events[0].Position {
+	if len(events) < 2 {
+		t.Fatalf("watching from an expired position delivered %+v, want a gap and then the retained events", events)
+	}
+	if events[0].Kind != api.EventGap || events[0].First <= events[0].Position {
 		t.Fatalf("watching from an expired position delivered %+v first, want a gap naming a later position", events[0])
 	}
 	first := events[0].First
@@ -845,7 +879,7 @@ func testRelease(t *testing.T, f Fixture) {
 		t.Fatal(err)
 	}
 	events := watchAll(t, ex, id, 0)
-	last := events[len(events)-1]
+	last := lastEvent(t, events)
 	if last.Kind != api.EventDone {
 		t.Fatalf("the last event = %+v, want the terminal one", last)
 	}
@@ -903,7 +937,7 @@ func testCancel(t *testing.T, f Fixture) {
 		t.Fatal(err)
 	}
 	events := watchAll(t, ex, id, 0)
-	last := events[len(events)-1]
+	last := lastEvent(t, events)
 	if last.Kind != api.EventDone || last.Outcome == nil || !last.Outcome.Cancelled {
 		t.Errorf("last event = %+v, want the terminal event reporting the cancellation", last)
 	}
@@ -951,7 +985,7 @@ func testFailure(t *testing.T, f Fixture) {
 		t.Fatal(err)
 	}
 	events := watchAll(t, ex, id, 0)
-	last := events[len(events)-1]
+	last := lastEvent(t, events)
 	if last.Kind != api.EventDone || last.Outcome == nil || last.Outcome.Failure == nil || last.Outcome.Cancelled {
 		t.Fatalf("last event = %+v, want the terminal event reporting a failure", last)
 	}
@@ -968,13 +1002,6 @@ func testFailure(t *testing.T, f Fixture) {
 	}
 	if outcome, err := ex.Result(ctx, id); err != nil || outcome.Cancelled {
 		t.Errorf("Result after cancelling an ended job = %+v, %v; want it unchanged", outcome, err)
-	}
-
-	// A watcher whose fn fails stops with that error.
-	stop := errors.New("stop")
-	err = ex.Watch(ctx, id, 0, func(api.Event) error { return stop })
-	if err == nil || err.Error() != stop.Error() {
-		t.Errorf("Watch with a failing fn = %v, want %v", err, stop)
 	}
 
 	// A graph the executor can't read fails the job, naming the blob, rather than being refused.
@@ -1084,7 +1111,7 @@ func testPrune(t *testing.T, f Fixture) {
 		}
 	}
 	events := watchAll(t, ex, id, 0)
-	last := events[len(events)-1]
+	last := lastEvent(t, events)
 	if last.Kind != api.EventDone || last.Outcome == nil || last.Outcome.Pruned == nil {
 		t.Fatalf("last event = %+v, want the terminal event with what was pruned", last)
 	}

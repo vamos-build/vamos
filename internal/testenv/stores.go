@@ -227,11 +227,10 @@ func RemoveSuiteStores() error {
 	if !suiteMade.Load() {
 		return nil
 	}
-	s, err := suiteStores()
-	if err != nil {
-		return nil // nothing was made
+	if s, err := suiteStores(); err == nil {
+		return s.remove()
 	}
-	return s.remove()
+	return nil // making them failed, and newStores fails only before it makes anything
 }
 
 // suiteMade reports whether suiteStores has been called.

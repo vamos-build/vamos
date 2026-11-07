@@ -600,7 +600,7 @@ func checkInclude(fsys afero.Fs, dir string, p pattern) error {
 	}
 	// Check each part: lstat on the final path still follows parent links.
 	current := dir
-	for _, part := range strings.Split(p.prefix, "/") {
+	for part := range strings.SplitSeq(p.prefix, "/") {
 		current = filepath.Join(current, part)
 		info, _, err := lstat(fsys, current)
 		if errors.Is(err, fs.ErrNotExist) {

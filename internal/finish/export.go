@@ -8,6 +8,7 @@ import (
 	"math/rand/v2"
 	"os"
 	"path/filepath"
+	"slices"
 	"syscall"
 	"time"
 
@@ -173,19 +174,19 @@ func setMetadata(root string, epoch time.Time) error {
 	// Not UnixNano, which overflows after 2262.
 	ts := unix.Timespec{Sec: epoch.Unix(), Nsec: int64(epoch.Nanosecond())}
 	times := []unix.Timespec{ts, ts}
-	for i := len(paths) - 1; i >= 0; i-- { // a folder after what it holds
+	for i, path := range slices.Backward(paths) { // a folder after what it holds
 		if uid >= 0 {
-			if err := os.Lchown(paths[i], uid, gid); err != nil {
+			if err := os.Lchown(path, uid, gid); err != nil {
 				return err
 			}
 			if modes[i].Mode()&(fs.ModeSetuid|fs.ModeSetgid) != 0 {
-				if err := os.Chmod(paths[i], modes[i].Mode()); err != nil {
+				if err := os.Chmod(path, modes[i].Mode()); err != nil {
 					return err
 				}
 			}
 		}
-		if err := unix.UtimesNanoAt(unix.AT_FDCWD, paths[i], times, unix.AT_SYMLINK_NOFOLLOW); err != nil {
-			return fmt.Errorf("setting the times of %s: %w", paths[i], err)
+		if err := unix.UtimesNanoAt(unix.AT_FDCWD, path, times, unix.AT_SYMLINK_NOFOLLOW); err != nil {
+			return fmt.Errorf("setting the times of %s: %w", path, err)
 		}
 	}
 	return nil

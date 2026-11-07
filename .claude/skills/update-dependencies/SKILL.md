@@ -7,7 +7,7 @@ description: Update every pinned dependency in the repository, in two phases aro
 
 The devcontainer supplies the toolchains that every other update is checked with:
 Go (with `GOTOOLCHAIN=local`, so `go.mod` can't ask for a newer Go than it has), Node.js, pnpm, Python and uv,
-openspec, kind and kubectl, actionlint and kubeconform.
+openspec, kind and kubectl, actionlint, kubeconform, golangci-lint and govulncheck.
 So the devcontainer is updated first, the user rebuilds it, and everything else is updated in the rebuilt container.
 
 A rebuild ends this session and keeps nothing but the repository, which is bind-mounted from the host.
@@ -46,6 +46,7 @@ So the user invokes this skill the same way both times, and a session that was c
 | Registry image | `registry:3` in [remote/compose.yaml](../../../remote/compose.yaml) (twice), [remote/helm/vamos/values.yaml](../../../remote/helm/vamos/values.yaml) (twice) and smoke-checks.md |
 | glibc floor | Dockerfile's build stage stays on Debian **bookworm** (glibc 2.36), since `glibc_minimum=2.34` in [install.sh](../../../install.sh) and the tutorial promise Ubuntu 24.04; moving to trixie raises that floor, so it is a major and needs the user's yes |
 | OpenSpec | the CLI version in the devcontainer and `generatedBy` in the generated skills and commands |
+| golangci-lint | the Go that built it, which `golangci-lint version` reports, is at least the `go` line of go.mod: a release built with an older Go can't load the packages |
 
 ## Phase 1: the devcontainer
 
@@ -71,8 +72,13 @@ The only file is [.devcontainer/Dockerfile](../../../.devcontainer/Dockerfile).
     Then set the package to that minor. Check that the package exists with repoquery.
 - **Perfetto** `trace_processor_shell`: newest release from `gh release list -R google/perfetto --exclude-pre-releases`.
 - **OpenSpec**: newest from `gh release list -R Fission-AI/OpenSpec --exclude-pre-releases`.
+- **golangci-lint**: newest from `gh release list -R golangci/golangci-lint --exclude-pre-releases`.
+  Its linters can change between releases. Before committing, extract the new binary into the scratchpad, run
+  `scripts/check` with it first on `PATH`, and fix what it newly reports in the same commit.
 - **kubeconform** (`yannh/kubeconform`) and **actionlint** (`rhysd/actionlint`): the `go install ...@vX` versions,
   newest from `gh release list -R <repo> --exclude-pre-releases`.
+- **govulncheck**: its `go install golang.org/x/vuln/cmd/govulncheck@vX`, newest from
+  `go list -m -versions golang.org/x/vuln`, dated by `go list -m -json golang.org/x/vuln@<v>`.
 - **Coding agents** (Claude, Codex, herdr, Antigravity) are installed from their `install.sh` scripts unpinned,
   and they update themselves. Nothing to edit; the rebuild refreshes them.
   Check only that each installer URL still answers: `curl -fsSI <url>`.
@@ -85,7 +91,7 @@ leaving out those that a commit of an earlier run records as declined (see step 
 
 Skip this step if nothing needs an edit: step 3 checks the running container directly.
 
-- For Perfetto and OpenSpec, a new version also needs **both** architectures' SHA-256 sums.
+- For Perfetto, OpenSpec and golangci-lint, a new version also needs **both** architectures' SHA-256 sums.
   Download each asset named in the Dockerfile's `case` into the scratchpad and run `sha256sum` on it.
   Then replace `sum=` for both `x86_64` and `aarch64`. Never copy a sum from release notes alone.
 - Keep the Dockerfile's comments true. For example, if kubectl moves, the comment still says it matches kind.
@@ -97,7 +103,8 @@ Skip this step if nothing needs an edit: step 3 checks the running container dir
   docker run --rm vamos-devcontainer-candidate sh -c \
     'cat /etc/fedora-release; go version; node --version; pnpm --version; python3 --version; uv --version;
      kind version; kubectl version --client; openspec --version; actionlint --version;
-     go version -m /usr/local/bin/kubeconform | grep -m1 "^\smod"; trace_processor_shell --version'
+     go version -m /usr/local/bin/kubeconform | grep -m1 "^\smod"; trace_processor_shell --version;
+     golangci-lint version; govulncheck -version'
   docker rmi vamos-devcontainer-candidate
   ```
   It checks only this machine's architecture. The other architecture's sums were checked when you downloaded them.
@@ -261,7 +268,7 @@ Update anything new, and add it to this skill, so that the next run covers it.
 ### Validate
 
 Follow [.agents/kb/testing.md](../../../.agents/kb/testing.md) for every scope touched. That means:
-- `go build -o vamos .`, `go vet ./...`, `gofmt -l .`, `go test -short ./...`, then the full `go test ./...`.
+- `scripts/check full`: the build, lint and both test suites.
 - Each changed example's own checks, from its README:
   - typescript-ui: `pnpm check`, `pnpm build` and `./examples/typescript-ui/check.sh`
   - typescript-mcp: `npm run check`

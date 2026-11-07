@@ -29,6 +29,7 @@ type Executor interface {
 	// Watch delivers the events of the job id from position from, each to fn, until fn fails,
 	// ctx ends, or the job's terminal event has been delivered, when it returns nil;
 	// from a position past the terminal event it delivers nothing.
+	// A failing fn's error is returned as it is, not wrapped or replaced, whatever it wraps.
 	// The end of ctx stops it before the next event, even when events are waiting to be delivered.
 	// A position before the first retained is replaced by a gap event, at that position, naming the first retained,
 	// which follows.

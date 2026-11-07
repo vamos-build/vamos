@@ -470,6 +470,23 @@ func TestUpdate_ReResolvesPinsAndReportsWhatChanged(t *testing.T) {
 			"couldn't be configured as building it would, may use a pull that does\n")
 	})
 
+	t.Run("A package that fails to load leaves no package that names its targets", func(t *testing.T) {
+		// .a loads .b, which names .a's x, before .a fails: .b, configured on its own, would name a target
+		// that was never declared.
+		w := newWorld(t)
+		w.GivenTheProjectHolds(files{"WORKSPACE": ""})
+		w.GivenThePackageDeclares(".a", `
+			layer(name="x", base="scratch")
+			layer(name="y", base="//.b:z")
+			fail("broken")
+		`)
+		w.GivenThePackageDeclares(".b", `layer(name="z", base="//.a:x")`)
+		w.GivenThePackageDeclares("ui", `layer(name="app", base=lambda ctx: "//.a:y")`)
+		w.WhenIUpdate(dryRun())
+		w.ThenItSucceeds()
+		w.ThenTheOutputIncludes("vamos.lock is up to date\n")
+	})
+
 	t.Run("A pull whose tag is a function of ctx is pinned for the platform the command gives", func(t *testing.T) {
 		w := newWorld(t)
 		w.GivenTheRegistryListsTags("<registry>/base", "amd64", "arm64")

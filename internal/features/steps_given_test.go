@@ -163,7 +163,8 @@ func (w *world) GivenTheLockfileHolds(lockfile string) {
 func (w *world) GivenAnotherCommandPinsWhileTheTagsAreListed(lockfile string) {
 	w.t.Helper()
 	if w.server == nil {
-		w.t.Fatal("GivenAnotherCommandPinsWhileTheTagsAreListed needs the scenario's registry, which GivenARegistry starts")
+		w.t.Fatal("GivenAnotherCommandPinsWhileTheTagsAreListed needs the scenario's registry, " +
+			"which GivenARegistry starts")
 	}
 	w.pinnedMeanwhile = dedent(w.atHeldDigests(w.atRegistry(lockfile)))
 }

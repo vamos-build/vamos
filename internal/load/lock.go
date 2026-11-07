@@ -178,7 +178,7 @@ func unmarshal(path string, data []byte, v any) error {
 		return nil
 	case errors.As(err, &syntax):
 		line, col := lineCol(data, syntax.Offset)
-		return fmt.Errorf("%s:%d:%d: %v", path, line, col, err)
+		return fmt.Errorf("%s:%d:%d: %w", path, line, col, err)
 	case errors.As(err, &typ):
 		line, col := lineCol(data, typ.Offset)
 		where := "the lockfile"

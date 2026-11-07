@@ -231,9 +231,9 @@ type IndexMember struct {
 	SourceCtx *types.SystemContext
 }
 
-// LayoutIndex copies each member's image, read with the settings sys or its own, into the OCI layout in dir, and makes an index
-// listing each with its platform, in order, which the layout's index.json names as "index", and returns a reference
-// to it and the index's bytes.
+// LayoutIndex copies each member's image, read with the settings sys or its own, into the OCI layout in dir,
+// and makes an index listing each with its platform, in order, which the layout's index.json names as "index",
+// and returns a reference to it and the index's bytes.
 // containers/image copies an index, and its images, only from a source that has one, which this makes.
 func LayoutIndex(
 	ctx context.Context, policyContext *signature.PolicyContext, dir string, members []IndexMember,

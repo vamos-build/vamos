@@ -40,8 +40,7 @@ func (e *pinUnavailable) Unwrap() []error { return []error{e.err, ErrPinUnavaila
 // FailureOf returns err, a Runner's, as data.
 func FailureOf(err error) *AttemptFailure {
 	f := &AttemptFailure{Message: err.Error()}
-	var se *StepError
-	if errors.As(err, &se) {
+	if se, ok := errors.AsType[*StepError](err); ok {
 		step := se.Step
 		f.Step, f.Hint, f.Log, f.Message = &step, se.Hint, se.Log, se.Err.Error()
 		if se.Cleanup != nil {
@@ -53,8 +52,7 @@ func FailureOf(err error) *AttemptFailure {
 	if f.Log == nil && errors.As(err, &logged) {
 		f.Log = logged.log
 	}
-	var ce *cache.CorruptError
-	if errors.As(err, &ce) {
+	if ce, ok := errors.AsType[*cache.CorruptError](err); ok {
 		f.Corrupt = &ce.Blob
 	}
 	f.PinUnavailable = errors.Is(err, ErrPinUnavailable)

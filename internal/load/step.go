@@ -307,7 +307,7 @@ func reprVars(vars []string) string {
 
 // isIdentifier reports whether name can be a Starlark keyword argument as it is.
 func isIdentifier(name string) bool {
-	expr, err := syntax.ParseExpr("", name, 0)
+	expr, err := (&syntax.FileOptions{}).ParseExpr("", name, 0)
 	ident, ok := expr.(*syntax.Ident)
 	return err == nil && ok && ident.Name == name
 }

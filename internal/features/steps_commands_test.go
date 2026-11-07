@@ -217,6 +217,9 @@ func alongWith(targets ...string) option {
 // or a flag that one feature alone passes, which gets an option of its own once a second passes it too.
 // It fails the scenario at once given a flag that an option names, so that the option's checks apply.
 // Every command takes it.
+// No feature needs it yet; testing.md offers it to the next that does.
+//
+//nolint:unused // documented step vocabulary, kept for the scenario that needs it
 func withFlags(flags ...string) option {
 	return option{"withFlags", everyCommand, func(w *world, c *commandLine) {
 		w.t.Helper()
@@ -234,6 +237,8 @@ func withFlags(flags ...string) option {
 }
 
 // namedFlags are the options that give flags, by flag, and the step that gives -C.
+//
+//nolint:unused // withFlags's check, kept with it
 var namedFlags = map[string]string{
 	"--tag":           "tagged or taggedAs",
 	"-t":              "tagged",

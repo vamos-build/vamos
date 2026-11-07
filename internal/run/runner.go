@@ -199,8 +199,7 @@ func (r *localRunner) runTarget(
 		if serr != nil {
 			tracing.Current(ctx).Set("log not saved", serr.Error())
 		}
-		var se *sched.StepError
-		if errors.As(err, &se) {
+		if se, ok := errors.AsType[*sched.StepError](err); ok {
 			se.Log = saved
 			return nil, err
 		}
@@ -257,7 +256,7 @@ func (r *localRunner) commitLayer(ctx context.Context, builder *buildah.Builder,
 	// since no result would name it and prune finds images by their names.
 	defer func() {
 		if err != nil && len(img.Names) == 0 {
-			r.store.DeleteImage(storeID, true)
+			_, _ = r.store.DeleteImage(storeID, true) // err already says what went wrong; a leftover is prune's
 		}
 	}()
 	id, platform, err := imageIdentity(ctx, r.store, storeID)

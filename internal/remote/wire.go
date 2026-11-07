@@ -128,14 +128,14 @@ func writeError(w http.ResponseWriter, r *http.Request, err error) {
 	}
 	w.Header().Set("Content-Type", contentJSON)
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(we)
+	_ = json.NewEncoder(w).Encode(we) // a client that has gone has no one else to be told
 }
 
 // writeJSON answers with v as JSON, with status.
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", contentJSON)
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(v)
+	_ = json.NewEncoder(w).Encode(v) // a client that has gone has no one else to be told
 }
 
 // readError returns the error a failed response carries: the body's, or the header's code for a response that

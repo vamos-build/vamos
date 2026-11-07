@@ -110,7 +110,7 @@ func (p *param) parse(text string) (starlark.Value, error) {
 	}
 	var items []starlark.Value
 	if text != "" {
-		for _, str := range strings.Split(text, ",") {
+		for str := range strings.SplitSeq(text, ",") {
 			items = append(items, starlark.String(str))
 		}
 	}
@@ -344,6 +344,7 @@ func (w *workspace) commandConfig(l string, sets []string, shared bool) (*config
 	}
 	for i, p := range d.params {
 		if values[i] == nil && p.def == nil {
+			//nolint:staticcheck // ST1005: the message ends with --set's form, its value elided as "..."
 			return nil, fmt.Errorf("%q needs a value for its parameter %q, which has no default; "+
 				"give it with --set %s=...", w.display(l), p.name, p.name)
 		}
@@ -1201,16 +1202,13 @@ func (w *workspace) template(d *declaration, cl confLabel) (any, error) {
 	}
 
 	// An error loading another package's BUILD file already says where it is.
-	var nested *loadError
-	if errors.As(err, &nested) {
+	if nested, ok := errors.AsType[*loadError](err); ok {
 		return nil, nested
 	}
 	msg := fmt.Sprintf("%s: %s", d.pos, err)
-	var evalErr *starlark.EvalError
-	var at *posError
-	if errors.As(err, &evalErr) {
+	if evalErr, ok := errors.AsType[*starlark.EvalError](err); ok {
 		msg = describeEvalError(evalErr)
-	} else if errors.As(err, &at) {
+	} else if at, ok := errors.AsType[*posError](err); ok {
 		msg = at.Error()
 	}
 	return nil, fmt.Errorf("%s (configuring %s)", msg, w.describeConfigured(cl))

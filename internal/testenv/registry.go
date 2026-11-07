@@ -36,19 +36,19 @@ func writeRegistriesConf(t *testing.T, host, entry string) {
 	t.Helper()
 	// A test that marks a second registry keeps the first: the entries of a file this package wrote are kept.
 	const header = "[[registry]]\n" // which opens each entry, a mirror's included in its registry's
-	text := ""
+	var text strings.Builder
 	if existing := os.Getenv("CONTAINERS_REGISTRIES_CONF"); existing != "" {
 		if data, err := os.ReadFile(existing); err == nil && bytes.HasPrefix(data, []byte(insecureMarker)) {
-			for _, e := range strings.Split(string(data[len(insecureMarker):]), header) {
+			for e := range strings.SplitSeq(string(data[len(insecureMarker):]), header) {
 				if e != "" && !strings.HasPrefix(e, "location = \""+host+"\"\n") {
-					text += header + e
+					text.WriteString(header + e)
 				}
 			}
 		}
 	}
-	text += entry
+	text.WriteString(entry)
 	conf := filepath.Join(t.TempDir(), "registries.conf")
-	Must(t, os.WriteFile(conf, []byte(insecureMarker+text), 0o644))
+	Must(t, os.WriteFile(conf, []byte(insecureMarker+text.String()), 0o644))
 	t.Setenv("CONTAINERS_REGISTRIES_CONF", conf)
 	// containers/image caches registries.conf without noticing the variable change.
 	sysregistriesv2.InvalidateCache()

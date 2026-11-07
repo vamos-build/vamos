@@ -12,7 +12,7 @@ such as with `docker run --privileged --rm tonistiigi/binfmt --install all`,
 which lasts until the host reboots.
 See [testing.md](testing.md) for required validation.
 
-Use gofmt and keep lines within 120 columns, counting a tab as four.
+Use gofmt and keep lines within 120 columns, counting a tab as four; `scripts/check` enforces both.
 For prose, follow the semantic-break and technical-item exceptions in [documentation.md](documentation.md).
 Match the existing comment density: document functions and add short explanations for non-obvious choices.
 Documentation placement is defined in [documentation.md](documentation.md);

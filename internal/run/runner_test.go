@@ -22,7 +22,9 @@ import (
 // memFile returns a filesystem holding the file /f with content.
 func memFile(content string) afero.Fs {
 	fsys := afero.NewMemMapFs()
-	afero.WriteFile(fsys, "/f", []byte(content), 0o644)
+	if err := afero.WriteFile(fsys, "/f", []byte(content), 0o644); err != nil {
+		panic(err) // a filesystem in memory can't refuse it
+	}
 	return fsys
 }
 

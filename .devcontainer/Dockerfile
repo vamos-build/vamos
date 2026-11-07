@@ -63,13 +63,30 @@ RUN case "$(uname -m)" in \
  && tar -xzf /tmp/openspec.tar.gz -C /usr/local/bin openspec \
  && rm /tmp/openspec.tar.gz
 
+# golangci-lint, which scripts/check runs: go vet, gofmt and the linters that .golangci.yml enables.
+# Its build's Go must be at least go.mod's, which `golangci-lint version` reports.
+RUN case "$(uname -m)" in \
+      x86_64) arch=amd64 sum=9b7fe6a6bf6334b98decf8d86b11415ea7889afdabdd1959fdce23af2a9ebcea ;; \
+      aarch64) arch=arm64 sum=b4d8f17068b35ee6060cc2f69a16fb48740d706fbba81661c318649c114a6998 ;; \
+      *) echo "no golangci-lint for $(uname -m)" >&2; exit 1 ;; \
+    esac \
+ && curl -fsSL -o /tmp/golangci-lint.tar.gz \
+      "https://github.com/golangci/golangci-lint/releases/download/v2.15.0/golangci-lint-2.15.0-linux-$arch.tar.gz" \
+ && echo "$sum  /tmp/golangci-lint.tar.gz" | sha256sum -c - \
+ && tar -xzf /tmp/golangci-lint.tar.gz -C /usr/local/bin --strip-components=1 \
+      "golangci-lint-2.15.0-linux-$arch/golangci-lint" \
+ && rm /tmp/golangci-lint.tar.gz
+
 # Tools with no Fedora package:
 # - kubeconform, to check rendered Helm manifests against the Kubernetes schemas
 # - actionlint, to check the release workflow
+# - govulncheck, which scripts/check runs, to find known vulnerabilities that vamos's code reaches
 RUN GOBIN=/usr/local/bin GOMODCACHE=/tmp/gomodcache GOCACHE=/tmp/gocache \
       go install github.com/yannh/kubeconform/cmd/kubeconform@v0.8.0 \
  && GOBIN=/usr/local/bin GOMODCACHE=/tmp/gomodcache GOCACHE=/tmp/gocache \
       go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 \
+ && GOBIN=/usr/local/bin GOMODCACHE=/tmp/gomodcache GOCACHE=/tmp/gocache \
+      go install golang.org/x/vuln/cmd/govulncheck@v1.9.0 \
  && rm -rf /tmp/gomodcache /tmp/gocache
 
 # Coding agents, which update themselves in ~/.local/bin.

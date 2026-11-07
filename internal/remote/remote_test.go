@@ -337,11 +337,26 @@ func TestExecutorThroughHTTP(t *testing.T) {
 	if id, err := c.Prune(ctx); err != nil || id != "prune-2" {
 		t.Errorf("Prune = %q, %v", id, err)
 	}
-	// A watcher's own error ends the watch with that error, as it is.
-	stop := errors.New("stop")
-	if err := c.Watch(ctx, "job-1", 0, func(api.Event) error { return stop }); err == nil ||
-		err.Error() != "stop" {
-		t.Errorf("Watch with a failing fn = %v, want %v", err, stop)
+	// A watcher's own error ends the watch with that error, as it is, after the one event that failed,
+	// even one that wraps what the client would otherwise retry or describe.
+	for _, stop := range []error{
+		errors.New("stop"),
+		fmt.Errorf("stop: %w", api.ErrExpired),
+		&transportError{err: errors.New("stop")},
+	} {
+		delivered := 0
+		watchCtx, cancel := context.WithCancel(ctx)
+		err := c.Watch(watchCtx, "job-1", 0, func(api.Event) error {
+			if delivered++; delivered > 1 {
+				cancel() // rather than retry for ever
+			}
+			return stop
+		})
+		cancel()
+		if err != stop || delivered != 1 { //nolint:errorlint // returned as it is, not wrapped
+			t.Errorf("Watch with fn failing with %v = %v after %d events, want it as it is after 1",
+				stop, err, delivered)
+		}
 	}
 	ex.mu.Lock()
 	ex.fellAt = 2
@@ -592,7 +607,9 @@ func TestSubmissionRepeatedWhileServed(t *testing.T) {
 		}
 		defer resp.Body.Close()
 		var handle jobHandle
-		json.NewDecoder(resp.Body).Decode(&handle)
+		if err := json.NewDecoder(resp.Body).Decode(&handle); err != nil {
+			t.Errorf("decoding the answer, status %d: %v", resp.StatusCode, err)
+		}
 		return resp.StatusCode, handle
 	}
 	type answer struct {
@@ -1024,7 +1041,9 @@ func TestReadManyBatches(t *testing.T) {
 			if r.URL.Path == pathReadMany {
 				var blobs []cache.Blob
 				data, _ := io.ReadAll(r.Body)
-				json.Unmarshal(data, &blobs)
+				if err := json.Unmarshal(data, &blobs); err != nil {
+					t.Errorf("decoding a read of many blobs: %v", err)
+				}
 				r.Body = io.NopCloser(bytes.NewReader(data))
 				mu.Lock()
 				requests = append(requests, len(blobs))

@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"archive/tar"
 	"bytes"
 	"context"
 	"io"
@@ -14,7 +13,6 @@ import (
 	"github.com/Topher-the-Geek/vamos/internal/testenv"
 	"github.com/Topher-the-Geek/vamos/internal/worker"
 	"github.com/google/go-containerregistry/pkg/registry"
-	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/spf13/afero"
 	"go.podman.io/storage"
 )
@@ -28,7 +26,6 @@ const (
 // The helpers of testenv, as this package's tests name them.
 var (
 	project        = testenv.Project
-	diskProject    = testenv.DiskProject
 	requireBuildah = testenv.RequireBuildah
 	must           = testenv.Must
 	newNonce       = testenv.NewNonce
@@ -134,71 +131,4 @@ func (r result) ran(t *testing.T) result {
 		t.Fatalf("vamos failed: %v\nstdout:\n%s\nstderr:\n%s", r.err, r.stdout, r.stderr)
 	}
 	return r
-}
-
-// failsWith fails the test unless r failed with an error containing each of wants.
-// Usage is expected only for mistakes on the command line.
-func (r result) failsWith(t *testing.T, usage bool, wants ...string) result {
-	t.Helper()
-	if r.err == nil {
-		t.Fatalf("vamos succeeded, want error containing %q\nstdout:\n%s", wants, r.stdout)
-	}
-	for _, want := range wants {
-		if !strings.Contains(r.err.Error(), want) {
-			t.Errorf("error = %q, want it to contain %q", r.err, want)
-		}
-	}
-	// Cobra prints usage to the output stream if one is set, as in tests, otherwise stderr.
-	if got := strings.Contains(r.stdout+r.stderr, "Usage:"); got != usage {
-		t.Errorf("printed usage = %v, want %v; stdout:\n%s\nstderr:\n%s", got, usage, r.stdout, r.stderr)
-	}
-	if strings.Contains(r.stdout, " built! ") {
-		t.Errorf("stdout = %q, want no image reported after an error", r.stdout)
-	}
-	return r
-}
-
-// imageCmd returns the default command recorded in img's config.
-func imageCmd(t *testing.T, img v1.Image) []string {
-	t.Helper()
-	config, err := img.ConfigFile()
-	if err != nil {
-		t.Fatal(err)
-	}
-	return config.Config.Cmd
-}
-
-// imageFile returns the content of the file at path in img's filesystem.
-func imageFile(t *testing.T, img v1.Image, path string) string {
-	t.Helper()
-	var content string
-	found := walkImage(t, img, func(hdr *tar.Header, r io.Reader) bool {
-		if imagePath(hdr) != path {
-			return false
-		}
-		b, err := io.ReadAll(r)
-		if err != nil {
-			t.Fatal(err)
-		}
-		content = string(b)
-		return true
-	})
-	if !found {
-		t.Fatalf("%s not found in image", path)
-	}
-	return content
-}
-
-// walkImage calls visit with each entry in img's flattened filesystem, until it returns true.
-// It reports whether visit did so.
-func walkImage(t *testing.T, img v1.Image, visit func(*tar.Header, io.Reader) bool) bool {
-	t.Helper()
-	found, err := testenv.WalkImage(img, visit)
-	must(t, err)
-	return found
-}
-
-// imagePath returns the absolute path within the image of a layer entry.
-func imagePath(hdr *tar.Header) string {
-	return testenv.ImagePath(hdr.Name)
 }

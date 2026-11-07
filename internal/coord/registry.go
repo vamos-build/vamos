@@ -113,8 +113,7 @@ func missing(err error) bool {
 	if errors.As(err, &status) && status.StatusCode == http.StatusNotFound {
 		return true
 	}
-	var registryErr errcode.Error
-	if errors.As(err, &registryErr) {
+	if registryErr, ok := errors.AsType[errcode.Error](err); ok {
 		switch registryErr.Code {
 		case v2.ErrorCodeNameUnknown, v2.ErrorCodeManifestUnknown:
 			return true
@@ -127,8 +126,7 @@ func missing(err error) bool {
 // unavailable reports whether err says the registry has no such image, or won't show it without credentials,
 // as opposed to the registry being unreachable.
 func unavailable(err error) bool {
-	var unauthorized docker.ErrUnauthorizedForCredentials
-	if errors.As(err, &unauthorized) {
+	if _, ok := errors.AsType[docker.ErrUnauthorizedForCredentials](err); ok {
 		return true
 	}
 	var registryErr errcode.Error

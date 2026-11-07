@@ -55,8 +55,7 @@ func TestFailureCrosses(t *testing.T) {
 				t.Errorf("after crossing, corrupt = %v, want %v", errors.Is(got, cache.ErrCorrupt),
 					errors.Is(c.err, cache.ErrCorrupt))
 			}
-			var ce *cache.CorruptError
-			if errors.As(c.err, &ce) {
+			if ce, ok := errors.AsType[*cache.CorruptError](c.err); ok {
 				var crossedCE *cache.CorruptError
 				if !errors.As(got, &crossedCE) || crossedCE.Blob != ce.Blob {
 					t.Errorf("after crossing, the corrupt blob = %v, want %v", crossedCE, ce.Blob)

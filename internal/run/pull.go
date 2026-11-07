@@ -293,7 +293,8 @@ func (pl *puller) fetch(ctx context.Context, ref reference.Named, platform imgsp
 	if err != nil {
 		return nil, err
 	}
-	return is.Transport.GetStoreImage(pl.store, dest)
+	_, img, err := is.ResolveReference(dest)
+	return img, err
 }
 
 // pullError describes err, from reaching the registry for image,

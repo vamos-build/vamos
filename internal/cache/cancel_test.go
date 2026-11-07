@@ -36,7 +36,7 @@ func TestCancelCheckoutAndReplay(t *testing.T) {
 	log, err := NewLog()
 	testenv.Must(t, err)
 	defer log.Discard()
-	log.Writer(StreamStdout, &bytes.Buffer{}).Write([]byte("hello\n"))
+	mustWrite(t, log.Writer(StreamStdout, &bytes.Buffer{}), "hello\n")
 	saved, err := log.Save(ctx, store)
 	testenv.Must(t, err)
 	data, err := store.Read(ctx, *saved, MaxLogSize)

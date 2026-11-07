@@ -3,12 +3,15 @@
 Run from the repository root in the [development environment](development.md):
 
 ```sh
-go build -o vamos .
-go vet ./...
-gofmt -l .                 # must print nothing
-go test -short ./...       # skips image builds
-go test ./...              # includes real buildah; needs root and network
+scripts/check              # build, lint, govulncheck, then go test -short ./..., which skips image builds
+scripts/check full         # then go test ./..., with real buildah; needs root and network
 ```
+
+Lint is golangci-lint, which runs `go vet`, `gofmt` and the linters [.golangci.yml](../../.golangci.yml) enables.
+Fix what it reports rather than suppressing it;
+a `//nolint:<linter>` needs a comment saying why the finding is wrong there.
+govulncheck fails only for a known vulnerability that vamos's code can reach;
+fix one by updating the module, under the update-dependencies skill's policy.
 
 For timeout planning, previous devcontainer runs took under one second for the short suite
 and about 90 seconds for the full suite.
@@ -50,7 +53,8 @@ Behavior tested before this rule is moving into scenarios, and [BDD-MIGRATION.md
 lists by category what is left.
 Until it moves, it is tested in Go tests that drive the real CLI using `vamos`
 in [helpers_test.go](../../internal/cli/helpers_test.go).
-Use `.succeeds(t)` and `.failsWith(t, usage, wants...)`; `usage` is true only for command-line mistakes.
+Use `.succeeds(t)` for a command that sends or saves an image, and `.ran(t)` for one that sends none,
+such as a build with no destination or a prune; check a failing command's `err` and output directly.
 Inspect resulting commands, files and tags.
 Do not mock the core: push uses an in-process registry,
 load uses a Unix-socket fake daemon and a real daemon when available.
@@ -63,7 +67,7 @@ since a transport buffers events.
 The remote package's own tests script an executor and inject dropped connections through the server's middleware.
 
 Use `project(t, map[string]string{...})` for projects under `/project` in memory.
-Use `diskProject` for symlinks or tests that write the project.
+Use `testenv.DiskProject` for symlinks or tests that write the project.
 Do not add `testdata/` directories.
 Workspace cases need `WORKSPACE` plus each package's BUILD file.
 BUILD snippets start with `pullBusybox`; image commands usually name `app`.
@@ -72,8 +76,7 @@ Every `TestMain` that uses buildah is `testenv.Main(m)`, which calls `buildah.In
 and `testenv.RemoveSuiteStores` after the tests; packages whose tests run a worker pass it `worker.ChildFromEnv`.
 Table cases use keyed struct literals, one field per line.
 
-On failure, check output absence with `assertNoFiles`.
-A scenario checks it with `ThenNothingIsSaved` or `ThenNothingIsExported`,
+On failure, a scenario checks that no output is left with `ThenNothingIsSaved` or `ThenNothingIsExported`,
 or with `ThenTheDestinationPathsAre` in a table whose other rows leave something there,
 and image cleanup with `ThenNoImageIsLeftBehind`; other tests compare `testenv.Stores.UnnamedImages` before and after.
 Successful dependencies remain cached even if a later target fails.

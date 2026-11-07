@@ -188,7 +188,11 @@ func TestCloseLeavesOthersMounts(t *testing.T) {
 	testenv.Must(t, err)
 	_, err = other.Mount(layer.ID, "")
 	testenv.Must(t, err)
-	defer other.Unmount(layer.ID, true)
+	defer func() {
+		if _, err := other.Unmount(layer.ID, true); err != nil {
+			t.Error(err)
+		}
+	}()
 
 	l, err := NewLocal(stores.Options)
 	testenv.Must(t, err)

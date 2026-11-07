@@ -75,7 +75,7 @@ func (r *restartable) start(addr string) {
 	r.c, r.url = c, "http://"+listener.Addr().String()
 	r.remote = &remote.Server{Executor: c, Content: r.m, Workers: c.Workers()}
 	r.http = &http.Server{Handler: r.remote.Handler()}
-	go r.http.Serve(listener)
+	go func() { _ = r.http.Serve(listener) }() // it fails only once the test shuts the server down
 }
 
 // stop shuts the coordinator down as the coordinator command does: the streams are cut, what else is in flight is

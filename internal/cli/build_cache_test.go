@@ -12,8 +12,6 @@ import (
 	"testing"
 
 	"github.com/Topher-the-Geek/vamos/internal/run"
-	v1 "github.com/google/go-containerregistry/pkg/v1"
-	"github.com/google/go-containerregistry/pkg/v1/tarball"
 	"github.com/spf13/afero"
 	"go.podman.io/storage"
 )
@@ -171,12 +169,4 @@ runroot = "%[1]s/default/run"
 			t.Errorf("pruning didn't open the default store: %v", err)
 		}
 	}
-}
-
-// readImage reads the image in the tarball at path.
-func readImage(t *testing.T, path string) v1.Image {
-	t.Helper()
-	img, err := tarball.ImageFromPath(path, nil)
-	must(t, err)
-	return img
 }

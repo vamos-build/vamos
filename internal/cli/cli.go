@@ -1832,7 +1832,7 @@ func (f *secretsFlag) String() string {
 // Set parses value as id=ID,env=VARIABLE or id=ID,src=FILE, refusing an ID given before.
 func (f *secretsFlag) Set(value string) error {
 	var s secretSource
-	for _, field := range strings.Split(value, ",") {
+	for field := range strings.SplitSeq(value, ",") {
 		key, v, ok := strings.Cut(field, "=")
 		switch {
 		case !ok || v == "":

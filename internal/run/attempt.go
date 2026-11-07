@@ -70,7 +70,7 @@ type lineWriter struct {
 func (w *lineWriter) write(line AttemptLine) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	w.enc.Encode(line) // a failure to print can't be reported anywhere but by ending
+	_ = w.enc.Encode(line) // a failure to print can't be reported anywhere but by ending
 }
 
 // Output prints what the attempt's run() steps printed, as sched.Output takes it; data is encoded before it returns,

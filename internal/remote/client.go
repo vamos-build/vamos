@@ -385,11 +385,19 @@ func jobPath(pattern string, id api.JobID) string {
 func (c *Client) Watch(ctx context.Context, id api.JobID, from int64, fn func(api.Event) error) error {
 	next := from
 	o := outage{c: c, what: "watching the build"}
+	var failed bool // whether fn failed, ending the watch with its error, which is returned as it is
+	watch := func(e api.Event) error {
+		err := fn(e)
+		failed = err != nil
+		return err
+	}
 	for {
-		err := c.watchOnce(ctx, id, &next, fn, o.recovered)
+		err := c.watchOnce(ctx, id, &next, watch, o.recovered)
 		switch {
 		case err == nil:
 			return nil
+		case failed:
+			return err
 		case ctx.Err() != nil:
 			return ctx.Err()
 		case !isTransport(err):

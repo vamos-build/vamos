@@ -3,6 +3,7 @@ package cache
 import (
 	"bytes"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -98,9 +99,9 @@ func TestLogReplay(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	out := log.Writer(StreamStdout, &stdout)
 	errOut := log.Writer(StreamStderr, &stderr)
-	out.Write([]byte("one\n"))
-	errOut.Write([]byte("two\n"))
-	out.Write([]byte("three\n"))
+	mustWrite(t, out, "one\n")
+	mustWrite(t, errOut, "two\n")
+	mustWrite(t, out, "three\n")
 	if stdout.String() != "one\nthree\n" || stderr.String() != "two\n" {
 		t.Fatalf("passed on stdout %q and stderr %q", stdout.String(), stderr.String())
 	}
@@ -140,7 +141,9 @@ func TestLogTruncated(t *testing.T) {
 	out := log.Writer(StreamStdout, &stdout)
 	chunk := bytes.Repeat([]byte("x"), 1<<20)
 	for range MaxLogSize/len(chunk) + 2 {
-		out.Write(chunk)
+		if _, err := out.Write(chunk); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if stdout.Len() != (MaxLogSize/len(chunk)+2)*len(chunk) {
 		t.Errorf("the destination got %d bytes, want all of the output", stdout.Len())
@@ -190,4 +193,12 @@ func countBlobs(t *testing.T, d *Directory) int {
 	entries, err := os.ReadDir(filepath.Join(d.dir, "cas", "sha256"))
 	testenv.Must(t, err)
 	return len(entries)
+}
+
+// mustWrite writes s to w, failing the test if it can't.
+func mustWrite(t *testing.T, w io.Writer, s string) {
+	t.Helper()
+	if _, err := io.WriteString(w, s); err != nil {
+		t.Fatal(err)
+	}
 }

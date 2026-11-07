@@ -201,14 +201,12 @@ func (w *world) front(served *server) string {
 	if err != nil {
 		w.t.Fatal(err)
 	}
-	proxy := httputil.NewSingleHostReverseProxy(backend)
-	proxy.FlushInterval = -1 // so that events stream
 	w.watching = make(chan struct{}, 1)
-	direct := proxy.Director
-	proxy.Director = func(r *http.Request) {
-		direct(r)
-		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/events") {
-			*r = *r.WithContext(httptrace.WithClientTrace(r.Context(), &httptrace.ClientTrace{
+	proxy := &httputil.ReverseProxy{FlushInterval: -1} // so that events stream
+	proxy.Rewrite = func(pr *httputil.ProxyRequest) {
+		pr.SetURL(backend)
+		if r := pr.Out; r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/events") {
+			pr.Out = r.WithContext(httptrace.WithClientTrace(r.Context(), &httptrace.ClientTrace{
 				WroteRequest: func(info httptrace.WroteRequestInfo) {
 					if info.Err != nil { // the coordinator has no watch, and the command fails to reach it
 						return
@@ -258,7 +256,7 @@ func (w *world) GivenACoordinatorWithAWorker(args ...string) {
 		cancel()
 		for _, s := range []*server{registered, coordinator} {
 			if s != nil {
-				s.wait(w.t, time.Minute)
+				_ = s.wait(w.t, time.Minute) // how it ended is for a step to check, if a scenario asks
 			}
 		}
 	})
@@ -497,7 +495,7 @@ func (w *world) GivenALocalCoordinator() {
 	w.t.Cleanup(func() {
 		cancel()
 		if w.local != nil {
-			w.local.wait(w.t, time.Minute) // which ThenTheCoordinatorEndsCleanlyWithin checks, if a scenario asks
+			_ = w.local.wait(w.t, time.Minute) // which ThenTheCoordinatorEndsCleanlyWithin checks, if a scenario asks
 		}
 	})
 	w.local = w.serve(ctx, &w.stores.Options, "coordinator", "--local", "--listen", "127.0.0.1:0")

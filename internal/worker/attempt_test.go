@@ -115,7 +115,7 @@ func renewing(t *testing.T, delay time.Duration, answer func(rw http.ResponseWri
 	release := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
 		requests.Add(1)
-		io.Copy(io.Discard, r.Body) // the server notices the client leaving only once it has read the request
+		_, _ = io.Copy(io.Discard, r.Body) // the server notices the client leaving only once it has read the request
 		select {
 		case <-time.After(delay):
 			answer(rw)
@@ -263,7 +263,7 @@ func TestRelayBoundsEvents(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		w.relay(t.Context(), "a", r)
+		_, _ = w.relay(t.Context(), "a", r) // the test checks what reached the coordinator
 	}()
 	time.Sleep(time.Second)
 	// What was read is what waits, a line over the bound at most, and one more line in the scanner.

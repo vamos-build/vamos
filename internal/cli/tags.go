@@ -33,7 +33,7 @@ func parseVersion(tag string) (tagVersion, bool) {
 		return tagVersion{}, false
 	}
 	v := tagVersion{tag: tag, v: m[1] == "v", variant: m[3]}
-	for _, n := range strings.Split(m[2], ".") {
+	for n := range strings.SplitSeq(m[2], ".") {
 		i, err := strconv.Atoi(n)
 		if err != nil {
 			return tagVersion{}, false // too large to compare
