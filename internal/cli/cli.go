@@ -76,6 +76,7 @@ type options struct {
 	execPlatform  string        // --exec-platform
 	dryRun        bool          // update --dry-run
 	pins          pinsFlag      // --pins, of the commands that build
+	color         colorFlag     // --color
 	emulate       bool          // --emulate
 	coordinator   string        // --coordinator, or $VAMOS_COORDINATOR
 	rebuild       bool          // build --rebuild
@@ -395,6 +396,9 @@ func NewRootCommand(cfg Config) *cobra.Command {
 		cmd.Flags().Var(&opts.pins, "pins",
 			"what to do with a pull that vamos.lock doesn't pin: record its pin, resolve its tag without one, or "+
 				"require one (default $VAMOS_PINS, or else record)")
+		cmd.Flags().Var(&opts.color, "color",
+			"color the statuses of targets: auto where standard output is a terminal, NO_COLOR is unset or empty "+
+				"and TERM isn't dumb, always or never")
 	}
 
 	coordinatorCmd := &cobra.Command{
@@ -974,7 +978,12 @@ func (inv *invocation) capabilities(ex api.Executor) (imgspecv1.Platform, error)
 
 // events returns what prints a run's progress, and passes the executor's spans on to the trace.
 func (inv *invocation) events() *eventPrinter {
-	return &eventPrinter{stdout: inv.stdout, stderr: inv.stderr, trace: inv.session}
+	return &eventPrinter{
+		stdout: inv.stdout,
+		stderr: inv.stderr,
+		trace:  inv.session,
+		color:  inv.opts.color.colors(inv.stdout),
+	}
 }
 
 // traced runs the command with run, tracing it to the file that --trace names, if given,
@@ -1628,6 +1637,7 @@ type eventPrinter struct {
 	graph          *graph.Graph
 	stdout, stderr io.Writer
 	trace          *traceSession
+	color          bool // whether statuses are colored, as --color says
 }
 
 // record passes the event e of a job to the command's trace, if it has one, without writing anything.
@@ -1690,6 +1700,9 @@ func (p *eventPrinter) status(node graph.Ref, status string) error {
 	if p.graph == nil {
 		_, err := fmt.Fprintf(p.stdout, "node %d: %s\n", node, status)
 		return err
+	}
+	if p.color {
+		status = paintStatus(status)
 	}
 	_, err := fmt.Fprintf(p.stdout, "%s: %s\n", p.graph.Node(node).Desc, status)
 	return err

@@ -44,6 +44,7 @@ flowchart LR
     end
 
     subgraph right["task"]
+        direction TD
         task-input-image@{shape: procs, label: "image"}
         task-input-fileset@{shape: docs, label: "fileset"}
         task-target@{shape: trap-t, label: "task"}

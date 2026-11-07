@@ -1,0 +1,229 @@
+/*
+  vamos design tokens, direction "Lovechild": Bazel green and buildah yellow.
+  Starlight reads its own --sl-* properties; this file defines vamos tokens once and maps them onto Starlight.
+  Starlight's scale runs from --sl-color-white (strongest text) to --sl-color-black (page),
+  so light mode inverts the gray steps rather than renaming them.
+  Every text pairing meets WCAG 2.2 AA; marigold fails as text on the light page,
+  so in light mode it appears only in the logo and as a fill behind dark text.
+*/
+
+:root {
+  /* Type */
+  --vamos-font-display: "Bricolage Grotesque Variable", "Bricolage Grotesque", system-ui, sans-serif;
+  --vamos-font-body: "Figtree Variable", "Figtree", system-ui, sans-serif;
+  --vamos-font-mono: "Martian Mono Variable", "Martian Mono", ui-monospace, monospace;
+
+  /* Shape */
+  --vamos-radius-sm: 0.25rem;
+  --vamos-radius: 0.5rem;
+  --vamos-radius-lg: 0.75rem;
+}
+
+/* Dark mode is Starlight's default theme. */
+:root {
+  --vamos-ink: #f2f6f2;
+  --vamos-text: #c2cfc6;
+  --vamos-muted: #97ab9e;
+  --vamos-subtle: #5e7266;
+  --vamos-rule: #2a392f;
+  --vamos-surface: #16201a;
+  --vamos-page: #0e1511;
+  --vamos-green-low: #12321f;
+  --vamos-green: #2f9e6b;
+  --vamos-green-high: #6fd3a0;
+  --vamos-marigold: #f5c451;
+
+  --sl-color-white: var(--vamos-ink);
+  --sl-color-gray-1: #e2ebe4;
+  --sl-color-gray-2: var(--vamos-text);
+  --sl-color-gray-3: var(--vamos-muted);
+  --sl-color-gray-4: var(--vamos-subtle);
+  --sl-color-gray-5: var(--vamos-rule);
+  --sl-color-gray-6: var(--vamos-surface);
+  --sl-color-black: var(--vamos-page);
+
+  --sl-color-accent-low: var(--vamos-green-low);
+  --sl-color-accent: var(--vamos-green);
+  --sl-color-accent-high: var(--vamos-green-high);
+
+  /*
+    Callouts. Starlight colors note, tip, caution and danger with its blue, purple, orange and red;
+    note and tip take the green accent, caution marigold, danger a warm red. Each is -low (background),
+    base (edge) and -high (title); every title and its body text meet WCAG 2.2 AA on the background.
+  */
+  --sl-color-blue-low: var(--vamos-green-low);
+  --sl-color-blue: var(--vamos-green);
+  --sl-color-blue-high: var(--vamos-green-high);
+  --sl-color-purple-low: var(--vamos-green-low);
+  --sl-color-purple: var(--vamos-green);
+  --sl-color-purple-high: var(--vamos-green-high);
+  --sl-color-orange-low: #3a2d0c;
+  --sl-color-orange: var(--vamos-marigold);
+  --sl-color-orange-high: #fbdf9a;
+  --sl-color-red-low: #3d1714;
+  --sl-color-red: #e5675a;
+  --sl-color-red-high: #f6b3aa;
+}
+
+:root[data-theme="light"] {
+  --vamos-ink: #14201a;
+  --vamos-text: #2e3d34;
+  --vamos-muted: #4b5b51;
+  --vamos-subtle: #7d8c82;
+  --vamos-rule: #c2cdc4;
+  --vamos-surface: #e2e9e0;
+  --vamos-page: #f7f9f5;
+  --vamos-green-low: #d2e8da;
+  --vamos-green: #1e6b47;
+  --vamos-green-high: #124a30;
+  --vamos-marigold: #e9a90e;
+
+  --sl-color-white: var(--vamos-ink);
+  --sl-color-gray-1: #1c2b22;
+  --sl-color-gray-2: var(--vamos-text);
+  --sl-color-gray-3: var(--vamos-muted);
+  --sl-color-gray-4: var(--vamos-subtle);
+  --sl-color-gray-5: var(--vamos-rule);
+  --sl-color-gray-6: var(--vamos-surface);
+  --sl-color-gray-7: #eef3ec;
+  --sl-color-black: var(--vamos-page);
+
+  --sl-color-accent-low: var(--vamos-green-low);
+  --sl-color-accent: var(--vamos-green);
+  --sl-color-accent-high: var(--vamos-green-high);
+
+  --sl-color-blue-low: var(--vamos-green-low);
+  --sl-color-blue: var(--vamos-green);
+  --sl-color-blue-high: var(--vamos-green-high);
+  --sl-color-purple-low: var(--vamos-green-low);
+  --sl-color-purple: var(--vamos-green);
+  --sl-color-purple-high: var(--vamos-green-high);
+  /* Marigold is too light for an edge on the light page, so caution's edge is a deeper amber. */
+  --sl-color-orange-low: #fbedc6;
+  --sl-color-orange: #b77a00;
+  --sl-color-orange-high: #6b4500;
+  --sl-color-red-low: #fbe1dd;
+  --sl-color-red: #c8463a;
+  --sl-color-red-high: #8a2219;
+}
+
+/* Fonts and type scale: Starlight's sizes, with tighter display headings. */
+:root {
+  --sl-font: var(--vamos-font-body);
+  --sl-font-mono: var(--vamos-font-mono);
+  --sl-text-code: 0.8125rem;
+  --sl-text-code-sm: 0.75rem;
+  --sl-line-height: 1.7;
+  --sl-line-height-headings: 1.15;
+}
+
+h1,
+h2,
+h3,
+h4,
+.sl-markdown-content :is(h1, h2, h3, h4) {
+  font-family: var(--vamos-font-display);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  text-wrap: balance;
+}
+
+h5,
+h6,
+.sl-markdown-content :is(h5, h6) {
+  font-family: var(--vamos-font-body);
+  font-weight: 650;
+}
+
+/* The logo replaces the text title; keep it at the header's optical size. */
+.site-title img {
+  height: 1.75rem;
+  width: auto;
+}
+
+/* Inline code reads better slightly smaller than body text in Martian Mono, which is wide. */
+.sl-markdown-content code:not(:where(.not-content *, pre code)) {
+  font-size: 0.82em;
+  border-radius: var(--vamos-radius-sm);
+  /* When inline code wraps, as long commands do in table columns, each line keeps its own padded box. */
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+
+/* Reference tables are scanned, not read; tighter lines keep each row together. */
+.sl-markdown-content :is(td, th) {
+  line-height: 1.5;
+}
+
+/* Selection uses the brand yellow in both themes; dark text keeps it readable. */
+::selection {
+  background-color: var(--vamos-marigold);
+  color: #14201a;
+}
+
+/*
+  Mermaid diagrams. astro-mermaid switches between Mermaid's stock "default" and "dark" themes, so the colors are
+  restyled here from the tokens instead; they then follow the theme toggle without re-rendering.
+  Mermaid scopes its own rules to the diagram's id, which outranks any class selector, hence !important.
+*/
+pre.mermaid svg :is(.node rect, .node circle, .node ellipse, .node polygon, .node path) {
+  fill: var(--sl-color-gray-6) !important;
+  stroke: var(--sl-color-gray-4) !important;
+}
+
+/* Mermaid's dark theme glows its shapes; flat shapes match the light theme and the page. */
+pre.mermaid svg :is(.node, .node *, .cluster, .cluster *) {
+  filter: none !important;
+}
+
+/* An italic label's last letter leans past the width Mermaid measured; let it show rather than clip. */
+pre.mermaid foreignObject {
+  overflow: visible;
+}
+
+pre.mermaid svg .cluster rect {
+  fill: transparent !important;
+  stroke: var(--sl-color-gray-5) !important;
+  stroke-dasharray: 4 4;
+  rx: var(--vamos-radius);
+}
+
+pre.mermaid svg :is(.flowchart-link, .edgePaths .path) {
+  stroke: var(--sl-color-gray-3) !important;
+}
+
+pre.mermaid svg :is(.marker, .arrowMarkerPath, .arrowheadPath) {
+  fill: var(--sl-color-gray-3) !important;
+  stroke: var(--sl-color-gray-3) !important;
+}
+
+pre.mermaid svg :is(.nodeLabel, .label, .label span, .edgeLabel) {
+  color: var(--sl-color-white) !important;
+  fill: var(--sl-color-white) !important;
+}
+
+pre.mermaid svg .cluster-label :is(span, text) {
+  color: var(--sl-color-gray-3) !important;
+  fill: var(--sl-color-gray-3) !important;
+  font-weight: 600;
+}
+
+/* The italic line names a target's kind; keep it quieter than what the target holds. */
+pre.mermaid svg .nodeLabel i {
+  color: var(--sl-color-gray-3);
+}
+
+/*
+  Starlight spaces adjacent elements in page content, which also reaches the HTML inside Mermaid's labels.
+  Mermaid sizes each label's box as if those margins, and the divider line, took no room, so either clips the
+  label's last line. The line keeps zero net height; the labels' line spacing gives it room.
+*/
+pre.mermaid foreignObject :is(div, span, p, i, b) {
+  margin: 0 !important;
+}
+
+pre.mermaid foreignObject hr {
+  margin: 0 0 -1px !important;
+  border: 0;
+  border-top: 1px solid var(--sl-color-gray-5);
+}

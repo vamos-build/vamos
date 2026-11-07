@@ -1,4 +1,11 @@
-# vamos
+<h1 align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/site/src/assets/logo-dark.svg">
+    <img alt="vamos" src="docs/site/src/assets/logo-light.svg" width="300">
+  </picture>
+</h1>
+
+<p align="center">The lovechild of bazel and buildah.</p>
 
 A Go CLI that uses the [buildah](https://github.com/containers/buildah) library
 to build container images described by `BUILD` files written in [Starlark](https://github.com/bazelbuild/starlark).

@@ -129,7 +129,8 @@ func TestCommandLine_UsageMistakesPrintUsage(t *testing.T) {
 
 // TestCommandLine_CommandSpecificFlagsBelongToTheirCommands specifies that the command-specific flags are
 // build --rebuild, push --push-from, save --tag or -t, and export --replace, and that another command doesn't take
-// them.
+// them; nor does a command that builds nothing, such as prune, take the flags shared by those that build, such as
+// --color.
 func TestCommandLine_CommandSpecificFlagsBelongToTheirCommands(t *testing.T) {
 	for _, example := range []struct {
 		name  string
@@ -151,6 +152,11 @@ func TestCommandLine_CommandSpecificFlagsBelongToTheirCommands(t *testing.T) {
 			args:  []string{"push", "app", "app", "--rebuild"},
 			error: "unknown flag: --rebuild",
 		},
+		{
+			name:  "--color on prune fails",
+			args:  []string{"prune", "--color=always"},
+			error: "unknown flag: --color",
+		},
 	} {
 		t.Run(example.name, func(t *testing.T) {
 			w := newCommandLineWorld(t)
@@ -161,8 +167,9 @@ func TestCommandLine_CommandSpecificFlagsBelongToTheirCommands(t *testing.T) {
 }
 
 // TestCommandLine_FlagsTakeValuesOfTheirKind specifies that a flag that takes a value is given one of its kind:
-// a boolean for --tls-verify, which given alone means true, executor or client for --push-from, a time for
-// --timestamp, no earlier than 1970, and id=ID with env=VARIABLE or src=FILE for --secret, each ID once.
+// a boolean for --tls-verify, which given alone means true, executor or client for --push-from,
+// auto, always or never for --color, a time for --timestamp, no earlier than 1970,
+// and id=ID with env=VARIABLE or src=FILE for --secret, each ID once.
 func TestCommandLine_FlagsTakeValuesOfTheirKind(t *testing.T) {
 	for _, example := range []struct {
 		name   string
@@ -188,6 +195,11 @@ func TestCommandLine_FlagsTakeValuesOfTheirKind(t *testing.T) {
 			name:   "A --push-from that isn't executor or client fails",
 			args:   []string{"push", "app", "app", "--push-from=remote"},
 			errors: []string{`invalid argument "remote" for "--push-from" flag: want "executor" or "client"`},
+		},
+		{
+			name:   "A --color that isn't auto, always or never fails",
+			args:   []string{"build", "app", "--color=yes"},
+			errors: []string{`invalid argument "yes" for "--color" flag: "yes" isn't a choice for coloring`},
 		},
 		{
 			name:   "A --timestamp that isn't a time fails",

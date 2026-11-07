@@ -380,6 +380,7 @@ These flags are shared by commands that build targets:
 | `--tls-verify <bool>` | Require HTTPS and verify certificates when vamos itself contacts a registry: pushing from the client, and reading a coordinator's images to deliver | `registries.conf` |
 | `--timestamp <time>` | Minimum timestamp for newly executed targets | Derived from bases and added tasks |
 | `--pins <policy>` | What a command that builds does with a pull that `vamos.lock` doesn't pin: `record` resolves its tag at its own registry, from the client, as [`update`](#update) does, adds its pin and reports it; `resolve` resolves it on the executor, keeping what the tag named only in the build cache; `require` fails, naming every pull without a pin, before anything runs | `$VAMOS_PINS`, or else `record` |
+| `--color <when>` | Color the word each target's status starts with: `cached` dimmed, and `building` and `rebuilding` green; `auto` colors them where standard output is a terminal, `NO_COLOR` is unset or empty and `TERM` isn't `dumb`, `always` wherever output goes, and `never` not at all | `auto` |
 
 `--platform` cannot be given when naming an index.
 With multiple build targets, each `--set` applies to named targets declaring that parameter,
@@ -449,6 +450,8 @@ A target configured alike for several platforms of an index, such as a task on a
 is built once: the others report `building, shared with` the one whose work they share,
 or with `another build` when another build started it.
 Cached targets replay output from their previous execution.
+In a terminal, `cached` is dimmed, and `building` and `rebuilding` green, so that the targets that run stand out;
+`--color` chooses otherwise; under its default, `auto`, a `NO_COLOR` that isn't empty or a `TERM` of `dumb` turns it off.
 Successful delivery prints one of these lines:
 
 ```text

@@ -33,6 +33,9 @@ Cloudflare watches `docs/` and builds and deploys the site itself, so no CI work
 and a change outside `docs/` never rebuilds it; that is why the guide cannot link to other files relatively.
 After changing the user guide, run `pnpm install && pnpm build` in `docs/site`;
 the build fails on a link to a missing file or to a file that is not a page, but does not check anchors.
+Astro caches rendered pages between builds, so after changing how code is highlighted,
+such as `src/code-themes.mjs`, run `pnpm exec astro build --force`, or the pages keep their old colors.
+The site's colors, fonts and diagram styling are in `src/styles/vamos.css`.
 After changing `worker.mjs` or `links.mjs`, also run `pnpm test` there,
 which checks the Worker's content negotiation and the links of the Markdown pages.
 Run `pnpm dev` there to preview with live reload, or `pnpm preview` to serve the build as Cloudflare does;

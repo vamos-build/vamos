@@ -18,13 +18,13 @@ import (
 )
 
 // RequireIntegrationEnv is the environment variable that, when set, makes tests which need buildah,
-// root or ownership changes fail, rather than skip, where those are unavailable:
+// root, ownership changes or a terminal fail, rather than skip, where those are unavailable:
 // for a host that is meant to run the whole suite.
 const RequireIntegrationEnv = "VAMOS_REQUIRE_INTEGRATION"
 
-// unavailable reports that what the test needs, what, isn't available here, as err says:
+// Unavailable reports that what the test needs, what, isn't available here, as err says:
 // the test fails if RequireIntegrationEnv is set, and is skipped otherwise.
-func unavailable(t *testing.T, what string, err error) {
+func Unavailable(t *testing.T, what string, err error) {
 	t.Helper()
 	msg := fmt.Sprintf("%s isn't possible here: %v", what, err)
 	if os.Getenv(RequireIntegrationEnv) != "" {
@@ -44,7 +44,7 @@ func RequireBuildah(t *testing.T) {
 		t.Skip("builds an image; skipped with -short")
 	}
 	if err := buildahAvailable(); err != nil {
-		unavailable(t, "building an image", err)
+		Unavailable(t, "building an image", err)
 	}
 }
 
@@ -93,7 +93,7 @@ func probeBuilder(store storage.Store) error {
 func RequireOwnership(t *testing.T) {
 	t.Helper()
 	if err := ownershipAvailable(); err != nil {
-		unavailable(t, "changing a file's owner", err)
+		Unavailable(t, "changing a file's owner", err)
 	}
 }
 

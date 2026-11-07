@@ -140,7 +140,7 @@ func TestIsolationHelper(t *testing.T) {
 // containers/storage reads its defaults once per process, so the stores are made in a new one.
 func TestIsolation(t *testing.T) {
 	if os.Geteuid() != 0 {
-		unavailable(t, "configuring the default container store", errors.New("it needs root"))
+		Unavailable(t, "configuring the default container store", errors.New("it needs root"))
 	}
 	for _, tc := range []struct {
 		name        string
@@ -232,7 +232,7 @@ func TestGateHelper(t *testing.T) {
 	if os.Getenv(gateHelperEnv) == "" {
 		return
 	}
-	unavailable(t, "a test prerequisite", errors.New("it is missing here"))
+	Unavailable(t, "a test prerequisite", errors.New("it is missing here"))
 }
 
 // TestGate checks that an unavailable prerequisite skips the test unless RequireIntegrationEnv is set,

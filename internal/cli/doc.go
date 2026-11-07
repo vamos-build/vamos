@@ -46,6 +46,7 @@
 // invocation.executor chooses the executor, and invocation.capabilities refuses one of another graph version.
 // Output goes through invocation.printf, which returns a failure to write.
 // Inspect destination for delivery and platform selection, invocation.execPlatform for the choice of execution
-// platform among those the executor offers, eventPrinter for events, and traceSession for trace file ownership.
+// platform among those the executor offers, eventPrinter for events, which colors statuses as --color says,
+// in color.go, and traceSession for trace file ownership.
 // Tests in this package exercise the real command path.
 package cli

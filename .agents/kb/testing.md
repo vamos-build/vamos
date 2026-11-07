@@ -92,9 +92,11 @@ Each run of the suite pulls `busybox:1.36` once into its fresh store, which Dock
 so tests that need only a base to add files to push one to an in-process registry instead.
 Use `newNonce`, `testenv.NewNonce`, for cases that need fresh actions within a run;
 `cached` versus `building` is observable.
-Tests that need buildah call `requireBuildah(t)`; those that change owners call `testenv.RequireOwnership`.
-Both skip where the capability is missing, by probing it, unless `VAMOS_REQUIRE_INTEGRATION` is set,
-which makes them fail instead, for a host that must run the whole suite.
+Tests that need buildah call `requireBuildah(t)`; those that change owners call `testenv.RequireOwnership`;
+scenarios whose output is a terminal take `GivenStandardOutputIsATerminal`, which opens a pseudo-terminal.
+All skip where the capability is missing, by probing it, unless `VAMOS_REQUIRE_INTEGRATION` is set,
+which makes them fail instead, for a host that must run the whole suite; a new probe reports through
+`testenv.Unavailable`.
 The buildah probe needs root and makes and mounts a container from scratch in the suite's store;
 the ownership probe needs root, as exports do, and a filesystem that takes `chown`.
 Test stores drop the default store's additional image and layer stores,
@@ -213,6 +215,7 @@ and its steps' observations;
 [steps_trace_test.go](../../internal/features/steps_trace_test.go) the trace that `--trace` writes, read as Perfetto
 reads it;
 [steps_interrupt_test.go](../../internal/features/steps_interrupt_test.go) interrupting a command, as Ctrl-C does;
+[steps_terminal_test.go](../../internal/features/steps_terminal_test.go) a terminal as a command's standard output;
 [steps_remote_test.go](../../internal/features/steps_remote_test.go) coordinators that a command builds on;
 and [steps_cache_test.go](../../internal/features/steps_cache_test.go) the build cache and the container store as
 other programs see them: steps that damage or hold them, as something outside vamos might, and see what they hold,

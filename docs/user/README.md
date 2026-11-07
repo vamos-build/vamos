@@ -1,7 +1,37 @@
 ---
 title: "vamos user guide"
-description: "Where to start with vamos, and the references for writing your own builds."
+description: "vamos, the lovechild of bazel and buildah, builds container images from Starlark BUILD files."
 ---
+
+vamos is the lovechild of bazel and buildah.
+
+It builds container images from `BUILD` files written in Starlark, Bazel's Python-like language,
+using the buildah library.
+Your project keeps its own tools, such as npm, pnpm, go or uv: vamos runs them in build containers,
+and only the files a task collects reach the image.
+It reuses each target's result while its inputs are unchanged.
+
+These two targets from the TypeScript UI example build a website with pnpm, then serve it from nginx,
+without Node.js in the final image:
+
+```python
+task(
+    name="build",
+    base="packages",
+    steps=[
+        add("source-files", "/workspace"),
+        run(["pnpm", "build"]),
+    ],
+    source="/workspace/dist",
+    include=["."],
+)
+
+layer(
+    name="frontend",
+    base="nginx",
+    steps=[add("build", "/usr/share/nginx/html")],
+)
+```
 
 Start with the [tutorial](tutorial.md).
 It introduces images and filesets, sets up vamos, and builds the

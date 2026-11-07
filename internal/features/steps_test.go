@@ -127,6 +127,7 @@ type world struct {
 	took         time.Duration     // how long the last command ran
 	endedAt      time.Time         // when the last command returned
 	outputClosed bool              // whether the command running's standard output fails every write
+	outputTTY    bool              // whether the scenario's commands write their standard output to a terminal
 	tried        string            // what the last command tried to print to standard output that was closed
 	tracePath    string            // where the last command wrote its trace, if traced() asked it to
 	trace        *trace            // the trace there, once a step has read it
@@ -233,12 +234,22 @@ func (w *world) execute(fsys afero.Fs, args []string) {
 	if w.outputClosed && (w.interruptOn != "" || w.interruptIn != 0 || w.interruptBy != 0) {
 		w.t.Fatal("a command whose standard output is closed stops on its first write, before any interrupt")
 	}
+	if w.outputTTY && (w.outputClosed || w.interruptOn != "") {
+		w.t.Fatal("a command's standard output is a terminal, closed or watched for a cue, not two of them")
+	}
+	var tty *terminal
 	switch {
 	case w.outputClosed:
 		cmd.SetOut(closedOutput{&tried})
 	case w.interruptOn != "":
 		cue = &interrupter{out: &stdout, text: []byte(w.interruptOn), ctx: ctx, cancel: cancel}
 		cmd.SetOut(cue)
+	case w.outputTTY:
+		var err error
+		if tty, err = openTerminal(&stdout); err != nil {
+			w.t.Fatal(err)
+		}
+		cmd.SetOut(tty.out)
 	default:
 		cmd.SetOut(&stdout)
 	}
@@ -280,6 +291,9 @@ func (w *world) execute(fsys afero.Fs, args []string) {
 	w.err = cmd.ExecuteContext(ctx)
 	w.endedAt = time.Now()
 	w.took = w.endedAt.Sub(start)
+	if tty != nil { // once the command's time is taken, which reading what it wrote isn't part of
+		tty.close()
+	}
 	w.askedDuring, w.jobsDuring = w.asked.Load()-asked, w.jobs.Load()-jobs
 	w.servedDuring = w.served.Load() - served
 	if w.ownStores {
