@@ -12,7 +12,7 @@ COPY internal/ ./internal/
 # The release sets VERSION, such as v0.1.0, which `vamos --version` reports.
 ARG VERSION
 RUN go build -tags "containers_image_openpgp exclude_graphdriver_btrfs" \
-    -ldflags "-X github.com/Topher-the-Geek/vamos/internal/run.stampedVersion=${VERSION}" -o vamos .
+    -ldflags "-X github.com/vamos-build/vamos/internal/run.stampedVersion=${VERSION}" -o vamos .
 
 # The binary alone, for `docker build --target binary --output <dir>`, which the release attaches.
 FROM scratch AS binary

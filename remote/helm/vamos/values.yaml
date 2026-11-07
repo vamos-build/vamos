@@ -11,7 +11,7 @@
 # agree on one image.
 # A chart under development runs a local build instead: repository vamos, loaded into the nodes.
 image:
-  repository: ghcr.io/topher-the-geek/vamos
+  repository: ghcr.io/vamos-build/vamos
   tag: latest
   pullPolicy: IfNotPresent
 imagePullSecrets: []

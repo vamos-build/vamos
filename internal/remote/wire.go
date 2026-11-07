@@ -8,9 +8,9 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/Topher-the-Geek/vamos/internal/api"
-	"github.com/Topher-the-Geek/vamos/internal/cache"
-	"github.com/Topher-the-Geek/vamos/internal/sched"
+	"github.com/vamos-build/vamos/internal/api"
+	"github.com/vamos-build/vamos/internal/cache"
+	"github.com/vamos-build/vamos/internal/sched"
 )
 
 // The paths of the API, beneath a prefix that versions the wire format.

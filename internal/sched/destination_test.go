@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Topher-the-Geek/vamos/internal/api"
+	"github.com/vamos-build/vamos/internal/api"
 )
 
 // TestParsePublicationBoundsDestinations checks that a publication may write MaxDestinations destinations, but is

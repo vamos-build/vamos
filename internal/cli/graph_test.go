@@ -6,7 +6,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/Topher-the-Geek/vamos/internal/graph"
+	"github.com/vamos-build/vamos/internal/graph"
 
 	"github.com/spf13/afero"
 )

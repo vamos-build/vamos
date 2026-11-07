@@ -16,7 +16,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Topher-the-Geek/vamos/internal/api"
+	"github.com/vamos-build/vamos/internal/api"
 
 	"golang.org/x/sys/unix"
 )

@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/Topher-the-Geek/vamos/internal/cache"
-	"github.com/Topher-the-Geek/vamos/internal/tracing"
+	"github.com/vamos-build/vamos/internal/cache"
+	"github.com/vamos-build/vamos/internal/tracing"
 
 	"github.com/opencontainers/go-digest"
 )

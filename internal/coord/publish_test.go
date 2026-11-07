@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Topher-the-Geek/vamos/internal/api"
-	"github.com/Topher-the-Geek/vamos/internal/graph"
-	"github.com/Topher-the-Geek/vamos/internal/remote"
-	"github.com/Topher-the-Geek/vamos/internal/sched"
+	"github.com/vamos-build/vamos/internal/api"
+	"github.com/vamos-build/vamos/internal/graph"
+	"github.com/vamos-build/vamos/internal/remote"
+	"github.com/vamos-build/vamos/internal/sched"
 )
 
 // aPublication publishes two images, each to its own repository, under the tags v1 and latest.

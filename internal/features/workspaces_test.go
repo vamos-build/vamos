@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/Topher-the-Geek/vamos/internal/testenv"
+	"github.com/vamos-build/vamos/internal/testenv"
 )
 
 // newWorkspaceWorld starts a scenario of the workspaces feature, from its background:

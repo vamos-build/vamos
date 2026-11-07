@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Topher-the-Geek/vamos/internal/testenv"
+	"github.com/vamos-build/vamos/internal/testenv"
 )
 
 // newCommandLineWorld starts a scenario of the command line feature, from its background:

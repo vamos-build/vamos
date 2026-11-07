@@ -7,7 +7,7 @@ import (
 )
 
 // module is the path of vamos's module, which its packages' import paths start with.
-const module = "github.com/Topher-the-Geek/vamos/internal/"
+const module = "github.com/vamos-build/vamos/internal/"
 
 // TestImportRules checks which packages each of vamos's may depend on, directly or not: load must not reach buildah,
 // so that it could run where buildah can't, run must not reach Starlark, so that a graph is all an executor needs,

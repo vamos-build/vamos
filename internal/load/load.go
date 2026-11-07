@@ -6,10 +6,10 @@ import (
 	"path/filepath"
 	"slices"
 
-	"github.com/Topher-the-Geek/vamos/internal/cache"
-	"github.com/Topher-the-Geek/vamos/internal/fileset"
-	"github.com/Topher-the-Geek/vamos/internal/graph"
-	"github.com/Topher-the-Geek/vamos/internal/tracing"
+	"github.com/vamos-build/vamos/internal/cache"
+	"github.com/vamos-build/vamos/internal/fileset"
+	"github.com/vamos-build/vamos/internal/graph"
+	"github.com/vamos-build/vamos/internal/tracing"
 
 	imgspecv1 "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/spf13/afero"

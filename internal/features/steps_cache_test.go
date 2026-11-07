@@ -12,11 +12,11 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/Topher-the-Geek/vamos/internal/cache"
-	"github.com/Topher-the-Geek/vamos/internal/cli"
-	"github.com/Topher-the-Geek/vamos/internal/run"
-	"github.com/Topher-the-Geek/vamos/internal/testenv"
 	"github.com/opencontainers/go-digest"
+	"github.com/vamos-build/vamos/internal/cache"
+	"github.com/vamos-build/vamos/internal/cli"
+	"github.com/vamos-build/vamos/internal/run"
+	"github.com/vamos-build/vamos/internal/testenv"
 	imagemanifest "go.podman.io/image/v5/manifest"
 	"go.podman.io/storage"
 )

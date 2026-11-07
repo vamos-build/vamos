@@ -17,12 +17,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Topher-the-Geek/vamos/internal/cli"
-	"github.com/Topher-the-Geek/vamos/internal/graph"
-	"github.com/Topher-the-Geek/vamos/internal/testenv"
 	"github.com/google/go-containerregistry/pkg/authn"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/spf13/afero"
+	"github.com/vamos-build/vamos/internal/cli"
+	"github.com/vamos-build/vamos/internal/graph"
+	"github.com/vamos-build/vamos/internal/testenv"
 )
 
 // The steps are split by subject, in files that sort together:

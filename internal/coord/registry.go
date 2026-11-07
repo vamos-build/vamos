@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Topher-the-Geek/vamos/internal/cache"
+	"github.com/vamos-build/vamos/internal/cache"
 
 	"github.com/docker/distribution/registry/api/errcode"
 	v2 "github.com/docker/distribution/registry/api/v2"

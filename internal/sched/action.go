@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"slices"
 
-	"github.com/Topher-the-Geek/vamos/internal/cache"
-	"github.com/Topher-the-Geek/vamos/internal/fileset"
-	"github.com/Topher-the-Geek/vamos/internal/graph"
+	"github.com/vamos-build/vamos/internal/cache"
+	"github.com/vamos-build/vamos/internal/fileset"
+	"github.com/vamos-build/vamos/internal/graph"
 
 	"github.com/opencontainers/go-digest"
 )

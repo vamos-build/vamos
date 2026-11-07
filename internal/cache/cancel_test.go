@@ -7,7 +7,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/Topher-the-Geek/vamos/internal/testenv"
+	"github.com/vamos-build/vamos/internal/testenv"
 )
 
 // TestCancelCheckoutAndReplay checks that checking out a tree, and replaying a log, stop when the context ends,

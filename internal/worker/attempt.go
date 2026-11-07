@@ -13,10 +13,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Topher-the-Geek/vamos/internal/remote"
-	"github.com/Topher-the-Geek/vamos/internal/run"
-	"github.com/Topher-the-Geek/vamos/internal/sched"
-	"github.com/Topher-the-Geek/vamos/internal/tracing"
+	"github.com/vamos-build/vamos/internal/remote"
+	"github.com/vamos-build/vamos/internal/run"
+	"github.com/vamos-build/vamos/internal/sched"
+	"github.com/vamos-build/vamos/internal/tracing"
 )
 
 // The pace of an attempt's reporting.

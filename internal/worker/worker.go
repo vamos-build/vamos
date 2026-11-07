@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Topher-the-Geek/vamos/internal/remote"
-	"github.com/Topher-the-Geek/vamos/internal/run"
-	"github.com/Topher-the-Geek/vamos/internal/sched"
+	"github.com/vamos-build/vamos/internal/remote"
+	"github.com/vamos-build/vamos/internal/run"
+	"github.com/vamos-build/vamos/internal/sched"
 
 	"go.podman.io/storage"
 )

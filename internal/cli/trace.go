@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/Topher-the-Geek/vamos/internal/finish"
-	"github.com/Topher-the-Geek/vamos/internal/tracing"
+	"github.com/vamos-build/vamos/internal/finish"
+	"github.com/vamos-build/vamos/internal/tracing"
 )
 
 // clientProcess names the client's spans' process in a trace.

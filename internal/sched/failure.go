@@ -3,7 +3,7 @@ package sched
 import (
 	"errors"
 
-	"github.com/Topher-the-Geek/vamos/internal/cache"
+	"github.com/vamos-build/vamos/internal/cache"
 )
 
 // AttemptFailure is why an attempt failed, as a worker reports it to its coordinator: everything the Scheduler

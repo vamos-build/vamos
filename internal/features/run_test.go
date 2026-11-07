@@ -6,7 +6,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/Topher-the-Geek/vamos/internal/testenv"
+	"github.com/vamos-build/vamos/internal/testenv"
 )
 
 // newRunWorld starts a scenario of the run feature, from its background.

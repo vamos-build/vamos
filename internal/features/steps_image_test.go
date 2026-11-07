@@ -16,7 +16,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Topher-the-Geek/vamos/internal/testenv"
 	"github.com/containerd/platforms"
 	"github.com/google/go-containerregistry/pkg/name"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
@@ -24,6 +23,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	"github.com/google/go-containerregistry/pkg/v1/tarball"
 	imgspecv1 "github.com/opencontainers/image-spec/specs-go/v1"
+	"github.com/vamos-build/vamos/internal/testenv"
 )
 
 // Then steps about the image that the last command saved, its archive, and the store it was built in.

@@ -3,7 +3,7 @@ title: "Tutorial: from source files to a running container"
 description: "Learn images, filesets, layers and tasks by building a TypeScript website into a running container."
 ---
 
-This tutorial walks through [examples/typescript-ui](https://github.com/Topher-the-Geek/vamos/tree/main/examples/typescript-ui),
+This tutorial walks through [examples/typescript-ui](https://github.com/vamos-build/vamos/tree/main/examples/typescript-ui),
 a small TypeScript website built with Node.js and served by nginx.
 You will learn the artifact model, set up vamos, and read the example's `BUILD` file one target at a time.
 All the project files are included in the repository.
@@ -82,7 +82,7 @@ The third installs vamos in your own project's devcontainer.
 
 ### In the repository's devcontainer
 
-Open the repository with its [devcontainer configuration](https://github.com/Topher-the-Geek/vamos/blob/main/.devcontainer/devcontainer.json).
+Open the repository with its [devcontainer configuration](https://github.com/vamos-build/vamos/blob/main/.devcontainer/devcontainer.json).
 It provides the build dependencies, privileges, chroot isolation, and container storage vamos needs.
 From the repository root:
 
@@ -121,7 +121,7 @@ If you are already inside a devcontainer, use the first setup because its paths 
 ### In your project's devcontainer
 
 To build your own project, install vamos in the image your devcontainer runs.
-Each [release](https://github.com/Topher-the-Geek/vamos/releases) has an `install.sh`,
+Each [release](https://github.com/vamos-build/vamos/releases) has an `install.sh`,
 which downloads that release's binary for the platform it runs on, `linux/amd64` or `linux/arm64`,
 checks it against the release's `SHA256SUMS`, and installs it as `/usr/local/bin/vamos`.
 The binary needs glibc 2.34 or later; these lines are for an Ubuntu 24.04 base:
@@ -137,7 +137,7 @@ RUN apt-get update \
       netavark \
  && rm -rf /var/lib/apt/lists/*
 
-RUN curl -fsSL -o /tmp/vamos-install.sh https://github.com/Topher-the-Geek/vamos/releases/download/v0.1.0/install.sh \
+RUN curl -fsSL -o /tmp/vamos-install.sh https://github.com/vamos-build/vamos/releases/download/v0.1.0/install.sh \
  && sh /tmp/vamos-install.sh \
  && rm /tmp/vamos-install.sh
 
@@ -160,11 +160,11 @@ and `VAMOS_VERSION` or `--version` choose another.
 To install vamos on a Linux machine of your own, run the script there; it uses `sudo` unless you are root:
 
 ```sh
-curl -fsSL https://github.com/Topher-the-Geek/vamos/releases/latest/download/install.sh | sh
+curl -fsSL https://github.com/vamos-build/vamos/releases/latest/download/install.sh | sh
 ```
 
-The [published image](https://github.com/Topher-the-Geek/vamos/pkgs/container/vamos) has the same binary,
-at `/usr/local/bin/vamos`, if you would rather `COPY --from=ghcr.io/topher-the-geek/vamos:0.1.0` it.
+The [published image](https://github.com/vamos-build/vamos/pkgs/container/vamos) has the same binary,
+at `/usr/local/bin/vamos`, if you would rather `COPY --from=ghcr.io/vamos-build/vamos:0.1.0` it.
 
 In `devcontainer.json`, run the container privileged, give container storage a volume of its own,
 and mount the Docker socket if you use `vamos load`:
@@ -217,9 +217,9 @@ typescript-ui/
     └── main.ts
 ```
 
-[index.html](https://github.com/Topher-the-Geek/vamos/blob/main/examples/typescript-ui/index.html) contains a heading, an empty paragraph,
+[index.html](https://github.com/vamos-build/vamos/blob/main/examples/typescript-ui/index.html) contains a heading, an empty paragraph,
 and a module script pointing to `src/main.ts`.
-[The TypeScript source](https://github.com/Topher-the-Geek/vamos/blob/main/examples/typescript-ui/src/main.ts) fills that paragraph:
+[The TypeScript source](https://github.com/vamos-build/vamos/blob/main/examples/typescript-ui/src/main.ts) fills that paragraph:
 
 ```typescript
 const message = document.querySelector<HTMLParagraphElement>("#message");
@@ -228,7 +228,7 @@ if (message) {
 }
 ```
 
-[package.json](https://github.com/Topher-the-Geek/vamos/blob/main/examples/typescript-ui/package.json) defines `pnpm build`:
+[package.json](https://github.com/vamos-build/vamos/blob/main/examples/typescript-ui/package.json) defines `pnpm build`:
 it type-checks the source with TypeScript, then bundles the website into `dist/` with Vite.
 The following targets run that command inside a container.
 
@@ -268,7 +268,7 @@ so editing a page does not require another dependency installation.
 
 ## 5. Read the build inputs
 
-Open [BUILD](https://github.com/Topher-the-Geek/vamos/blob/main/examples/typescript-ui/BUILD).
+Open [BUILD](https://github.com/vamos-build/vamos/blob/main/examples/typescript-ui/BUILD).
 Its first declarations select the build image and input files:
 
 ```python
@@ -413,7 +413,7 @@ docker stop vamos-hello
 git restore index.html
 ```
 
-The example's [sanity check](https://github.com/Topher-the-Geek/vamos/blob/main/examples/typescript-ui/README.md#sanity-check) builds and serves this same project,
+The example's [sanity check](https://github.com/vamos-build/vamos/blob/main/examples/typescript-ui/README.md#sanity-check) builds and serves this same project,
 then compares the served page and bundle with the task's exported files.
 
 ## Where to go next
@@ -432,5 +432,5 @@ Use the references as your project grows:
 - [Remote builds](README.md#remote-builds): share one build cache and a pool of workers with a team,
   through a coordinator that any build command reaches with `--coordinator`.
 
-See the [examples](https://github.com/Topher-the-Geek/vamos/blob/main/examples/README.md) for more build patterns,
+See the [examples](https://github.com/vamos-build/vamos/blob/main/examples/README.md) for more build patterns,
 including cross-compilation and monorepo dependencies.

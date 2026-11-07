@@ -14,8 +14,8 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/Topher-the-Geek/vamos/internal/api"
-	"github.com/Topher-the-Geek/vamos/internal/cache"
+	"github.com/vamos-build/vamos/internal/api"
+	"github.com/vamos-build/vamos/internal/cache"
 )
 
 // The reasons export refuses a destination.

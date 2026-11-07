@@ -24,7 +24,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Topher-the-Geek/vamos/internal/testenv"
 	"github.com/containerd/platforms"
 	"github.com/docker/distribution/registry/api/errcode"
 	v2 "github.com/docker/distribution/registry/api/v2"
@@ -37,6 +36,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/random"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/opencontainers/go-digest"
+	"github.com/vamos-build/vamos/internal/testenv"
 	"go.podman.io/image/v5/docker/reference"
 )
 

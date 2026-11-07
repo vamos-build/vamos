@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/Topher-the-Geek/vamos/internal/testenv"
 	"github.com/opencontainers/go-digest"
+	"github.com/vamos-build/vamos/internal/testenv"
 )
 
 // TestCopy checks that Copy moves only the blobs the destination lacks, verified, and that a blob corrupt

@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Topher-the-Geek/vamos/internal/testenv"
+	"github.com/vamos-build/vamos/internal/testenv"
 
 	"github.com/opencontainers/go-digest"
 	imgspecv1 "github.com/opencontainers/image-spec/specs-go/v1"

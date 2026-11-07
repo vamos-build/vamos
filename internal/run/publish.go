@@ -7,12 +7,12 @@ import (
 	"os"
 	"unicode/utf8"
 
-	"github.com/Topher-the-Geek/vamos/internal/api"
-	"github.com/Topher-the-Geek/vamos/internal/graph"
-	"github.com/Topher-the-Geek/vamos/internal/remote"
-	"github.com/Topher-the-Geek/vamos/internal/sched"
-	"github.com/Topher-the-Geek/vamos/internal/tracing"
-	"github.com/Topher-the-Geek/vamos/internal/transfer"
+	"github.com/vamos-build/vamos/internal/api"
+	"github.com/vamos-build/vamos/internal/graph"
+	"github.com/vamos-build/vamos/internal/remote"
+	"github.com/vamos-build/vamos/internal/sched"
+	"github.com/vamos-build/vamos/internal/tracing"
+	"github.com/vamos-build/vamos/internal/transfer"
 
 	"github.com/opencontainers/go-digest"
 	imagecopy "go.podman.io/image/v5/copy"

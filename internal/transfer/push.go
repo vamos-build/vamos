@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Topher-the-Geek/vamos/internal/tracing"
+	"github.com/vamos-build/vamos/internal/tracing"
 
 	"github.com/opencontainers/go-digest"
 	containersconfig "go.podman.io/common/pkg/config"

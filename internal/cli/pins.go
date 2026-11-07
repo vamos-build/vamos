@@ -8,9 +8,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/Topher-the-Geek/vamos/internal/graph"
-	"github.com/Topher-the-Geek/vamos/internal/load"
-	"github.com/Topher-the-Geek/vamos/internal/tracing"
+	"github.com/vamos-build/vamos/internal/graph"
+	"github.com/vamos-build/vamos/internal/load"
+	"github.com/vamos-build/vamos/internal/tracing"
 )
 
 // The policies of --pins, for a pull that the lockfile doesn't pin.

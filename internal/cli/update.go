@@ -11,9 +11,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Topher-the-Geek/vamos/internal/load"
-	"github.com/Topher-the-Geek/vamos/internal/remote"
-	"github.com/Topher-the-Geek/vamos/internal/run"
+	"github.com/vamos-build/vamos/internal/load"
+	"github.com/vamos-build/vamos/internal/remote"
+	"github.com/vamos-build/vamos/internal/run"
 
 	"github.com/docker/distribution/registry/api/errcode"
 	v2 "github.com/docker/distribution/registry/api/v2"

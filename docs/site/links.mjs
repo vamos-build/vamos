@@ -5,7 +5,7 @@ import remarkGfm from "remark-gfm";
 import remarkParse from "remark-parse";
 import { unified } from "unified";
 
-export const github = "https://github.com/Topher-the-Geek/vamos";
+export const github = "https://github.com/vamos-build/vamos";
 
 /** Returns the directory of the user guide and of the repository, given the site's root URL. */
 export function layout(root) {

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/Topher-the-Geek/vamos/internal/fileset"
+	"github.com/vamos-build/vamos/internal/fileset"
 
 	"go.starlark.net/starlark"
 )

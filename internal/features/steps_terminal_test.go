@@ -8,7 +8,7 @@ import (
 	"os"
 	"syscall"
 
-	"github.com/Topher-the-Geek/vamos/internal/testenv"
+	"github.com/vamos-build/vamos/internal/testenv"
 	"golang.org/x/sys/unix"
 	"golang.org/x/term"
 )

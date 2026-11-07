@@ -25,7 +25,7 @@ Start each page with `title` and `description` frontmatter instead of a `#` head
 which Starlight renders from the title.
 Add a new page to the sidebar in `sidebar.mjs`, which also orders `llms.txt`.
 Link to another page with a relative link, which works on GitHub and which the site turns into the page's URL.
-Link to any other repository file by its GitHub URL, `https://github.com/Topher-the-Geek/vamos/blob/main/<path>`;
+Link to any other repository file by its GitHub URL, `https://github.com/vamos-build/vamos/blob/main/<path>`;
 the build rejects a relative link to one.
 Agents get the same pages as Markdown: at each page's path with `.md`, in `llms.txt` and `llms-full.txt`,
 and at the page's own URL when they ask with `Accept: text/markdown`, which `worker.mjs` answers.

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Topher-the-Geek/vamos/internal/testenv"
+	"github.com/vamos-build/vamos/internal/testenv"
 )
 
 // newLoadWorld starts a scenario of the load feature, from its background: a project whose layer "app" adds a file

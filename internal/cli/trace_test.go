@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Topher-the-Geek/vamos/internal/tracing"
+	"github.com/vamos-build/vamos/internal/tracing"
 )
 
 // TestFinishTrace checks which error a traced command returns when its trace can't be written:

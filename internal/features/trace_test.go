@@ -5,7 +5,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/Topher-the-Geek/vamos/internal/testenv"
+	"github.com/vamos-build/vamos/internal/testenv"
 )
 
 // newTraceWorld starts a scenario of the trace feature, from its background: a project, which builds.

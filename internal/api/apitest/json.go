@@ -9,7 +9,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/Topher-the-Geek/vamos/internal/api"
+	"github.com/vamos-build/vamos/internal/api"
 )
 
 // JSON is an executor that passes every request, result and event through JSON on its way to and from ex,

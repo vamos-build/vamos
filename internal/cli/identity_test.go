@@ -10,8 +10,8 @@ import (
 	"runtime/debug"
 	"testing"
 
-	"github.com/Topher-the-Geek/vamos/internal/cache"
-	"github.com/Topher-the-Geek/vamos/internal/run"
+	"github.com/vamos-build/vamos/internal/cache"
+	"github.com/vamos-build/vamos/internal/run"
 	containersconfig "go.podman.io/common/pkg/config"
 	"go.podman.io/storage"
 )

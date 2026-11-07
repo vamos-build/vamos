@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Topher-the-Geek/vamos/internal/testenv"
 	"github.com/opencontainers/go-digest"
+	"github.com/vamos-build/vamos/internal/testenv"
 )
 
 // newCacheWorld starts a scenario of the cache feature, from its background.

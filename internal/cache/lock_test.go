@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Topher-the-Geek/vamos/internal/testenv"
+	"github.com/vamos-build/vamos/internal/testenv"
 )
 
 // TestDirectoryLockInProcess checks that a prune is refused while another handle holds the directory open,

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Topher-the-Geek/vamos/internal/api"
+	"github.com/vamos-build/vamos/internal/api"
 )
 
 // TestJournalRecordSize checks that a record the journal writes is one it reads back: one as large as a record may

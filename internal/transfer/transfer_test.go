@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/Topher-the-Geek/vamos/internal/tracing"
+	"github.com/vamos-build/vamos/internal/tracing"
 
 	"github.com/opencontainers/go-digest"
 	"go.podman.io/image/v5/types"

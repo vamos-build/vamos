@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Topher-the-Geek/vamos/internal/testenv"
 	"github.com/opencontainers/go-digest"
 	"github.com/spf13/afero"
+	"github.com/vamos-build/vamos/internal/testenv"
 )
 
 // TestPutFileChanged checks that a file that changes while it is stored is described by the content stored,

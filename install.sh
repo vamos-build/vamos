@@ -12,7 +12,7 @@
 # A user other than root installs through sudo.
 set -eu
 
-repository=https://github.com/Topher-the-Geek/vamos
+repository=https://github.com/vamos-build/vamos
 # The default on the next line is latest in the repository; the release workflow sets it to the release's version
 # in the copy it attaches.
 version=${VAMOS_VERSION:-latest}

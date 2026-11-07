@@ -3,7 +3,7 @@ package features
 import (
 	"testing"
 
-	"github.com/Topher-the-Geek/vamos/internal/testenv"
+	"github.com/vamos-build/vamos/internal/testenv"
 )
 
 // newOutputWorld starts a scenario of the output feature, from its background: a project with a layer that adds a

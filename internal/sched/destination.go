@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/Topher-the-Geek/vamos/internal/api"
+	"github.com/vamos-build/vamos/internal/api"
 
 	"go.podman.io/image/v5/docker/reference"
 )

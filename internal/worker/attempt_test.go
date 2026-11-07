@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Topher-the-Geek/vamos/internal/remote"
-	"github.com/Topher-the-Geek/vamos/internal/run"
-	"github.com/Topher-the-Geek/vamos/internal/tracing"
+	"github.com/vamos-build/vamos/internal/remote"
+	"github.com/vamos-build/vamos/internal/run"
+	"github.com/vamos-build/vamos/internal/tracing"
 )
 
 // TestEstimateOffset checks the estimate one heartbeat gives of this clock's offset from the coordinator's,

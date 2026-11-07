@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Topher-the-Geek/vamos/internal/graph"
-	"github.com/Topher-the-Geek/vamos/internal/tracing"
+	"github.com/vamos-build/vamos/internal/graph"
+	"github.com/vamos-build/vamos/internal/tracing"
 
 	imgspecv1 "github.com/opencontainers/image-spec/specs-go/v1"
 )

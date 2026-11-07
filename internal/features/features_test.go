@@ -21,8 +21,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Topher-the-Geek/vamos/internal/testenv"
-	"github.com/Topher-the-Geek/vamos/internal/worker"
+	"github.com/vamos-build/vamos/internal/testenv"
+	"github.com/vamos-build/vamos/internal/worker"
 )
 
 func TestMain(m *testing.M) {

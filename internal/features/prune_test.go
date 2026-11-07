@@ -3,7 +3,7 @@ package features
 import (
 	"testing"
 
-	"github.com/Topher-the-Geek/vamos/internal/testenv"
+	"github.com/vamos-build/vamos/internal/testenv"
 )
 
 // newPruneWorld starts a scenario of the prune feature, from its background: stores of its own, since prune empties

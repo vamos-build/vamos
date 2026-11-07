@@ -122,7 +122,7 @@ since `kubectl exec` enters the container's other namespaces but not that one.
 
 ## Releases
 
-The chart's default image is `ghcr.io/topher-the-geek/vamos`,
+The chart's default image is `ghcr.io/vamos-build/vamos`,
 which the [release workflow](../../.github/workflows/release.yml) publishes as an index for `linux/amd64` and `linux/arm64`,
 since developers and clusters run both.
 It runs only when started by hand, never on a push or pull request,
@@ -177,5 +177,5 @@ it runs on the native runner because under emulation buildah can't re-execute it
 [Smoke check 11](smoke-checks.md) runs the same on the devcontainer's platform.
 The image is still published with the binary at `/usr/local/bin/vamos`, which a Dockerfile may copy out instead.
 The workflow pushes and releases with the job's `GITHUB_TOKEN`, so it needs no stored credential.
-Pull it locally with `docker pull ghcr.io/topher-the-geek/vamos:<tag>`;
+Pull it locally with `docker pull ghcr.io/vamos-build/vamos:<tag>`;
 a cluster needs the package to be public, or a `kubernetes.io/dockerconfigjson` Secret in `imagePullSecrets`.

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/Topher-the-Geek/vamos/internal/graph"
+	"github.com/vamos-build/vamos/internal/graph"
 
 	"go.starlark.net/starlark"
 	"go.starlark.net/syntax"

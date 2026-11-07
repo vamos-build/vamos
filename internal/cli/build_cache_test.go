@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Topher-the-Geek/vamos/internal/run"
 	"github.com/spf13/afero"
+	"github.com/vamos-build/vamos/internal/run"
 	"go.podman.io/storage"
 )
 

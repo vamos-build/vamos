@@ -11,8 +11,8 @@ import (
 	"testing"
 	"testing/iotest"
 
-	"github.com/Topher-the-Geek/vamos/internal/testenv"
 	"github.com/opencontainers/go-digest"
+	"github.com/vamos-build/vamos/internal/testenv"
 )
 
 // TestVerifier checks that the verifying stream accepts a blob's content however its reader delivers it,

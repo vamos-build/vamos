@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Topher-the-Geek/vamos/internal/api"
+	"github.com/vamos-build/vamos/internal/api"
 )
 
 // testPublish checks that a publish job uploads every image, then writes every tag in every repository,

@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Topher-the-Geek/vamos/internal/fileset"
-	"github.com/Topher-the-Geek/vamos/internal/graph"
+	"github.com/vamos-build/vamos/internal/fileset"
+	"github.com/vamos-build/vamos/internal/graph"
 
 	"github.com/containerd/platforms"
 	imgspecv1 "github.com/opencontainers/image-spec/specs-go/v1"

@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/Topher-the-Geek/vamos/internal/api"
-	"github.com/Topher-the-Geek/vamos/internal/tracing"
-	"github.com/Topher-the-Geek/vamos/internal/transfer"
+	"github.com/vamos-build/vamos/internal/api"
+	"github.com/vamos-build/vamos/internal/tracing"
+	"github.com/vamos-build/vamos/internal/transfer"
 
 	imagecopy "go.podman.io/image/v5/copy"
 	"go.podman.io/image/v5/docker/reference"

@@ -10,10 +10,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Topher-the-Geek/vamos/internal/testenv"
-	"github.com/Topher-the-Geek/vamos/internal/worker"
 	"github.com/google/go-containerregistry/pkg/registry"
 	"github.com/spf13/afero"
+	"github.com/vamos-build/vamos/internal/testenv"
+	"github.com/vamos-build/vamos/internal/worker"
 	"go.podman.io/storage"
 )
 

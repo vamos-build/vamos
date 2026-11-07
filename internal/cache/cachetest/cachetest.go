@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Topher-the-Geek/vamos/internal/cache"
+	"github.com/vamos-build/vamos/internal/cache"
 
 	"github.com/opencontainers/go-digest"
 	"github.com/spf13/afero"

@@ -5,9 +5,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/Topher-the-Geek/vamos/internal/cache"
-	"github.com/Topher-the-Geek/vamos/internal/cache/cachetest"
-	"github.com/Topher-the-Geek/vamos/internal/testenv"
+	"github.com/vamos-build/vamos/internal/cache"
+	"github.com/vamos-build/vamos/internal/cache/cachetest"
+	"github.com/vamos-build/vamos/internal/testenv"
 )
 
 // implementations returns a fixture for each implementation of the stores: the directory on disk, which a test

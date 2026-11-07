@@ -7,8 +7,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/Topher-the-Geek/vamos/internal/cli"
 	"github.com/spf13/afero"
+	"github.com/vamos-build/vamos/internal/cli"
 	"go.podman.io/buildah"
 	"go.podman.io/storage/pkg/unshare"
 )

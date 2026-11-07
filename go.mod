@@ -1,4 +1,4 @@
-module github.com/Topher-the-Geek/vamos
+module github.com/vamos-build/vamos
 
 go 1.26.9
 

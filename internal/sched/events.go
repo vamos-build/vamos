@@ -4,8 +4,8 @@ import (
 	"context"
 	"sync"
 
-	"github.com/Topher-the-Geek/vamos/internal/graph"
-	"github.com/Topher-the-Geek/vamos/internal/tracing"
+	"github.com/vamos-build/vamos/internal/graph"
+	"github.com/vamos-build/vamos/internal/tracing"
 )
 
 // Events receives a run's progress, within the executor: a job sends them on as api.Events.

@@ -3,7 +3,7 @@ package cache_test
 import (
 	"testing"
 
-	"github.com/Topher-the-Geek/vamos/internal/cache"
+	"github.com/vamos-build/vamos/internal/cache"
 )
 
 // TestDirectoryGenerationPersists checks that the generation a Directory counts its clears with survives closing

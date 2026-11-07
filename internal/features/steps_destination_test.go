@@ -13,8 +13,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Topher-the-Geek/vamos/internal/cache"
-	"github.com/Topher-the-Geek/vamos/internal/testenv"
+	"github.com/vamos-build/vamos/internal/cache"
+	"github.com/vamos-build/vamos/internal/testenv"
 )
 
 // Steps about the folder that a command sends to, and the files that export writes there.
