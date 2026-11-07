@@ -1,8 +1,17 @@
 ---
 name: code-review
-description: Review the most recent commit using independent reviewers for correctness, architecture, simplicity, adversarial cases, and testing.
+description: Review a commit range, a single commit, or a described set of commits (HEAD when none is given) using independent reviewers for correctness, architecture, simplicity, adversarial cases, and testing.
 ---
-Perform a comprehensive engineering review of the most recent commit (HEAD) using parallel subagents.
+Perform a comprehensive engineering review of the change named in the request, using parallel subagents.
+
+### The change under review
+The request names the change as a commit range such as `abc123..def456` (the commits after `abc123`, up to and including `def456`), a single commit, or a description such as "the last three commits" or "this branch since main". If it names nothing, review the most recent commit, `HEAD^..HEAD`.
+
+Resolve the request to a concrete range of full SHAs with git before spawning anyone. If the description is ambiguous, or the range holds no commits, say so and ask rather than guessing.
+
+Review the combined diff of the range (`git diff <from> <to>`) as one change. The commit messages in it (`git log <from>..<to>`) tell you the intent, but they are not evidence that the code is correct. Only committed code is under review. If the working tree has uncommitted changes, ignore them, but mention them in the report, because surrounding code read from the working tree may differ from what was committed.
+
+The request may add context, for example that the range fixes findings from an earlier review. Use that context to direct attention, and still judge the code on its own merits.
 
 Spawn **five independent review agents**, each with a distinct focus:
 
@@ -17,7 +26,7 @@ Spawn **five independent review agents**, each with a distinct focus:
 5. **Testing reviewer:** Evaluate existing tests, identify missing behavioral coverage, weak assertions, untested failure paths, and specific tests likely to uncover defects.
 
 ### Instructions for all agents
-- Independently examine the complete diff and relevant surrounding code.
+- Independently examine the complete diff of the resolved range and relevant surrounding code. Give each agent the range's SHAs and any context from the request.
 - Inspect callers, callees, and existing tests as necessary.
 - Do not limit the review to changed lines.
 - Be skeptical, thorough, and specific.
@@ -40,7 +49,7 @@ As the coordinating agent:
 6. Identify disagreements between reviewers.
 7. Report areas where review coverage was incomplete.
 
-Produce one consolidated review with:
+Produce one consolidated review headed `Reviewed <from>..<to>` with the resolved SHAs, followed by:
 - Critical and high-priority defects
 - Other correctness concerns
 - Design and architectural improvements
