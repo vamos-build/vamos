@@ -49,9 +49,7 @@ Needing a registry, a Docker daemon, emulation, root or a long table of examples
 a step provides what a scenario needs, or skips it where the host can't, as scenarios skip without buildah.
 Mistakes that loading a BUILD file catches are scenarios too, from a background that needs no buildah.
 
-Behavior tested before this rule is moving into scenarios, and [BDD-MIGRATION.md](../../BDD-MIGRATION.md)
-lists by category what is left.
-Until it moves, it is tested in Go tests that drive the real CLI using `vamos`
+A Go test that has one of those cases and needs a command drives the real CLI using `vamos`
 in [helpers_test.go](../../internal/cli/helpers_test.go).
 Use `.succeeds(t)` for a command that sends or saves an image, and `.ran(t)` for one that sends none,
 such as a build with no destination or a prune; check a failing command's `err` and output directly.

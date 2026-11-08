@@ -19,7 +19,8 @@ The [user guide](docs/user/README.md) links to the CLI, BUILD language, configur
 ## Development
 
 Use the repository's [devcontainer](.devcontainer/devcontainer.json) for build dependencies and container privileges.
-See the [contributor index](AGENTS.md) for development and validation instructions.
+See the [design documents](docs/design/README.md) for how vamos is built and why,
+and the [contributor index](AGENTS.md) for development and validation instructions.
 
 Build the CLI image from the repository root:
 

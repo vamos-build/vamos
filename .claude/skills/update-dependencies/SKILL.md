@@ -46,6 +46,7 @@ So the user invokes this skill the same way both times, and a session that was c
 | Registry image | `registry:3` in [remote/compose.yaml](../../../remote/compose.yaml) (twice), [remote/helm/vamos/values.yaml](../../../remote/helm/vamos/values.yaml) (twice) and smoke-checks.md |
 | glibc floor | Dockerfile's build stage stays on Debian **bookworm** (glibc 2.36), since `glibc_minimum=2.34` in [install.sh](../../../install.sh) and the tutorial promise Ubuntu 24.04; moving to trixie raises that floor, so it is a major and needs the user's yes |
 | OpenSpec | the CLI version in the devcontainer and `generatedBy` in the generated skills and commands |
+| mermaid-cli | `puppeteer@X` in the devcontainer's `npm install -g` is within the `peerDependencies` range of the `@mermaid-js/mermaid-cli` version beside it |
 | golangci-lint | the Go that built it, which `golangci-lint version` reports, is at least the `go` line of go.mod: a release built with an older Go can't load the packages |
 
 ## Phase 1: the devcontainer
@@ -79,6 +80,11 @@ The only file is [.devcontainer/Dockerfile](../../../.devcontainer/Dockerfile).
   newest from `gh release list -R <repo> --exclude-pre-releases`.
 - **govulncheck**: its `go install golang.org/x/vuln/cmd/govulncheck@vX`, newest from
   `go list -m -versions golang.org/x/vuln`, dated by `go list -m -json golang.org/x/vuln@<v>`.
+- **mermaid-cli** (`@mermaid-js/mermaid-cli`) and **puppeteer**: the versions in the `npm install -g` line,
+  newest from `npm view <pkg> time --json`; check puppeteer against
+  `npm view @mermaid-js/mermaid-cli@<v> peerDependencies`.
+  The browser is Fedora's `chromium-headless`, unpinned like the other packages; if a Fedora release moves
+  `headless_shell` out of `/usr/lib64/chromium-browser/`, update the path in the Dockerfile's Puppeteer config.
 - **Coding agents** (Claude, Codex, herdr, Antigravity) are installed from their `install.sh` scripts unpinned,
   and they update themselves. Nothing to edit; the rebuild refreshes them.
   Check only that each installer URL still answers: `curl -fsSI <url>`.
@@ -104,7 +110,8 @@ Skip this step if nothing needs an edit: step 3 checks the running container dir
     'cat /etc/fedora-release; go version; node --version; pnpm --version; python3 --version; uv --version;
      kind version; kubectl version --client; openspec --version; actionlint --version;
      go version -m /usr/local/bin/kubeconform | grep -m1 "^\smod"; trace_processor_shell --version;
-     golangci-lint version; govulncheck -version'
+     golangci-lint version; govulncheck -version; mmdc --version;
+     printf "flowchart LR\n  a --> b\n" | mmdc -q -i - -o /tmp/check.png && echo mmdc renders'
   docker rmi vamos-devcontainer-candidate
   ```
   It checks only this machine's architecture. The other architecture's sums were checked when you downloaded them.

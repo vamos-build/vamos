@@ -1,55 +1,35 @@
 # Architecture and phase boundaries
 
-vamos evaluates Starlark BUILD projects and builds OCI images through the buildah library.
-It does not generate Dockerfiles or invoke Docker/buildah executables to build targets.
-Docker is a destination, not the build engine.
+The design is explained, with diagrams, across three design documents:
+[docs/design/architecture.md](../../docs/design/architecture.md)
+for the load/run/finish phases and execution topologies,
+[docs/design/execution-protocol.md](../../docs/design/execution-protocol.md)
+for the client/executor boundary and jobs,
+and [docs/design/package-layering.md](../../docs/design/package-layering.md)
+for package dependencies and new steps.
+This file says what to check when changing them.
 
-| Phase | Placement | Owner | Boundary |
-| --- | --- | --- | --- |
-| Load | Client | [load](../../internal/load/doc.go) | Project and Starlark become a graph and cached sources |
-| Run | Executor | [run](../../internal/run/doc.go) | Cached graph and sources become images or task files |
-| Finish | Client or executor | [finish](../../internal/finish/doc.go) | Results reach the requested destination |
+Keep the boundaries:
 
-[cli](../../internal/cli/doc.go) coordinates the phases.
-The executor owns buildah, container storage and base image pulls.
-Push and publish normally run there; `--push-from=client` selects client credentials and registry settings.
-Finish may contact a registry for that client push or publication,
-so registry access is not exclusively an executor concern.
+- No Starlark values, open project files or in-memory loader state may cross from load to run;
+  the graph and the content store are the whole handoff.
+- A value in [api](../../internal/api/doc.go) must survive JSON and name no host resource;
+  `apitest.Contract` checks every `api.Executor`, and `apitest.JSON` proves values cross as JSON.
+- Only [transfer](../../internal/transfer/doc.go) is shared by the client and executor sides.
+- Dependency constraints are executable in [TestImportRules](../../internal/deps_test.go);
+  consult that test before adding imports, rather than inferring rules from directory placement.
+- Keep [main.go](../../main.go) limited to re-exec initialization, command execution and final error reporting;
+  implementation belongs under `internal/`, and the independent example modules are BUILD clients.
 
-The graph and the content store are the load/run data boundary.
-No Starlark values, open project files or in-memory loader state may cross it.
-What crosses between the client and the executor is defined in [api](../../internal/api/doc.go):
-plain data that survives JSON, and the `api.Executor` interface of jobs, which `run.Local` implements.
-The client submits a graph as a job, watches its events and reads its result;
-`apitest.Contract` checks every implementation, and `apitest.JSON` proves the values cross as JSON.
-This keeps execution independent of the project and leaves room for a remote executor;
-the executor that builds is `run.Local`; [sched](../../internal/sched/doc.go) schedules, shares and records
-actions free of buildah, so that a coordinator can use it, and [remote](../../internal/remote/doc.go) carries
-`api.Executor` and `cache.ContentStore` over HTTP, so that `vamos coordinator` serves one to clients that give
-`--coordinator`;
-see [remote-environment.md](remote-environment.md) for the environment it runs in.
-Push, publish and export are jobs too.
-A push sends an image from the executor's store, or on a worker from the image's location,
-with the executor's credentials;
-a publication uploads each image by digest the same way, and writes every tag only once every upload has succeeded,
-as one job; on a coordinator only workers contact a destination registry, never the coordinator itself.
-A local executor's export publishes an image's blobs to the content store, from which the client's finish delivers
-them; a coordinator exports nothing, since its workers leave every image at a registry location that the client
-reads directly.
-Only [transfer](../../internal/transfer/doc.go), which copies images with a trace, is shared by both sides.
-Dependency constraints are executable in [TestImportRules](../../internal/deps_test.go);
-consult that test before adding imports.
-
-The two notions of package differ: a BUILD package is a workspace directory addressed by `//dir:name`;
-a Go package implements one of these subsystems.
 Target identity before execution includes configuration.
 See `confLabel` in [config.go](../../internal/load/config.go) for the loader's identity model
 and [graph.doc.go](../../internal/graph/doc.go) for the serialized execution model.
 
-Keep [main.go](../../main.go) limited to re-exec initialization, command execution and final error reporting.
-Implementation belongs under `internal/`; the independent example modules are BUILD clients.
-
 For a new build step, change Starlark construction/lowering in [load/step.go](../../internal/load/step.go),
 the encoded form and validation in [graph](../../internal/graph/doc.go),
 the keyed form in [sched](../../internal/sched/doc.go), and execution in [run](../../internal/run/doc.go).
-Graph compatibility and cache compatibility have separate version owners: `graph.Version` and `sched.ActionVersion`.
+Raise `graph.Version` when graph meaning changes and `sched.ActionVersion` when what a key covers,
+or how a target is built, changes; they are separate compatibility boundaries.
+
+When a change alters a design decision, update the page in [docs/design](../../docs/design/README.md) that explains
+it, its diagrams included, in the same change.

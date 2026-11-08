@@ -1,111 +1,38 @@
 # Storage, identity and reuse
 
-Three stores participate in a build.
-The content store holds graph blobs, source/output trees and logs, and the record store holds action results
-and tag records; both are interfaces in [cache](../../internal/cache/doc.go), with `cache.Directory` on disk
-and `cache.Memory` for tests.
-The executor's container store holds images.
-`run.CacheDir` locates the directory beside the executor's container store (normally `/var/lib/containers/vamos`),
-so persisting `/var/lib/containers` keeps both; nothing outside run and cache names that directory,
-and a client gets its content store from the executor it builds with.
-The project's lockfile, `vamos.lock`, which [load](../../internal/load/doc.go) reads, is the source of truth for
-a pinned pull: the digest that its tag is pinned to, committed with the project. The record store keeps, for each pin,
-a record under the image's name and that digest, `sched.PinName`, of the manifest and each platform's image, which
-never goes stale, since a digest names one manifest forever; a tag's record, under the tag, is what an unpinned pull,
-under `--pins=resolve`, resolved to, which differs between machines and caches. A pinned pull never reads or writes
-its tag's record.
-Record metadata alone cannot prove an image or tree is still available.
-Content is verified as it is read: a task whose cached files are found corrupt runs again,
-a glob whose files are corrupt fails the build, since only the client can capture them again,
-and a result whose log is corrupt is a miss; `TestCache_ResultsThatCantBeUsedAreBuiltAgain` covers each.
+The design is explained, with diagrams, in [docs/design/storage.md](../../docs/design/storage.md):
+the three stores, the identities, action keys, image naming and locations, pins and tags, epochs and pruning.
+This file says what to review when changing it and which tests hold it.
 
-Do not conflate these identities:
+## Where to look
 
-| Identity | Owner | Used for |
-| --- | --- | --- |
-| Configured target | `load.confLabel` | Deduplicating dependency configurations |
-| Graph blob | `graph.Encode`, `api.GraphRequest.Graph` | Transferring one build plan |
-| Action key | `sched.Action`, `Scheduler.inputs` | Reusing equivalent target work |
-| File tree | `cache.Tree` | Reusing file content and metadata independently of times |
-| Image ID / manifest digest | `api.Result`, `cache.TagRecord` | Stored image content / registry resolution |
+| Change | Review together |
+| --- | --- |
+| Execution semantics or what a key covers | [action.go](../../internal/sched/action.go), `Scheduler.inputs` and `Scheduler.lookup` in [scheduler.go](../../internal/sched/scheduler.go), `localRunner.Check` in [runner.go](../../internal/run/runner.go); raise `sched.ActionVersion` |
+| Image naming | `CacheRepository`; `imageIdentity`, `locateImage`, `cacheName` and `nameImage` in [pull.go](../../internal/run/pull.go) |
+| Tag resolution and freshness | `cache.TagRecord`, `cache.TagInstance`, `puller` in [pull.go](../../internal/run/pull.go), `Scheduler.resolve` |
+| Reproducible timestamps | `Scheduler.epoch`, `commitLayer` and `sched.Step.Epoch` |
+| Pruning policy | `Local.prune` in run, `Directory.Prune`, the stores' `ClearContent` and `ClearResults`, `pool.Report`, `coord.Registry.ClearRepository` |
+| Record writes | `sched.Sharing`; the runner returns a `sched.Report` and the puller the tag record to write |
 
-An image's ID is the digest of its config, which a push and a pull preserve; `TestImageIdentityRoundTrip` holds
-it portable.
-Run locates every image, built or pulled, through its name in the cache repository, `CacheRepository:<image ID>`,
-so the container store's own IDs stay inside run; see `imageIdentity`, `locateImage`, `cacheName` and `nameImage`
-in [pull.go](../../internal/run/pull.go).
-Anything that changes the store can move a name, so `locateImage` checks that the image a name names has that ID,
-and that its layers are those its config lists, then uses it by the store's ID it found;
-a cached result whose name doesn't check out is a miss.
-The layer check refuses images that storage.conf's `insecure_allow_unpredictable_image_contents` lets a partial
-pull keep unverified, whose config wouldn't identify their files;
-the cache feature's `TestCache_CachedLayersAreFoundByTheirImageIDs` holds both checks,
-and store IDs that differ from image IDs.
-A resolve validates what a tag resolved to before anything uses it: the store's image is the manifest chosen,
-and it is for the platform asked.
-Each layer's and task's result records a `cache.Provenance`, the executor's platform, isolation, capabilities,
-version and whether its commands ran emulated, which is no part of the action key;
-a resolve's result isn't published, so it records none.
-A result names its image by ID and lists its `cache.Location`s separately: the store's name locally,
-for a pulled base the registry reference by digest too, at the pull-through cache when the coordinator maps its
-registry to one, and for a layer built on a worker its reference in the cache repository, tagged by image ID,
-which the worker pushes before reporting; `localRunner.materialize` fetches a missing image from a registry location,
-and `TestMaterializeFromRegistry` holds that. The client delivers from registry locations only over a coordinator.
-Only `sched.Sharing` writes the record store, once an attempt has published its artifact;
-the runner returns a `sched.Report` and the puller the tag record to write, so that no record names an artifact that
-isn't there, and the latest write wins.
-Action identity is deliberately independent of graph position and target naming.
-Changes to execution semantics must review [action.go](../../internal/sched/action.go),
-`Scheduler.inputs` and `Scheduler.lookup` in [scheduler.go](../../internal/sched/scheduler.go),
-and `localRunner.Check` in [runner.go](../../internal/run/runner.go).
-`sched.ActionVersion` invalidates results built under old semantics;
-`graph.Version` addresses a different compatibility boundary.
-A `run()` step's secrets are part of its key by ID and by the variable or file the step gets them as, never by value
-nor by where `--secret` reads them,
-so a rotated secret reuses results, and their replayed output is from the run that made them.
-Values travel only in `api.GraphRequest.Secrets` and `sched.Request.Secrets`, which are never encoded,
-so no record, trace, graph or transport holds one, and `--secret` is refused with `--coordinator`;
-the runner writes each value to a file only its process reads, for buildah's secret mount, and removes it after the
-step. The secrets feature, [secrets_test.go](../../internal/features/secrets_test.go),
-checks the steps, the image, the trace and reuse,
-and `TestRequestSecretsNotEncoded` the encoding.
+Only run and cache name the cache directory, `run.CacheDir`; a client gets its content store from its executor.
+`graph.Version` addresses a different compatibility boundary from `sched.ActionVersion`.
+Do not let a secret value reach anything encoded: values travel only in `api.GraphRequest.Secrets`
+and `sched.Request.Secrets`.
 
-Reproducible layer metadata spans both stores: trees omit times, but action results carry an epoch.
-Review `Scheduler.epoch`, `commitLayer` and `sched.Step.Epoch` together.
-`--timestamp` controls newly executed work; it does not invalidate a cached target.
-The timestamp rules of the cache feature, `TestCache_TimestampsComeFromBasesAndTasks`,
-`TestCache_AddedTasksTimestampIsAnInput` and `TestCache_TimestampIsAMinimumForTargetsThatRun`
-in [cache_test.go](../../internal/features/cache_test.go), guard this distinction.
+## Tests that hold the design
 
-Tag freshness is separate from action reuse.
-`cache.TagRecord` and `puller` in [pull.go](../../internal/run/pull.go) own resolution across builds,
-and `Scheduler.resolve` pins each tag's index within a job, so every platform's image comes from one index;
-`--rebuild` is not a blanket rebuild of every dependency.
-Each platform's `cache.TagInstance` records the image's ID, platform, epoch and locations once pulled,
-so `Scheduler.resolve` serves a cached pull from the record and the checker alone, asking the runner nothing;
-only a missing or incomplete instance, or an image the checker can't find, reaches the puller,
-which is given the record in its request and reads none itself;
-`--rebuild` resolves no pull again, since `vamos update` refreshes pins instead.
-`TestSchedulerCachedResolve` and `TestTagRecordLegacyInstances` hold this,
-and `TestPull_ResolvedTagsAreReused` still requires that nothing reaches a registry
-once the record and images are cached.
-Pruning removes action results, blobs and cached layer images while retaining tag records and pulled bases,
-which lose their cache-repository name until the next resolve gives it back.
-A coordinator's prune has no lock over its clients, so it fences by generation: `RecordStore.Generation` counts
-the clears, `api.Capabilities.Generation` reports one more than that, so that zero still means unchecked,
-the client reads it before capturing sources and sends it in `api.GraphRequest.Generation`,
-and a build of another generation fails with a message to run the command again;
-the build checks it once admitted, when no prune can start, so that none slips between the check and the start.
-A report from an attempt that started in an earlier generation is refused too (`pool.Report`).
-The coordinator's prune also deletes every tag of the cache repository, through `coord.Registry.ClearRepository`,
-after the blobs and the records, so that a failure there leaves only images nothing names; tag records and the
-pull-through cache are kept, as locally.
-The blobs go before the records, since clearing the records advances the generation: a client that reads the new
-generation then uploads to a content store that nothing clears any more.
-`TestGenerationFencing`, `TestPruneOrder` and `TestPruneClearsRepository` hold this.
-Consult `Local.prune` in run and the stores' `ClearContent` and `ClearResults` before changing this policy,
-and `CacheRepository` before changing image naming.
-Checking local images by manifest digest before fetching prevents unnecessary registry requests.
+| Rule | Tests |
+| --- | --- |
+| Unusable cached content: corrupt task files rerun, corrupt globs fail, corrupt logs miss | `TestCache_ResultsThatCantBeUsedAreBuiltAgain` |
+| Image IDs survive a push and pull | `TestImageIdentityRoundTrip` |
+| Names are checked against image IDs and layers, and store IDs differ from image IDs | `TestCache_CachedLayersAreFoundByTheirImageIDs` |
+| A missing image is fetched from a registry location | `TestMaterializeFromRegistry` |
+| Secrets in steps, image, trace and reuse | [secrets_test.go](../../internal/features/secrets_test.go), and `TestRequestSecretsNotEncoded` for the encoding |
+| Timestamps: from bases and tasks, task epochs as inputs, `--timestamp` as a minimum | `TestCache_TimestampsComeFromBasesAndTasks`, `TestCache_AddedTasksTimestampIsAnInput`, `TestCache_TimestampIsAMinimumForTargetsThatRun` in [cache_test.go](../../internal/features/cache_test.go) |
+| Cached resolves ask the runner nothing; legacy instances decode | `TestSchedulerCachedResolve`, `TestTagRecordLegacyInstances` |
+| Nothing reaches a registry once the record and images are cached | `TestPull_ResolvedTagsAreReused` |
+| Generation fencing, prune order, cache repository cleared | `TestGenerationFencing`, `TestPruneOrder`, `TestPruneClearsRepository` |
 
 Pruning excludes every other use of the directory through its lock; see [concurrency-model.md](concurrency-model.md).
 Shared-cache test isolation rules are in [testing.md](testing.md).

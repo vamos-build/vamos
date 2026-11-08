@@ -11,13 +11,16 @@ Read the routes relevant to the change before editing.
 | Manual build, destination, example and release checks | [.agents/kb/smoke-checks.md](.agents/kb/smoke-checks.md) |
 | Documentation changes and `doc.go` template | [.agents/kb/documentation.md](.agents/kb/documentation.md) |
 | Documentation site, `docs/site/` | [.agents/kb/documentation.md](.agents/kb/documentation.md) |
-| Phase boundaries, imports, new steps | [.agents/kb/architecture.md](.agents/kb/architecture.md) |
-| Container lifecycle, platforms, delivery | [.agents/kb/container-builds.md](.agents/kb/container-builds.md) |
-| Cache identity, epochs, pruning | [.agents/kb/storage.md](.agents/kb/storage.md) |
-| Concurrency, ownership, trace transport | [.agents/kb/concurrency-model.md](.agents/kb/concurrency-model.md) |
-| Remote execution environment, `remote/`, its Helm chart and published image | [.agents/kb/remote-environment.md](.agents/kb/remote-environment.md) |
+| Design: components, boundaries, interactions and why, `docs/design/` | [docs/design/README.md](docs/design/README.md), [.agents/kb/documentation.md](.agents/kb/documentation.md#design-documents) |
+| Phase boundaries and lifecycle | [docs/design/architecture.md](docs/design/architecture.md), [.agents/kb/architecture.md](.agents/kb/architecture.md) |
+| Client/executor protocol and job execution | [docs/design/execution-protocol.md](docs/design/execution-protocol.md), [.agents/kb/architecture.md](.agents/kb/architecture.md) |
+| Package dependencies, imports and new steps | [docs/design/package-layering.md](docs/design/package-layering.md), [.agents/kb/architecture.md](.agents/kb/architecture.md) |
+| Container lifecycle, platforms, delivery | [docs/design/container-builds.md](docs/design/container-builds.md), [.agents/kb/container-builds.md](.agents/kb/container-builds.md) |
+| Cache identity, epochs, pruning | [docs/design/storage.md](docs/design/storage.md), [.agents/kb/storage.md](.agents/kb/storage.md) |
+| Concurrency, ownership, trace transport | [docs/design/scheduling.md](docs/design/scheduling.md), [.agents/kb/concurrency-model.md](.agents/kb/concurrency-model.md) |
+| Remote execution environment, `remote/`, its Helm chart and published image | [docs/design/remote-execution.md](docs/design/remote-execution.md), [.agents/kb/remote-environment.md](.agents/kb/remote-environment.md) |
 | Updating dependencies, lockfiles, image tags and the devcontainer's tools | [.claude/skills/update-dependencies/SKILL.md](.claude/skills/update-dependencies/SKILL.md) |
-| Releases, `release.yml`, `install.sh` | [.agents/kb/remote-environment.md](.agents/kb/remote-environment.md#releases) |
+| Releases, `release.yml`, `install.sh` | [docs/design/releases.md](docs/design/releases.md), [.agents/kb/remote-environment.md](.agents/kb/remote-environment.md#releases) |
 | Root startup / `main.go` | [doc.go](doc.go) |
 | `internal/api/` | [internal/api/doc.go](internal/api/doc.go) |
 | `internal/cli/` | [internal/cli/doc.go](internal/cli/doc.go) |
