@@ -5,6 +5,7 @@
   "name": "vamos-docs",
   "main": "worker.mjs",
   "compatibility_date": "2026-10-19",
+  "previews": {},
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS",
