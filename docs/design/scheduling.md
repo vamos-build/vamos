@@ -9,8 +9,10 @@ and submits un-cached actions to a `Runner` implementation.
 Concurrent jobs requesting identical actions share in-flight execution attempts,
 and the runner's completed outputs are written to the record store.
 `sched` imports neither buildah, container storage, nor Starlark.
-This decoupling ensures that a coordinator, which coordinates work without executing actions directly,
-never links container runtime or evaluation libraries.
+This decoupling keeps the `sched` and `coord` packages, which coordinate work without executing actions directly,
+free of container runtime and evaluation dependencies.
+It is a package boundary, not a binary one: the single `vamos` executable serves every subcommand,
+including `coordinator`, and still links those libraries through the CLI.
 
 ## The scheduler and backend interfaces
 

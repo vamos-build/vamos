@@ -262,13 +262,18 @@ The coordinator dispatches work using balanced scheduling priorities:
 2. Older actions within a build take priority over newer ones.
 
 Platform matching guarantees native execution:
-- Actions execute on their native architecture if registered workers support it.
-- If no native workers exist, actions execute on the build's execution platform under emulation.
+- A build treats a platform as native if it was offered when the build was submitted,
+  either by configuration (`--offer`) or by a registered worker, or if one is offered later as the build reaches it.
+  Actions for a native platform run only on workers of that platform,
+  and wait for one if none is currently registered.
+- Actions for a platform the build doesn't treat as native run on the build's execution platform under emulation.
 - Emulated actions are assigned exclusively to workers of the execution platform that advertise an emulator
   for the target architecture.
-- Once a build begins running actions natively on a given platform,
-  the coordinator records that platform in the build's journal;
-  even across coordinator restarts, actions for that target will never silently fall back to emulation.
+- A platform, once native for a build, stays native for it: the coordinator records it in the build's journal
+  before dispatching work to it, so that after a coordinator restart its actions don't silently fall back to emulation.
+  The record is best-effort: if writing it fails, the coordinator logs the failure and still runs the work natively,
+  and the platform is carried by the build's next successful record.
+  A restart before that record lands may emulate or refuse the build's remaining work for that platform.
 
 If all workers for a required platform disconnect, the build pauses, emits a diagnostic waiting event,
 and remains paused until matching workers reconnect or the client cancels the build.

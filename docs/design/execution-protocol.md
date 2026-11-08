@@ -162,7 +162,9 @@ Push, publish, and export operations are modeled as jobs so they execute where c
   to a destination registry using executor credentials.
 - A **publication job** executes a two-phase delivery: it uploads all images by digest first,
   and writes registry tags only after every upload succeeds.
-  On a coordinator, workers handle all registry interaction; the coordinator process itself never touches registries.
+  On a coordinator, workers handle all destination-registry interaction with their own credentials;
+  the coordinator never contacts a destination registry.
+  It does contact the shared cache registry, to validate cache hits and to clear tags when pruning.
   Detailed publication mechanics are described in [Container builds and delivery](container-builds.md#publications).
 - An **export job** publishes an image's layers and manifest as blobs into the content store,
   enabling client-side delivery to load the image into a local Docker daemon or write an OCI archive.
