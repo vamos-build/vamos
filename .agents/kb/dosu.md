@@ -1,0 +1,25 @@
+# Shared knowledge in Dosu
+
+Dosu's MCP server gives agents the team's shared knowledge.
+The devcontainer installs the `dosu` CLI.
+Setup signs you in, which is interactive, so after building the container run it yourself in a terminal to connect your account and agents:
+
+```sh
+(cd /root && dosu setup)
+```
+
+Running it from `/root` keeps it from modifying the repository's `AGENTS.md`.
+`dosu status` shows the current connection.
+The instructions below are Dosu's own, kept between the markers that `dosu setup` writes, so a newer version can replace them.
+
+<!-- dosu:mcp:start v2 -->
+The team you are assisting maintains shared knowledge in Dosu: consult it to build on prior work, and contribute durable knowledge so future teammates and agents do not have to rediscover it. Always use only tools currently listed by the server.
+
+When `read_knowledge` is listed, call it before non-trivial code or documentation work involving architecture, conventions, prior decisions, gotchas, incidents, ownership, or branch history. **If unsure whether relevant context exists, read first.** Pass `repo` and `branch` when available. Skip generic questions, trivial or self-contained edits, and context already injected by Dosu.
+
+When `write_knowledge` is listed, use it after the task for durable, non-obvious knowledge that future work would otherwise have to rediscover. Do not save task or PR summaries, progress, test results, obvious facts, speculation, duplicates, or sensitive data. **If nothing durable was learned, do not write.**
+
+Use `review_knowledge` only when the user asks to inspect or manage pending knowledge; for a review list, review queue, pending reviews, or what needs approval, call it with action="list". Preview one item at a time and require explicit confirmation before making changes.
+
+When `read_knowledge` or `write_knowledge` returned a `receipt_item_id` this turn, call `finalize_session_knowledge` exactly once at the end of the turn — after completing the task, immediately before your final reply — passing all receipt_item_ids from this turn. Avoid calling it when the current turn produced no receipt_item_id (it will succeed but render an empty state), and never call it more than once per turn.
+<!-- dosu:mcp:end -->

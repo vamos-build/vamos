@@ -89,16 +89,17 @@ RUN GOBIN=/usr/local/bin GOMODCACHE=/tmp/gomodcache GOCACHE=/tmp/gocache \
       go install golang.org/x/vuln/cmd/govulncheck@v1.9.0 \
  && rm -rf /tmp/gomodcache /tmp/gocache
 
-# Coding agents, which update themselves in ~/.local/bin.
+# Coding agents, which update themselves in ~/.local/bin, and the Dosu CLI, which npm installs globally.
 # Their installers append PATH lines to .bashrc or .bash_profile; restore both, and set PATH once instead,
 # for every process rather than only interactive shells.
 # Fedora's .bashrc adds ~/.local/bin and ~/bin unless PATH already starts with them, so it starts with both.
 ENV PATH=/root/.local/bin:/root/bin:$PATH
 RUN cp /root/.bashrc /root/.bash_profile /tmp/ \
+ && curl -LfsS https://antigravity.google/cli/install.sh | bash \
  && curl -LfsS https://claude.ai/install.sh | bash \
  && curl -LfsS https://chatgpt.com/codex/install.sh | bash \
  && curl -LfsS https://herdr.dev/install.sh | bash \
- && curl -LfsS https://antigravity.google/cli/install.sh | bash \
+ && curl -fsSL https://cli.dosu.dev/install | sh \
  && mv /tmp/.bashrc /tmp/.bash_profile /root/
 
 # Run build steps with chroot isolation, so no OCI runtime is needed.
