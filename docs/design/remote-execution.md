@@ -264,9 +264,12 @@ The coordinator dispatches work using balanced scheduling priorities:
 Platform matching guarantees native execution:
 - A build treats a platform as native if it was offered when the build was submitted,
   either by configuration (`--offer`) or by a registered worker, or if one is offered later as the build reaches it.
-  Actions for a native platform run only on workers of that platform,
+  Command-running actions for a native platform run only on workers of that platform,
   and wait for one if none is currently registered.
-- Actions for a platform the build doesn't treat as native run on the build's execution platform under emulation.
+- Command-running actions for a platform the build doesn't treat as native
+  run on the build's execution platform under emulation.
+- An action that runs no command, such as an add-only layer, prefers the same platform as above,
+  but may run on any worker while none of that preferred platform is registered.
 - Emulated actions are assigned exclusively to workers of the execution platform that advertise an emulator
   for the target architecture.
 - A platform, once native for a build, stays native for it: the coordinator records it in the build's journal

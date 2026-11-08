@@ -90,10 +90,13 @@ The following diagram shows how the scheduler assigns an action to a native or e
 flowchart TD
     action(["action for an image of platform P"])
     action --> native{"Executor runs P natively?<br/>(Options.Native, Options.Offered)"}
-    native -- "yes" --> onP["runs on P"]
-    native -- "no" --> onExec["runs on the execution platform"]
+    native -- "yes" --> onP["prefers P"]
+    native -- "no" --> onExec["prefers the execution platform"]
+    onP --> cmdsP{"Runs commands?"}
     onExec --> cmds{"Runs commands?"}
-    cmds -- "no" --> any["may run on any worker<br/>while none of P is registered"]
+    cmdsP -- "no" --> any["runs on the preferred platform,<br/>or on any worker while none of it is registered"]
+    cmds -- "no" --> any
+    cmdsP -- "yes" --> runP["runs natively on P"]
     cmds -- "yes" --> emu["commands run emulated"]
     emu --> permit{"Emulation required<br/>to be permitted?"}
     permit -- "no (local executor today)" --> runemu["runs, provenance records emulation"]
