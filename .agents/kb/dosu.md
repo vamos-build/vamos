@@ -2,7 +2,8 @@
 
 Dosu's MCP server gives agents the team's shared knowledge.
 The devcontainer installs the `dosu` CLI.
-Setup signs you in, which is interactive, so after building the container run it yourself in a terminal to connect your account and agents:
+Setup signs you in, which is interactive,
+so after building the container run it yourself in a terminal to connect your account and agents:
 
 ```sh
 (cd /root && dosu setup)
@@ -10,7 +11,8 @@ Setup signs you in, which is interactive, so after building the container run it
 
 Running it from `/root` keeps it from modifying the repository's `AGENTS.md`.
 `dosu status` shows the current connection.
-The instructions below are Dosu's own, kept between the markers that `dosu setup` writes, so a newer version can replace them.
+The instructions below are Dosu's own, kept between the markers that `dosu setup` writes,
+so a newer version can replace them.
 
 <!-- dosu:mcp:start v2 -->
 The team you are assisting maintains shared knowledge in Dosu: consult it to build on prior work, and contribute durable knowledge so future teammates and agents do not have to rediscover it. Always use only tools currently listed by the server.

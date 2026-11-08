@@ -1,9 +1,9 @@
 # Container build and delivery lifecycle
 
-The load/run/finish boundary is defined in [architecture.md](architecture.md).
-A build first configures all reachable targets and stores their source trees,
-then resolves pulls before running targets in dependency order.
-It does not validate unrelated workspace packages.
+The design is explained, with diagrams, in [docs/design/container-builds.md](../../docs/design/container-builds.md):
+the build lifecycle, result kinds, the execution and run platforms, emulation and binfmt_misc, and delivery.
+This file says where to change it and which tests guard it.
+
 Source bytes used by execution must be the cached bytes used to identify its inputs:
 never optimize an `add()` by reading the live project again.
 Regression coverage is the scenario of every target that adds a glob getting its files as they were first read,
@@ -11,75 +11,28 @@ in `TestGlob_ReadBeforeExecution` in [glob_test.go](../../internal/features/glob
 and that of a file edited while the build reads it, cached under the key of what was read,
 in `TestCache_ChangedInputsRunAgain` in [cache_test.go](../../internal/features/cache_test.go).
 
-The result kinds have different lifetimes: a layer produces an image in the executor's container store;
-a task discards its container and may retain a tree of files; an index assembles images for several platforms.
-See [run.doc.go](../../internal/run/doc.go) for execution ownership and [storage.md](storage.md) for reuse.
+## Platforms
 
-Platform selection spans configuration, execution and delivery.
-`EXEC_PLATFORM` describes the executor, whereas a target's platform describes its requested output.
-`workspace.edge` and `workspace.imageRoot` in [load](../../internal/load/doc.go) own propagation
-and destination selection.
-Indexes are command-line roots, or a publication's;
-`build`, `push` and `publish` keep the index,
-while `load` and `save` choose a manifest before configuring its dependencies.
-This avoids building images a single-image destination cannot consume.
+- Propagation and destination selection: `workspace.edge` and `workspace.imageRoot` in [load](../../internal/load/doc.go).
+- Choice of execution platform: `invocation.execPlatform` in [cli](../../internal/cli/doc.go).
+- Where an action runs: `Scheduler.runPlatform`, `sched.Options.Native`, `sched.Options.Offered`.
+- Emulation permission: `sched.Scheduler.emulationRefused`, `sched.Options.OptIn`, `api.GraphRequest.Emulate`.
+- Platform checks, library contexts and diagnostics: `setPlatform`, `forPlatform` and `emulatorHint`
+  in [run](../../internal/run/doc.go);
+  the buildah error-reporting limitation is documented beside `emulatorHint` in [runner.go](../../internal/run/runner.go).
+- Emulators a worker offers: `emulatedPlatforms` in [worker](../../internal/worker/doc.go);
+  which worker gets emulated work: `pool.suits` in [coord](../../internal/coord/doc.go).
 
-Cross-compilation and emulated execution are separate choices.
-See the native compiler configuration in [golang-cli/BUILD](../../examples/golang-cli/BUILD).
-Foreign executable steps depend on the host kernel's binfmt_misc handlers;
-`setPlatform`, `forPlatform` and `emulatorHint` in [run](../../internal/run/doc.go) own platform checks,
-library contexts and diagnostics.
-`sched.Scheduler.emulationRefused` refuses a target whose commands would run emulated
-when `sched.Options.OptIn` requires the build's permission, `api.GraphRequest.Emulate`,
-which the hidden `--emulate` flag gives;
-the local executor doesn't require it yet, so local builds emulate as they always have, and the result's
-provenance records that they did.
-The execution platform is chosen by `invocation.execPlatform` among `api.Capabilities.Platforms`:
-`--exec-platform`, else the coordinator's `api.Capabilities.ExecPlatform`, which `--default-exec-platform` sets,
-else this machine's, else the only one offered.
-It is the graph's one platform: it fixes what `EXEC_PLATFORM` configures, and with it cache keys,
-so a coordinator without a default gives clients of different architectures different keys.
-Where each action runs is decided later, by `Scheduler.runPlatform`: its image's platform when the executor offers it
-natively, as `sched.Options.Native` and `sched.Options.Offered` say, and otherwise the execution platform;
-a coordinator offers its configured and registered platforms, and records with each build those it used,
-so a mixed pool builds every platform natively, while a local executor offers its own alone.
-That choice is execution metadata, `sched.Request.RunPlatform`, outside the key, like emulation;
-for an action that runs no command it is a preference, which the pool drops while no worker of it is registered.
-For Docker Desktop's bundled QEMU support,
-see its [emulation guide](https://docs.docker.com/build/building/multi-platform/#qemu).
-On Apple silicon, Rosetta for amd64 is an option tied to the selected VM backend;
-see [Desktop settings](https://docs.docker.com/desktop/settings-and-maintenance/settings/#general).
-The buildah error-reporting limitation is documented beside `emulatorHint` in [runner.go](../../internal/run/runner.go).
-
-The handlers belong to the kernel, not to a container, and need no setup inside one.
-Docker Desktop's, and those `tonistiigi/binfmt` registers, have the `F` flag,
-so their interpreter is opened when they are registered and runs a foreign program in any container,
-whether or not `/proc/sys/fs/binfmt_misc` is mounted there.
-Mounting that filesystem only shows the handlers' control files.
-Only the worker reads them, in `emulatedPlatforms` in [worker](../../internal/worker/doc.go),
-to report the qemu emulators it offers,
-and the coordinator gives emulated work only to a worker that reports the emulator,
-in `pool.suits` in [coord](../../internal/coord/doc.go).
-So a worker in a container where it isn't mounted could run emulated work, but reports no emulators and gets none;
-the worker containers in [remote/](../../remote/) don't mount it yet.
 An empty or unmounted `/proc/sys/fs/binfmt_misc`, as in the devcontainer, does not mean that nothing emulates,
 and mounting it fixes no `exec format error`:
 to learn whether a platform is emulated, run one of its programs, as the scenarios behind `GivenThisMachineEmulates` do.
-A handler without `F` opens its interpreter by path in the container that runs the program,
-so that interpreter must exist there.
 
-Delivery is a separate commit from caching a successful target.
-A failed build must publish no requested file output, while previously successful dependency results remain reusable.
+## Delivery
+
 For file destinations, inspect `Save`, `Export`, `install`
 and `swap` in [finish](../../internal/finish/doc.go) before changing preflight or installation.
-Preflight checks improve diagnostics but cannot authorize deleting files that appear while a build runs.
-The replacement fallback may briefly leave the destination absent; cleanup failure after installation is a warning.
-A publication delivers in two phases, so that a failure changes no tag before every image is in place:
-it uploads every image to its repository by digest, with no tag, and only once every upload has succeeded writes
-every tag, putting each the manifest uploaded and reading it back; a failure while tagging still attempts every tag
-and reports which were written.
-The executor's job, `run.Local`'s or a coordinator's on its workers, and the client's `finish.Publish` share
-`transfer.Upload` and `transfer.Tag`, which own those writes.
+Publications share `transfer.Upload` and `transfer.Tag` between the executor's job, `run.Local`'s or a coordinator's
+on its workers, and the client's `finish.Publish`.
 
 Transport details belong beside their owners:
 `Image.open`, `copyTo` and `LoadDocker` in [finish.go](../../internal/finish/finish.go), and `Publish` in
@@ -96,6 +49,8 @@ which both sides copy with; and the registry settings,
 Construct image references with transport packages;
 preserve the system signature policy
 and the distinction between an unset TLS override and explicit `--tls-verify=false`.
+
+## Host and container paths
 
 For host/container path isolation, start with `cache.Checkout`,
 `fileset.Walk`, `targetState.addSource` and `collectOutput`.

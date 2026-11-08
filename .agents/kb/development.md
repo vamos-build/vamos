@@ -5,7 +5,8 @@ Image builds need root, a privileged container, `BUILDAH_ISOLATION=chroot`
 and a volume for `/var/lib/containers`; no OCI runtime is installed.
 The Docker socket is mounted for destination checks.
 `run` steps for another architecture use the emulators the Docker host's kernel has registered,
-with nothing to set up in the devcontainer, as [container-builds.md](container-builds.md) explains.
+with nothing to set up in the devcontainer, as [docs/design/container-builds.md](../../docs/design/container-builds.md#emulation-and-binfmt_misc)
+explains.
 Docker Desktop registers them itself;
 a Linux host without them needs them registered on the host,
 such as with `docker run --privileged --rm tonistiigi/binfmt --install all`,
@@ -13,7 +14,7 @@ which lasts until the host reboots.
 See [testing.md](testing.md) for required validation.
 
 Use gofmt and keep lines within 120 columns, counting a tab as four; `scripts/check` enforces both.
-For prose, follow the semantic-break and technical-item exceptions in [documentation.md](documentation.md).
+For prose, use the semantic line breaks in [documentation.md](documentation.md), and its exceptions to wrapping.
 Match the existing comment density: document functions and add short explanations for non-obvious choices.
 Documentation placement is defined in [documentation.md](documentation.md);
 package behavior lives in `doc.go` and individual symbol contracts.
