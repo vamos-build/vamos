@@ -17,7 +17,7 @@ and shares identical target builds across concurrent client requests.
 | --- | --- | --- |
 | `--listen <addr>` | Address and port to bind | `:8080` |
 | `--cache-dir <dir>` | Directory for coordinator state, logs, and captured files | `/var/lib/vamos` |
-| `--cache-repository <repo>` | OCI registry repository where workers push built layers | Required |
+| `--cache-repository <repo>` | OCI registry repository where workers push built layers | None |
 | `--pull-through <reg=cache>` | Mapping from upstream registry to pull-through proxy cache | `[]` |
 | `--bound <n>` | Maximum concurrent targets scheduled per build | `4` |
 | `--max-builds <n>` | Maximum concurrent builds accepted | `64` |

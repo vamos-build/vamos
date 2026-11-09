@@ -23,8 +23,7 @@ Pulls do not take user parameters; they are configured only by target platform.
 ## Pinning and resolution
 
 When the lockfile (`vamos.lock` at the workspace root) pins an image and tag,
-`pull()` reads the manifest digest directly from the pin.
-It selects the matching platform image from that digest without querying the registry.
+`pull()` pulls the pinned manifest digest directly without resolving the tag against the registry.
 If the pinned digest no longer exists in the registry,
 the build fails and prompts you to run [`vamos update`](../cli/update.md).
 

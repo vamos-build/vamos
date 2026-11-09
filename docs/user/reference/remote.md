@@ -69,12 +69,15 @@ Credentials and network access are partitioned by role:
 - **Clients** use their own local credentials to resolve upstream tags (during `vamos update` and pin recording),
   pull images during `load` and `save`,
   and push images when `--push-from=client` is specified.
-- **Coordinator** credentials require read and delete permissions on the cache repository to prune unreferenced tags.
-- Upstream image tag resolution is performed directly from the client against the upstream registry,
+- **Coordinator** credentials require read and delete permissions on the cache repository
+  to delete cached layer tags during `vamos prune`.
+- `vamos update` and pin recording resolve tags directly from the client against the upstream registry,
   bypassing pull-through caches to prevent reading stale tag mappings.
 
-For registries that use plain HTTP,
-mark them as `insecure = true` in `/etc/containers/registries.conf` or pass `--tls-verify=false`.
+For registries that use plain HTTP, mark them as `insecure = true` in `/etc/containers/registries.conf`
+on the coordinator and workers.
+Clients automatically inherit the coordinator's `insecure = true` settings for the cache and pull-through registries;
+for other plain-HTTP registries, configure the client's `registries.conf` or pass `--tls-verify=false`.
 
 ### Secrets
 
@@ -87,7 +90,7 @@ Build targets requiring secrets using local execution.
 ### Platform routing
 
 Workers register their native platform architecture (such as `linux/amd64` or `linux/arm64`) with the coordinator.
-The coordinator assigns targets to workers matching each target's platform:
+The coordinator assigns each target to a worker matching its base image's platform:
 - A cluster with both `linux/amd64` and `linux/arm64` workers builds multi-platform image indexes natively,
   executing each platform's build steps on native hardware.
 - Pulls and targets that only add files without running commands run on any available worker
@@ -98,7 +101,7 @@ The coordinator assigns targets to workers matching each target's platform:
 The coordinator offers the platforms of all currently registered workers,
 plus any platforms declared with `--offer <os/arch>`.
 Use `--offer` so builds wait for a worker when all workers for that architecture are temporarily offline.
-Targets requesting an unoffered platform fail unless emulation is enabled.
+Targets that run commands on an unoffered platform fail unless emulation is enabled.
 
 When a target's platform is not offered natively, its commands can run under QEMU emulation
 on a worker that has a registered `binfmt_misc` emulator for that architecture.
@@ -147,7 +150,7 @@ two coordinators cannot share the same state directory.
 
 Run `vamos prune --coordinator <URL>` to prune the remote cache:
 - Removes coordinator build records and uploaded workspace files.
-- Deletes unreferenced layer tags from the cache repository registry.
+- Deletes all cached layer tags from the cache repository (dedicate this repository to the vamos cache).
 - Preserves recorded tag resolutions and cached upstream layers in the pull-through cache.
 
 The cache repository registry must have deletion enabled.

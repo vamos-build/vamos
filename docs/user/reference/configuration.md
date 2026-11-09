@@ -200,7 +200,7 @@ Functions of `ctx` can inspect built-in platform properties:
 | `ctx.os` | Target operating system | `"linux"` |
 | `ctx.arch` | Target CPU architecture | `"arm64"` |
 | `ctx.variant` | Architecture variant, or an empty string | `"v7"` |
-| `ctx.exec_platform` | Host or worker platform executing build steps | `"linux/amd64"` |
+| `ctx.exec_platform` | Build execution platform (matching `EXEC_PLATFORM`) | `"linux/amd64"` |
 
 These field names are reserved and cannot be used as custom parameter names.
 Globs are shared across platforms and cannot inspect `ctx.platform`, `ctx.os`, `ctx.arch`, or `ctx.variant`.

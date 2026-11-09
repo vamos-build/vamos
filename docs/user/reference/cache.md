@@ -107,8 +107,8 @@ and deletes cached layer tags from the cache repository.
 ## Timestamps
 
 Files added to a container and the resulting image metadata receive deterministic timestamps.
-A target derives its timestamp from the latest timestamp among its base image and any added task outputs.
-Pulled images supply their creation timestamps; built layers and tasks supply their execution timestamps.
+Each target derives its timestamp from the latest timestamp among its base image and any added task outputs,
+starting from the creation timestamps of pulled base images.
 Using deterministic timestamps ensures identical inputs produce byte-identical images across builds.
 
 Use `--timestamp` to establish a minimum timestamp for newly built targets:

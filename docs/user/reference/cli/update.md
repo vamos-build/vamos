@@ -9,7 +9,7 @@ vamos update node base  # update only the specified pull targets
 ```
 
 Resolves pull targets against container registries and records pinned digests in `vamos.lock` at the workspace root.
-Subsequent builds read digests from `vamos.lock` instead of contacting registries;
+Subsequent builds read digests from `vamos.lock` instead of resolving tags against registries;
 see [`pull()`](../build/pull.md).
 
 ## Tag resolution

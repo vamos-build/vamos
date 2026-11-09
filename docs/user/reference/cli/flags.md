@@ -67,9 +67,11 @@ See [traces](../cache.md#traces).
 
 ## TLS verification
 
-The `--tls-verify` flag controls TLS verification when vamos contacts container registries:
+The `--tls-verify` flag controls TLS verification when the client contacts container registries:
 - Pushing images from the client via `--push-from=client`.
-- Reading built images from a coordinator's cache repository.
+- Reading images from a coordinator's cache repository or pull-through cache.
 - Querying upstream registries during `vamos update` or pin recording.
 
-When omitted, vamos follows `/etc/containers/registries.conf`, including entries marked `insecure = true`.
+When omitted, the client follows `/etc/containers/registries.conf`
+(and any `insecure = true` settings reported by a coordinator for its cache registries).
+Executors always use their own `/etc/containers/registries.conf`.
