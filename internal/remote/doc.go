@@ -8,7 +8,8 @@
 // Values cross as JSON, as api defines them, and blobs as raw request and response bodies, verified on read by
 // both sides: a put verifies what it receives, and a get verifies what arrives, so a corrupt store or a corrupt
 // transfer is told apart from a missing blob on either side.
-// The stores' batched operations are single round trips: Missing, and ReadMany up to maxReadMany blobs.
+// The stores' batched operations are single round trips: Missing,
+// and ReadMany up to maxReadMany blobs holding at most maxReadManyBytes, a larger read taking more.
 // ClearContent isn't served: clearing a coordinator's store is a prune's, which excludes the builds that use it.
 // Errors cross as data: the sentinels of api and cache travel as codes, so that errors.Is holds on the client,
 // and any other error by its message alone.
