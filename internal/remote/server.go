@@ -93,6 +93,10 @@ const defaultKeepAlive = 15 * time.Second
 // maxReadMany is how many blobs one ReadMany request may ask for, since the server holds them all before answering.
 const maxReadMany = 256
 
+// maxReadManyBytes is how many bytes the blobs of one ReadMany request may hold, for the same reason:
+// as much as the largest structure a client reads, a tree or a log.
+const maxReadManyBytes = max(cache.MaxTreeSize, cache.MaxLogSize)
+
 // Handler returns the handler that serves the API.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
@@ -506,7 +510,7 @@ func (s *Server) missing(w http.ResponseWriter, r *http.Request) {
 // readMany answers with the content of each blob in the body, in order, one after the other:
 // the client knows each blob's size, and verifies each.
 // Every blob is read before anything is sent, so that a failure is an answer rather than a short body,
-// which bounds a request to maxReadMany blobs.
+// which bounds a request to maxReadMany blobs holding at most maxReadManyBytes.
 func (s *Server) readMany(w http.ResponseWriter, r *http.Request) {
 	limit, err := limitOf(r)
 	if err != nil {
@@ -521,6 +525,20 @@ func (s *Server) readMany(w http.ResponseWriter, r *http.Request) {
 	if len(blobs) > maxReadMany {
 		writeError(w, r, fmt.Errorf("%d blobs asked for at once; at most %d may be", len(blobs), maxReadMany))
 		return
+	}
+	size := int64(0)
+	for _, b := range blobs {
+		if err := b.Validate(); err != nil {
+			writeError(w, r, err)
+			return
+		}
+		if b.Size > maxReadManyBytes-size {
+			// Not ErrOverLimit, which would make the content unusable: the request, not a blob, is too large.
+			writeError(w, r, fmt.Errorf("the blobs asked for at once hold more than %d bytes, the most that may be",
+				maxReadManyBytes))
+			return
+		}
+		size += b.Size
 	}
 	contents, err := s.Content.ReadMany(r.Context(), blobs, limit)
 	if err != nil {

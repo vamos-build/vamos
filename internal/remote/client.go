@@ -790,17 +790,34 @@ func (c *Client) ReadMany(ctx context.Context, blobs []cache.Blob, limit int64) 
 		}
 	}
 	contents := make([][]byte, 0, len(blobs))
-	for start := 0; start < len(blobs); start += maxReadMany {
-		read, err := c.readBatch(ctx, blobs[start:min(start+maxReadMany, len(blobs))], limit)
+	for len(blobs) > 0 {
+		if blobs[0].Size > maxReadManyBytes {
+			// More than a request may ask for: read it on its own.
+			data, err := c.Read(ctx, blobs[0], limit)
+			if err != nil {
+				return nil, err
+			}
+			contents = append(contents, data)
+			blobs = blobs[1:]
+			continue
+		}
+		n, size := 0, int64(0)
+		for n < len(blobs) && n < maxReadMany && blobs[n].Size <= maxReadManyBytes-size {
+			size += blobs[n].Size
+			n++
+		}
+		read, err := c.readBatch(ctx, blobs[:n], limit)
 		if err != nil {
 			return nil, err
 		}
 		contents = append(contents, read...)
+		blobs = blobs[n:]
 	}
 	return contents, nil
 }
 
-// readBatch returns the content of each of blobs, at most maxReadMany, in one round trip.
+// readBatch returns the content of each of blobs, at most maxReadMany holding at most maxReadManyBytes,
+// in one round trip.
 func (c *Client) readBatch(ctx context.Context, blobs []cache.Blob, limit int64) ([][]byte, error) {
 	body, err := json.Marshal(blobs)
 	if err != nil {
@@ -824,8 +841,12 @@ func (c *Client) readBatch(ctx context.Context, blobs []cache.Blob, limit int64)
 		}
 		contents = make([][]byte, len(blobs))
 		for i, b := range blobs {
-			data := make([]byte, b.Size)
-			if _, err := io.ReadFull(resp.Body, data); err != nil {
+			// Read what arrives, up to b's size, rather than allocate that size before anything has.
+			data, err := io.ReadAll(io.LimitReader(resp.Body, b.Size))
+			if err == nil && int64(len(data)) < b.Size {
+				err = io.ErrUnexpectedEOF
+			}
+			if err != nil {
 				return &transportError{err: fmt.Errorf("reading blob %s: %w", b.Digest, err)}
 			}
 			if got := digest.FromBytes(data); got != b.Digest {

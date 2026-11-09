@@ -1100,6 +1100,127 @@ func TestReadManyBatches(t *testing.T) {
 	if fmt.Sprint(requests) != "[256 1]" {
 		t.Errorf("ReadMany whose second batch fails made requests of %v blobs, want [256 1]", requests)
 	}
+	// Batches hold at most maxReadManyBytes, and a blob holding more is read on its own.
+	half, err := m.PutBytes(ctx, bytes.Repeat([]byte{'h'}, maxReadManyBytes/2+1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	huge, err := m.PutBytes(ctx, bytes.Repeat([]byte{'x'}, maxReadManyBytes+1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		blobs []cache.Blob
+		want  string
+	}{
+		{blobs: []cache.Blob{blobs[0], half, half, blobs[1]}, want: "[2 2]"},
+		{blobs: []cache.Blob{blobs[0], huge, blobs[1]}, want: "[1 1]"},
+	} {
+		requests = nil
+		contents, err := c.ReadMany(ctx, tc.blobs, maxReadManyBytes+1)
+		if err != nil || len(contents) != len(tc.blobs) {
+			t.Fatalf("ReadMany of blobs of %v bytes = %d contents, %v", sizes(tc.blobs), len(contents), err)
+		}
+		for i, b := range tc.blobs {
+			if digest.FromBytes(contents[i]) != b.Digest {
+				t.Errorf("ReadMany of blobs of %v bytes gave the wrong content at %d", sizes(tc.blobs), i)
+			}
+		}
+		if fmt.Sprint(requests) != tc.want {
+			t.Errorf("ReadMany of blobs of %v bytes made requests of %v blobs, want %s", sizes(tc.blobs), requests,
+				tc.want)
+		}
+	}
+}
+
+// sizes returns the size of each of blobs.
+func sizes(blobs []cache.Blob) []int64 {
+	var s []int64
+	for _, b := range blobs {
+		s = append(s, b.Size)
+	}
+	return s
+}
+
+// TestReadManyRefusesTooManyBytes checks that the coordinator refuses to read blobs holding more than
+// maxReadManyBytes at once, before reading any, whatever limit the request gives, and as a refusal of the request
+// rather than ErrOverLimit, which would make the blobs unusable; blobs holding exactly that many are read.
+func TestReadManyRefusesTooManyBytes(t *testing.T) {
+	server := httptest.NewServer((&Server{Executor: newFakeExecutor(1), Content: cache.NewMemory()}).Handler())
+	t.Cleanup(server.Close)
+	for _, tc := range []struct {
+		sizes   []int64
+		refused bool
+	}{
+		{sizes: []int64{maxReadManyBytes + 1}, refused: true},
+		{sizes: []int64{maxReadManyBytes / 2, maxReadManyBytes/2 + 1}, refused: true},
+		{sizes: []int64{maxReadManyBytes / 2, maxReadManyBytes / 2}},
+		{sizes: []int64{0, maxReadManyBytes}},
+	} {
+		t.Run(fmt.Sprint(tc.sizes), func(t *testing.T) {
+			var blobs []cache.Blob
+			for i, size := range tc.sizes {
+				blobs = append(blobs, cache.Blob{Digest: digest.FromString(fmt.Sprint(i)), Size: size})
+			}
+			body, err := json.Marshal(blobs)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resp, err := http.Post(server.URL+pathReadMany+"?limit=9223372036854775807", contentJSON,
+				bytes.NewReader(body))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+			err = readError(resp)
+			// The blobs were never put: a read that gets past the bound finds them missing.
+			if tc.refused && (resp.StatusCode != http.StatusInternalServerError || errors.Is(err, cache.ErrOverLimit)) {
+				t.Errorf("reading them at once = %s, %v; want %d, a refusal that isn't %v", resp.Status, err,
+					http.StatusInternalServerError, cache.ErrOverLimit)
+			}
+			if !tc.refused && !errors.Is(err, cache.ErrMissing) {
+				t.Errorf("reading them at once = %s, %v; want %v", resp.Status, err, cache.ErrMissing)
+			}
+		})
+	}
+}
+
+// TestReadManyRetriesShortBody checks that a batch whose response ends inside a blob is read again,
+// rather than giving the short content or failing.
+func TestReadManyRetriesShortBody(t *testing.T) {
+	first, second := []byte("first"), []byte("second")
+	blobs := []cache.Blob{
+		{Digest: digest.FromBytes(first), Size: int64(len(first))},
+		{Digest: digest.FromBytes(second), Size: int64(len(second))},
+	}
+	var mu sync.Mutex
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		requests++
+		n := requests
+		mu.Unlock()
+		body := slices.Concat(first, second)
+		if n == 1 {
+			body = body[:len(first)+2] // ends inside the second blob
+		}
+		w.Write(body)
+	}))
+	t.Cleanup(server.Close)
+	c, err := NewClient(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	contents, err := c.ReadMany(t.Context(), blobs, 8)
+	if err != nil || len(contents) != 2 || !bytes.Equal(contents[0], first) || !bytes.Equal(contents[1], second) {
+		t.Fatalf("ReadMany whose first response ends early = %q, %v; want %q", contents, err,
+			[][]byte{first, second})
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if requests != 2 {
+		t.Errorf("ReadMany whose first response ends early made %d requests, want 2", requests)
+	}
 }
 
 // TestReleaseCrosses checks that Release reaches the executor, and that an unknown job's release is ErrNoJob.
