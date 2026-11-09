@@ -1,72 +1,63 @@
 ---
 title: "vamos user guide"
-description: "vamos, the lovechild of bazel and buildah, builds container images from Starlark BUILD files."
+description: "Introduction to vamos, core concepts, and reading order for the documentation."
 ---
 
-vamos is the lovechild of bazel and buildah.
+vamos builds container images from Starlark `BUILD` files using container isolation.
+It combines multi-stage build pipelines, fine-grained caching, and reproducible outputs.
 
-It builds container images from `BUILD` files written in Starlark, Bazel's Python-like language,
-using the buildah library.
-Your project keeps its own tools, such as npm, pnpm, go or uv: vamos runs them in build containers,
-and only the files a task collects reach the image.
-It reuses each target's result while its inputs are unchanged.
+Build steps run inside disposable containers using your project's native tools, such as pnpm, Go, or uv.
+Each target specifies its base image, inputs, and build steps.
+Tasks collect only the files you select, keeping compilers and intermediate tools out of the finished image.
+vamos caches the result of every target and reuses it when its inputs have not changed.
 
-These two targets from the TypeScript UI example build a website with pnpm, then serve it from nginx,
-without Node.js in the final image:
+These two targets from the TypeScript UI example build a website with pnpm,
+then serve it from nginx without Node.js in the final image:
 
 ```python
 task(
-    name="build",
-    base="packages",
-    steps=[
+    name = "build",
+    base = "packages",
+    steps = [
         add("source-files", "/workspace"),
         run(["pnpm", "build"]),
     ],
-    source="/workspace/dist",
-    include=["."],
+    source = "/workspace/dist",
+    include = ["."],
 )
 
 layer(
-    name="frontend",
-    base="nginx",
-    steps=[add("build", "/usr/share/nginx/html")],
+    name = "frontend",
+    base = "nginx",
+    steps = [add("build", "/usr/share/nginx/html")],
 )
 ```
 
+The `build` task compiles the website inside a Node.js container
+and collects only the static files from `/workspace/dist`.
+The `frontend` layer places those files into an nginx image.
+The final image contains only nginx and the static assets;
+Node.js and build tools remain in the build cache.
+
+## Where to start
+
 Start with the [tutorial](tutorial.md).
-It introduces images and filesets, sets up vamos, and builds the
-[TypeScript UI example](https://github.com/vamos-build/vamos/blob/main/examples/typescript-ui/README.md) into a running container.
+It introduces images and filesets, walks through setting up vamos,
+and builds the [TypeScript UI example](https://github.com/vamos-build/vamos/blob/main/examples/typescript-ui/README.md)
+into a running container.
+
+## Documentation index
 
 Use these references when writing your own project:
 
-| Reference | Covers |
+| Reference | Contents |
 | --- | --- |
-| [BUILD language](reference/build.md) | Targets, steps, and selecting files |
-| [CLI](reference/cli.md) | Building, publishing, loading, saving, and exporting |
-| [Configuration](reference/configuration.md) | Workspaces, parameters, platforms, and shared `.star` files |
-| [Cache and traces](reference/cache.md) | Reuse, rebuilding, timestamps, pruning, and inspecting a build |
+| [Tutorial](tutorial.md) | Hands-on walkthrough building an application from source into a running container |
+| [BUILD language](reference/build/README.md) | Target declarations (`pull`, `glob`, `task`, `layer`, `index`, `publication`), build steps, secrets, and file selection |
+| [CLI](reference/cli/README.md) | Commands for building, publishing, loading into Docker, saving archives, and exporting files |
+| [Configuration](reference/configuration.md) | Multi-package workspaces, target parameters, cross-platform builds, and shared `.star` files |
+| [Build cache and traces](reference/cache.md) | Cache keys, rebuilding, dependency pinning, storage pruning, and performance traces |
+| [Remote execution](reference/remote.md) | Distributing builds across a coordinator and worker pool on a shared network |
 
-See the [examples](https://github.com/vamos-build/vamos/blob/main/examples/README.md) for complete projects and the build patterns they demonstrate.
-
-## Remote builds
-
-By default vamos builds in the process you run it in, with its own build cache and container store.
-A team can share one build cache and a pool of build machines instead: a [coordinator](reference/cli.md#coordinator)
-schedules builds across [workers](reference/cli.md#worker) that register with it, and any command that builds takes
-`--coordinator http://host:8080`, or `VAMOS_COORDINATOR`, to build there.
-Targets already built by anyone are reused, independent targets of one build run on different workers at once,
-and the images come back to the client from a cache registry that the workers push to.
-
-Run a coordinator only on a trusted network: it has no authentication, so anyone who can reach it can build on it
-and read its cache, and anyone who can reach a pull-through cache reads what its upstream credentials can.
-The client must reach the coordinator, the cache registry and, for images that are plain `pull()`s, the pull-through
-cache, with its own registry credentials.
-`vamos update`, and a build that records a pin, ask each pulled image's own upstream registry about its tags, from
-the client, never a pull-through cache, whose answer about a tag can be stale; so the client must reach those too.
-A registry that the coordinator's `registries.conf` marks insecure, as the Helm chart's are, the client reads over
-plain HTTP too; for another, `--tls-verify=false` or a `registries.conf` entry allows one that speaks plain HTTP.
-A build runs its commands on the platform the coordinator's workers have; see
-[platforms](reference/configuration.md#platforms) for how that platform is chosen and what happens when the image
-being built is for another one.
-The `remote/` directory holds a Docker Compose file that runs the whole arrangement on one machine, for trying it.
-`remote/helm/vamos` is a Helm chart that deploys it on Kubernetes, documented by its values file.
+See the [examples directory](https://github.com/vamos-build/vamos/blob/main/examples/README.md)
+for complete projects demonstrating Go services, TypeScript frontends, and cross-compilation.

@@ -4,7 +4,44 @@ export const sidebar = [
   "tutorial",
   {
     label: "Reference",
-    items: ["reference/build", "reference/cli", "reference/configuration", "reference/cache"],
+    items: [
+      {
+        label: "BUILD language",
+        items: [
+          { label: "Overview", link: "/reference/build/" },
+          "reference/build/pull",
+          "reference/build/glob",
+          "reference/build/task",
+          "reference/build/layer",
+          "reference/build/image-index",
+          "reference/build/publication",
+          "reference/build/steps",
+          "reference/build/secrets",
+        ],
+      },
+      {
+        label: "CLI",
+        items: [
+          { label: "Overview", link: "/reference/cli/" },
+          "reference/cli/build",
+          "reference/cli/push",
+          "reference/cli/publish",
+          "reference/cli/load",
+          "reference/cli/save",
+          "reference/cli/export",
+          "reference/cli/update",
+          "reference/cli/prune",
+          "reference/cli/coordinator",
+          "reference/cli/worker",
+          "reference/cli/flags",
+          "reference/cli/registry-credentials",
+          "reference/cli/output",
+        ],
+      },
+      "reference/configuration",
+      "reference/cache",
+      "reference/remote",
+    ],
   },
 ];
 
