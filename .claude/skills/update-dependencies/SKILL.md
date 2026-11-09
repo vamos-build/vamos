@@ -232,7 +232,7 @@ Find it with `curl -fsSL https://nodejs.org/dist/index.json | jq -r '[.[] | sele
    (`vamos update` asks Docker Hub directly. It doesn't apply the two-week rule, and doesn't need to:
    the tags it follows are the maintainers' own rolling tags.)
 3. If a tag changes, update its coherence group. That includes the tutorial, which walks through typescript-ui's BUILD,
-   and [docs/user/reference/build.md](../../../docs/user/reference/build.md)'s example `pull`.
+   and [docs/user/reference/build/pull.md](../../../docs/user/reference/build/pull.md)'s example `pull`.
    Then run `vamos update` again.
 
 Leave `busybox:1.36` and `BusyboxIndex` in [internal/testenv/testenv.go](../../../internal/testenv/testenv.go) alone.

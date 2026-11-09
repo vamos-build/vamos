@@ -16,7 +16,7 @@ Do not add Go package READMEs.
 The root [README.md](../../README.md) introduces vamos and links to the user guide, the design documents
 and contributor instructions.
 The [tutorial](../../docs/user/tutorial.md) owns the introductory walkthrough;
-the references in `docs/user/reference/` own CLI, BUILD language, configuration and cache behavior.
+the references in `docs/user/reference/` own CLI, BUILD language, configuration, cache and remote execution behavior.
 The [example index](../../examples/README.md) helps users choose projects and build patterns.
 Example project READMEs own project-specific setup and checks, including non-Go toolchains,
 and link to the tutorial for shared vamos setup.

@@ -1,22 +1,32 @@
 ---
 title: "Build cache and traces"
-description: "How vamos reuses and rebuilds results, prunes its cache and traces a build."
+description: "How vamos reuses and rebuilds results, prunes its cache, and traces builds."
 ---
 
-vamos caches target results and reuses them when their effective inputs are unchanged.
-Delivery commands use the same cache as `build`.
+vamos caches target results and reuses them when their effective inputs have not changed.
+Delivery commands (`push`, `publish`, `load`, `save`, `export`) use the same cache as `build`.
+This reference describes cache key composition, rebuild rules, cache storage, pruning, timestamps,
+and performance tracing.
 
 ## What changes a result
 
-Inputs include the base image, configured steps and arguments, and the contents, modes, and links of added files.
-An added task's timestamp is also an input, even when its file contents are unchanged.
-Target names and source modification times are not inputs.
-Touching a file or renaming a target therefore does not force it to run again.
-Changing a parameter matters when it changes what the target actually does or consumes.
-A [secret](build.md#secrets)'s value is not an input, nor where `--secret` reads it;
-its ID and the variable or file that the step names for it are.
+A target's cache key is determined by its configured inputs:
+- The base image identity and layers.
+- Configured steps, executable paths, and arguments.
+- Contents, permission modes, and symbolic links of added filesets.
+- Timestamps of added task outputs (even if file contents are identical).
+- Secret IDs and the container environment variables or paths assigned to them (excluding secret values).
+- The execution platform for targets configured with `EXEC_PLATFORM`.
 
-The CLI reports reuse and replays a cached target's previous output:
+The following factors do not affect cache keys:
+- Secret values supplied via `--secret`.
+- Modification times (mtimes) of source files on your host.
+- Target names.
+
+Touching a source file without altering its contents or renaming a target does not force it to rerun.
+Changing a parameter invalidates the cache only if it alters the target's configured inputs or steps.
+
+The CLI reports target status during execution:
 
 ```text
 layer "tools": cached
@@ -25,43 +35,42 @@ task "compile": building
 layer "app": building
 ```
 
-Test and lint successes are cached too.
-A failed target does not produce a successful reusable result,
-but dependencies that succeeded before its failure remain cached.
+Cached targets replay their previous console output.
+Check tasks (tasks without output declarations) are cached on success.
+Failed targets do not produce cached results,
+though dependencies that completed successfully before a failure remain cached.
 
 ## Refreshing results
 
-Cached results are reused even when rerunning would observe a changed external service,
-such as a package repository with newer dependencies.
-`push`, `publish`, `load`, `save`, and `export` do not force cached targets to run again:
-publishing again pushes again, while a publication's checks and images are reused.
+Cached results are reused even if external network dependencies have changed
+(such as newer packages in a remote package repository).
+Delivery commands (`push`, `publish`, `load`, `save`, `export`) do not force cached targets to rerun.
+For example, running `vamos publish` republishes release images to registries,
+reusing cached check tasks and built layers.
 
-To refresh a target explicitly:
+To force a target to rerun explicitly:
 
 ```sh
 vamos build packages --rebuild
 ```
 
-This rebuilds `packages`, reuses its dependencies when possible, and replaces its cached result.
-Consumers run again when the result they consume changes.
-To refresh a dependency too, name it explicitly; a pull is refreshed by `vamos update` instead.
+The `--rebuild` flag rebuilds `packages`, reuses its unchanged dependencies where possible,
+and replaces its cached result.
+Downstream targets that depend on `packages` rebuild automatically if its output changes.
+To refresh a dependency, pass its name explicitly.
 
-A pull that the lockfile pins uses its pin; refresh it, or every pull, with [`vamos update`](cli.md#update):
+Pull targets are refreshed using [`vamos update`](cli/update.md) rather than `--rebuild`:
 
 ```sh
 vamos update node
 ```
 
-The lockfile, `vamos.lock`, which the project commits, says which manifest each pulled tag is pinned to;
-the build cache keeps what was found out about it, each platform's image, under the pin's digest, so that a build of a
-pin asks no registry anything once its image is in the store.
-Pulls without a pin, as `--pins=resolve` leaves them, keep what their tag resolved to only in the build cache,
-in a record of the tag, which differs between machines and is lost with the cache;
-they remember what their tag resolved to and reuse it without contacting the registry.
-`vamos build <pull> --rebuild` resolves nothing again: it says that `vamos update` refreshes pulls,
-which pins them, and `prune` refreshes neither pins nor tag resolutions.
+The workspace lockfile (`vamos.lock`) records the manifest digest for each pulled tag.
+The build cache retains pulled images under their digest so subsequent builds avoid registry round-trips.
+Running `vamos build <pull> --rebuild` does not contact the registry;
+it informs you that `vamos update` is used to update pulls.
 
-For checks that must execute every CI run:
+To ensure test and lint checks run on every CI execution:
 
 ```sh
 vamos build lint test --rebuild
@@ -69,89 +78,79 @@ vamos build lint test --rebuild
 
 ## Storage and pruning
 
-Cached layers are container-store images named `localhost/vamos-cache:<id>`, by their image ID, whatever their
-store ID, and used through that name only if what has it is that image, with the layers its config lists;
-pulled images carry that name too, beside the name of the digest they were pulled by.
-Other cached data is beside the container store, normally in `/var/lib/containers/vamos`.
-A volume on `/var/lib/containers` preserves both when vamos runs in a disposable container.
-A cached result that can't be used, since its image or files were removed from either, or are corrupt,
-is reported and built again, rather than failing the build;
-a project file whose captured copy is corrupt fails the build, which captures it again when run again.
-See the [tutorial](../tutorial.md#2-set-up-vamos) for a Docker setup with a named volume.
+Locally cached layer images are stored in the local container store under the name `localhost/vamos-cache:<id>`.
+Metadata, logs, and captured workspace files are stored alongside the container store,
+typically under `/var/lib/containers/vamos`.
+Mounting a volume at `/var/lib/containers` preserves the cache when running vamos inside a container;
+see the [tutorial setup](../tutorial.md#2-set-up-vamos).
 
-Cache results remain until explicitly pruned:
+If a cached layer image or fileset is deleted or corrupted,
+vamos reports the issue and automatically rebuilds the target rather than failing the build.
+
+To remove cached build outputs:
 
 ```sh
 vamos prune
 ```
 
-This removes cached layer images and other build results, while keeping pulled images and recorded tag resolutions,
-both a tag's and a pin's,
-and the images that other names, such as one `buildah tag` gave, also name, by those names alone.
-It reports how many images, results and files it removed.
-The next build recreates the needed results.
-A prune is refused while another vamos is using the build cache, and a build is refused while a prune runs;
-run it again when the other finishes.
+`prune` deletes all cached layer images and intermediate build outputs.
+It preserves pulled base images, recorded tag resolutions, and lockfile pins.
+The command reports the count of removed images, target results, and files.
+Subsequent builds regenerate required targets.
 
-With `--coordinator`, the build cache is the coordinator's: sources, trees, logs and results live in its
-`--cache-dir`, and built layers in the cache registry repository its workers push to, tagged by image ID.
-The registry must have deletion enabled, the coordinator's credentials must allow deleting there and the workers'
-pushing, and the space of deleted layers comes back only when the registry's own garbage collection runs, which is
-the operator's to schedule.
-The workers' own container stores only speed things up; a cache hit is checked against the registry, so a worker can
-be replaced at any time.
-`vamos prune --coordinator URL` empties the coordinator's results, files and the cache repository's tags, keeping
-recorded tag resolutions and the pull-through cache's contents.
-It is refused while any build, push or publication is open,
-including a finished build whose client is still delivering it, while attempts are still ending on the workers,
-and for one lease after the coordinator started; run it again when they have finished.
-A build whose sources were captured before a prune is refused when submitted, with a message to run it again.
+When building through a [remote coordinator](remote.md),
+the build cache resides on the coordinator (`--cache-dir`)
+and intermediate layer images are stored in the shared cache repository registry.
+Running `vamos prune --coordinator <URL>` removes coordinator build results
+and deletes cached layer tags from the cache repository.
 
 ## Timestamps
 
-Files a target adds, and the resulting image, use the latest timestamp from its base and any tasks whose files it adds.
-Pulled images supply their creation times; built bases and added tasks supply their result timestamps.
-This helps the same inputs produce the same image despite different build times.
+Files added to a container and the resulting image metadata receive deterministic timestamps.
+Each target derives its timestamp from the latest timestamp among its base image and any added task outputs,
+starting from the creation timestamps of pulled base images.
+Using deterministic timestamps ensures identical inputs produce byte-identical images across builds.
 
-`--timestamp` sets a minimum time for newly executed targets:
+Use `--timestamp` to establish a minimum timestamp for newly built targets:
 
 ```sh
 vamos build app --timestamp 2026-01-01T00:00:00Z
 vamos build app --timestamp 1767225600
 ```
 
-Both examples name the same UTC instant.
-The flag is not a cache input, so a cached result keeps its previous timestamp.
-To apply a new timestamp to a cached target, explicitly rebuild it:
+Both examples specify the same UTC moment.
+The `--timestamp` flag is not a cache key input, so cached results retain their existing timestamps.
+To apply a new timestamp to a cached target, rebuild it explicitly:
 
 ```sh
 vamos build app --rebuild --timestamp 2026-01-01T00:00:00Z
 ```
 
-Dependencies may still be reused with their earlier timestamps.
-Rebuilding a task with a changed timestamp invalidates targets that add its files,
-even when the files' contents are unchanged.
-Exported task files receive the task's timestamp.
+Rebuilding a task with a changed timestamp invalidates downstream targets that add its files,
+even if the file contents did not change.
+Exported task files retain the task's timestamp.
 
 ## Traces
 
-`--trace <file.json>` is available on `build`, `push`, `publish`, `load`, `save` (including its `write` alias),
-and `export`:
+Commands that build or deliver targets accept `--trace <file.json>`:
 
 ```sh
 vamos build lint test app --trace build-trace.json
 vamos load app app:dev --trace load-trace.json
 ```
 
-Open the trace in [Perfetto](https://ui.perfetto.dev).
-The viewer reads the file in your browser without uploading it.
+The resulting trace file can be opened in [Perfetto](https://ui.perfetto.dev).
+The viewer parses the file locally in your browser without uploading data.
 
-The trace shows BUILD loading and glob capture, each pull and target, execution steps, cache activity,
-and image delivery.
-Arrows connect the results of globs, pulls, and targets to the steps that consume them.
-Spans include details such as file counts, byte sizes, digests, and image IDs.
+Traces visualize the complete build lifecycle:
+- `BUILD` file parsing and package loading.
+- Input glob evaluation and source file hashing.
+- Execution steps for pulls, tasks, and layers.
+- Cache hits, cache misses, and step replay.
+- Delivery operations (pushing to registries, loading into Docker, saving archives).
 
-Once tracing starts, vamos attempts to write the trace even if BUILD loading, execution, or delivery fails.
-Errors caught before tracing starts, such as an invalid image name or a failed destination check, produce no trace.
-Writing the trace replaces an existing file at its path.
-The trace path must be different from a `save` archive and outside an `export` destination folder.
+Arrows in the timeline connect glob and target outputs to the execution steps that consume them.
+Trace spans include performance metrics such as file counts, byte sizes, manifest digests, and image IDs.
+vamos attempts to write the trace file even if a build step or delivery operation fails.
+Writing a trace replaces an existing file at the specified path.
+The trace path must not collide with a `save` archive path or reside inside an `export` destination directory.

@@ -115,9 +115,9 @@ output that can't be written, building on a coordinator, and the coordinator com
 as features, rules and scenarios, in Go:
 a feature is a file, such as `task_test.go`, and each of its rules is a test named `TestFeature_Rule`,
 such as `TestTask_WithoutOutputIsACheck`,
-whose doc comment states the rule's sentence, in the words of the [BUILD reference](../../docs/user/reference/build.md),
+whose doc comment states the rule's sentence, in the words of the [BUILD reference](../../docs/user/reference/build/README.md) pages,
 the [configuration reference](../../docs/user/reference/configuration.md),
-the [cache reference](../../docs/user/reference/cache.md) or the [CLI reference](../../docs/user/reference/cli.md).
+the [cache reference](../../docs/user/reference/cache.md) or the [CLI reference](../../docs/user/reference/cli/README.md).
 A rule's scenarios are its subtests, named by their sentences,
 and each starts from its feature's background, such as `newTaskWorld`,
 which skips it where buildah can't build, through `newBuildingWorld`.

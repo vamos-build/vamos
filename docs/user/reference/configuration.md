@@ -1,25 +1,25 @@
 ---
 title: "Configuration reference"
-description: "Workspaces, parameters, platforms and shared .star files."
+description: "Workspaces, parameters, platforms, and shared .star files."
 ---
 
-Use labels to compose packages, parameters to vary a target's behavior,
-and platforms to choose what its artifacts run on.
+vamos uses packages to organize projects, parameters to vary target behavior,
+and platforms to manage cross-compilation and container architectures.
+This reference explains workspace discovery, target labels, configuration parameters, multi-platform builds,
+and shared Starlark modules.
 
 ## Workspaces
 
-A package is a directory containing a `BUILD` file, or one named `BUILD.vms`.
-A workspace groups packages beneath a directory containing a `WORKSPACE` file, which may be empty.
+A **package** is any directory containing a `BUILD` or `BUILD.vms` file.
+A **workspace** groups packages beneath a common root directory containing a `WORKSPACE` file (which can be empty).
 
-Name a package's file `BUILD.vms` when the directory also holds a `build` directory, such as a project's build output.
-Where file names are compared without case, as on macOS's default filesystem or with git's `core.ignorecase`,
-`BUILD` and `build` are the same name: the two can't sit side by side,
-and a `.gitignore` entry for `build` silently ignores `BUILD` as well.
-A directory named `BUILD` or `build` is never taken for a BUILD file.
-A package has one BUILD file: a directory with both `BUILD` and `BUILD.vms` is an error,
-rather than one of them being silently ignored.
-Everything said here of a `BUILD` file applies to a `BUILD.vms` file, and labels don't change:
-`//ui:app` names the target `app` of `ui/BUILD` or `ui/BUILD.vms`.
+Name a package file `BUILD.vms` if the directory also contains a `build` output directory.
+On case-insensitive filesystems (such as macOS default filesystems or Git repositories with `core.ignorecase`),
+`BUILD` and `build` represent the same file path.
+Using `BUILD.vms` prevents naming collisions
+and ensures `.gitignore` patterns for `build` do not ignore the build file.
+A package cannot contain both `BUILD` and `BUILD.vms`; having both in one directory is an error.
+Labels and target semantics are identical whether a package uses `BUILD` or `BUILD.vms`.
 
 ```text
 project/
@@ -28,21 +28,21 @@ project/
 ├── backend/
 │   └── BUILD
 └── ui/
-    └── BUILD
+    └── BUILD.vms
 ```
 
-vamos searches for the nearest `WORKSPACE` in `-C`'s directory and its ancestors.
-Without one, `-C`'s directory is the workspace root.
-A `WORKSPACE` that can't be checked, such as one in a directory vamos can't search, stops the search with an error,
-rather than letting another directory become the root.
+To locate the workspace root, vamos searches upward from the directory specified by `-C` for a `WORKSPACE` file.
+If no `WORKSPACE` file is found, the directory specified by `-C` is treated as the workspace root.
 
-| Reference | Meaning |
+Target labels identify targets across packages:
+
+| Label | Meaning |
 | --- | --- |
-| `app` or `:app` | Target in the current BUILD file's package |
-| `//:tools` | Target in the workspace root's BUILD file |
-| `//backend:schema` | Target in `backend/BUILD`, or `backend/BUILD.vms`, beneath the workspace root |
+| `app` or `:app` | Target in the current package's `BUILD` file |
+| `//:tools` | Target in the workspace root's `BUILD` file |
+| `//backend:schema` | Target in `backend/` beneath the workspace root |
 
-Use labels wherever a target reference is accepted, including `base`, `add()`, `dep()`, and index entries:
+Use labels anywhere target references are accepted, including `base`, `add()`, `dep()`, and index mappings:
 
 ```python
 task(
@@ -57,34 +57,21 @@ task(
 )
 ```
 
-A label's path is a clean path to a directory within the workspace, reached through no symbolic link.
-A referenced glob keeps paths relative to its own BUILD directory.
-A mistake in a BUILD file that loads because another names one of its targets is reported where it is.
-vamos loads only the packages needed by the requested targets and reports dependency cycles.
+Label paths must be normalized relative paths without symbolic links.
+Globs evaluate paths relative to their declaring package directory.
+vamos loads only the packages needed by the requested build targets and reports dependency cycles as errors.
 
-Packages may name each other's targets, as where their files sit is often for other tools to say.
-A package's `BUILD` file runs when another first names one of its targets, while that other file is still running;
-it can then name the other file's targets declared above that point, as a file names its own earlier targets:
+### Cross-package dependencies
 
-```python
-# BUILD
-layer(name = "jre", base = "//:java")         # declared before scala/BUILD runs
-layer(name = "app", base = "//scala:server")  # runs scala/BUILD, which names //:jre
-```
+Packages can reference each other's targets.
+A package's `BUILD` file is loaded when another file first references one of its targets.
+If the loaded package references targets back in the first package,
+those targets must already be declared above the referencing line.
+References produced by functions of `ctx` are evaluated after all `BUILD` files are loaded,
+allowing them to reference targets declared anywhere in the workspace.
+Circular target dependencies produce an error during graph construction.
 
-```python
-# scala/BUILD
-layer(name = "server", base = "//:jre", steps = [add("jar", "/app")])
-```
-
-A target declared below that point isn't declared yet when the other file names it,
-which is an error saying where the first file stopped; declare the target above that line.
-A reference made by a function of `ctx`, such as `base = lambda ctx: "//:later"`, is resolved
-once every BUILD file has run, so it can name any target.
-Targets that name each other in a cycle, such as `//:app -> //scala:server -> //:app`, are an error.
-The workspace root does not need a `BUILD` file unless a reference or command needs targets from it.
-
-On the command line, unqualified names refer to `-C`'s package:
+On the command line, unqualified target names resolve against the package selected by `-C`:
 
 ```sh
 vamos build //backend:test //ui:lint -C project
@@ -93,8 +80,8 @@ vamos load app ui:dev -C project/ui
 
 ## Parameters
 
-Targets other than pulls accept a `params` dictionary.
-A plain value declares both a default and a type:
+All targets other than `pull()` accept a `params` dictionary.
+Providing a default value declares both the parameter's type and its default:
 
 ```python
 params = {
@@ -105,8 +92,8 @@ params = {
 }
 ```
 
-Supported types are strings, booleans, integers, and lists of strings.
-Use `param()` to constrain values or require an argument:
+Supported parameter types are strings, booleans, integers, and lists of strings.
+Use `param()` to constrain allowed values or require an explicit argument:
 
 ```python
 params = {
@@ -116,22 +103,20 @@ params = {
 }
 ```
 
-`param(default = ..., values = ..., type = ...)` accepts these optional arguments:
-
-| Argument | Meaning |
+| Argument | Description |
 | --- | --- |
-| `default` | Value used when no argument is given; determines the type |
-| `values` | Nonempty list of allowed strings, for a string or list parameter |
-| `type` | `"string"`, `"bool"`, `"int"`, or `"list"`; required when there is no default |
+| `default` | Default value if omitted; determines the parameter type |
+| `values` | Nonempty list of permitted string values |
+| `type` | `"string"`, `"bool"`, `"int"`, or `"list"`; required when omitting `default` |
 
-Provide a default or a type.
-If both are given, they must agree.
-A parameter without a default must be supplied on every use.
-For list parameters, `values` constrains each item.
+Provide either a `default` or an explicit `type`.
+If both are specified, their types must match.
+A parameter without a default must be supplied whenever the target is built or referenced.
+For list parameters, `values` constrains each individual list element.
 
 ### Functions of `ctx`
 
-An attribute can be a function that receives the target's configuration:
+Target attributes can be defined as functions of `ctx` that receive the target's configuration:
 
 ```python
 glob(
@@ -141,26 +126,26 @@ glob(
 )
 ```
 
-Read user parameters as `ctx.<name>`, so a parameter's name is an identifier.
-The function returns the whole attribute, such as a complete `steps` list or `include` list.
-Individual list entries cannot be functions of `ctx`.
-Such functions configure existing targets; they cannot declare new targets.
+Read configured parameters as `ctx.<name>`.
+Functions of `ctx` return entire attribute values (such as a full `steps` list or `include` list);
+individual list items cannot be functions of `ctx`.
+Functions of `ctx` configure existing targets; they cannot declare new targets.
 The target's `name` and `params` cannot be functions of `ctx`.
-A mistake that a function makes names the configuration it was given,
-such as `(configuring //:app with mode="debug")`.
+Errors inside `ctx` functions display the target name and parameter values being evaluated.
 
 ### `dep()` and `arg()`
 
-`dep(label, platform = ..., **arguments)` names a target with explicit parameter arguments.
-It is accepted wherever a plain target label is accepted.
-Omit `platform` to inherit the using target's platform.
+`dep(label, platform = ..., **arguments)` references a target with explicit parameter values.
+It is accepted wherever a plain target label is permitted:
 
 ```python
 add(dep("translations", languages = ["en", "es"]), "/app")
 base = dep("tools", platform = EXEC_PLATFORM)
 ```
 
-`arg("name")` forwards the using target's parameter value as an argument of `dep()`:
+Omit `platform` to inherit the caller's target platform.
+
+`arg("name")` forwards a parameter from the caller to a dependency:
 
 ```python
 layer(
@@ -172,57 +157,57 @@ layer(
 )
 ```
 
-The referenced target must declare the argument's parameter.
-Arguments are not automatically propagated beyond that target.
-A plain label uses all the referenced target's defaults.
+The downstream target must declare the forwarded parameter name.
+Parameters are not forwarded automatically beyond that target.
+Plain target labels use the referenced target's default parameter values.
 
-### CLI values
+### Command-line overrides
 
-Repeat `--set name=value` for each parameter to override:
+Override parameters from the command line using `--set <name>=<value>`:
 
 ```sh
 vamos build compile --set mode=debug
 vamos build bundle --set languages=en,es --set verbose=true --set workers=8
 ```
 
-Lists use comma-separated strings and preserve order.
-An empty value, such as `--set languages=`, gives an empty list.
-Boolean values must be lowercase `true` or `false`.
-An integer parameter's value must be an integer, and that of a parameter with `values` must be one of them,
-or for a list, each of its items.
-Give each parameter once.
-With several targets, `build` applies each flag to every named target declaring that parameter.
-A flag that matches none of the named targets is an error.
+- String parameters accept plain text values.
+- Boolean parameters accept lowercase `true` or `false`.
+- Integer parameters accept integer values.
+- List parameters accept comma-separated strings (for example, `--set languages=en,es`);
+  an empty value (`--set languages=`) produces an empty list.
+- Parameters with `values` constraints validate each supplied value against the allowed list.
 
-Parameters affect reuse through the configured inputs and operations.
-Changing an unused parameter does not by itself force a target to run again.
+Each `--set` flag applies to all requested top-level targets that declare matching parameter names.
+A `--set` flag that matches no requested target produces an error.
+Parameters affect cache reuse only when they change configured inputs, environment variables, or commands.
 
 ## Platforms
 
-A platform is `os/arch` or `os/arch/variant`, for example `linux/arm64` or `linux/arm/v7`.
-Targets normally inherit the requested platform through their dependencies.
-The command defaults to the host's platform unless `--platform` is given.
+A platform string specifies the operating system, architecture, and optional variant:
+`os/arch` (such as `linux/amd64`, `linux/arm64`) or `os/arch/variant` (such as `linux/arm/v7`).
+Targets inherit their platform from the requesting command or caller.
+Build commands default to the host platform unless overridden by `--platform`:
 
 ```sh
 vamos build app --platform linux/arm64
 ```
 
-Functions of `ctx` can read these built-in fields:
+Functions of `ctx` can inspect built-in platform properties:
 
-| Field | Meaning | Example |
+| Field | Description | Example |
 | --- | --- | --- |
-| `ctx.platform` | Full target platform | `"linux/arm64"` |
+| `ctx.platform` | Full platform string | `"linux/arm64"` |
 | `ctx.os` | Target operating system | `"linux"` |
-| `ctx.arch` | Target architecture | `"arm64"` |
+| `ctx.arch` | Target CPU architecture | `"arm64"` |
 | `ctx.variant` | Architecture variant, or an empty string | `"v7"` |
-| `ctx.exec_platform` | Platform executing build steps natively | `"linux/amd64"` |
+| `ctx.exec_platform` | Build execution platform (matching `EXEC_PLATFORM`) | `"linux/amd64"` |
 
-These field names are reserved and cannot be user parameters.
-Globs are shared across platforms and cannot read `ctx.platform`, `ctx.os`, `ctx.arch`, or `ctx.variant`.
+These field names are reserved and cannot be used as custom parameter names.
+Globs are shared across platforms and cannot inspect `ctx.platform`, `ctx.os`, `ctx.arch`, or `ctx.variant`.
 
 ### Native tools and cross-compilation
 
-`EXEC_PLATFORM` asks `dep()` for the executor's platform, rather than the target's platform:
+`EXEC_PLATFORM` requests the execution platform of the build engine rather than the target platform:
 
 ```python
 task(
@@ -239,53 +224,50 @@ task(
 )
 ```
 
-This runs native compiler tools while producing a binary for the requested platform.
-A task using native tools can share one result across platforms when its configured work is identical,
-as for a platform-independent JavaScript bundle.
-Reading the target platform here changes the compiler environment, producing a separate result for each platform.
-A layer's base must match the layer's own platform; use a task to separate native tools from target output.
+This pattern runs compiler tools natively on the host architecture while producing binaries for the target platform.
+A task using native tools can share a single cached result across target architectures
+if its inputs and commands are platform-independent (such as bundled web assets).
+When compiler environment variables depend on `ctx.os` or `ctx.arch`,
+vamos generates a separate cached result for each target architecture.
+A layer's base image must match the layer's platform; use a task to decouple build tools from the final runtime image.
 
-The execution platform is chosen among those the executor offers, before the BUILD files are read:
-the one `--exec-platform` names if it is given, otherwise the one a coordinator's `--default-exec-platform` names,
-otherwise this machine's platform if the executor offers it, and otherwise the only one it offers.
-Since it configures `EXEC_PLATFORM`, it is part of those targets' cache keys:
-a coordinator with `--default-exec-platform` gives clients on laptops and CI runners of other architectures
-the same keys, so they reuse each other's results.
-The executor built into vamos offers this machine's platform alone; a [coordinator](cli.md#coordinator) offers the
-platforms of its workers, so a client on an Apple-silicon laptop building against an amd64 pool runs its commands
-on `linux/amd64`, while `--platform` still says what to build and defaults to the client's own platform.
-A coordinator runs each layer's and task's commands on a worker of its image's platform
-when the deployment offers that platform, and on the execution platform otherwise,
-so an index for `linux/amd64` and `linux/arm64` builds natively on a pool with workers of both.
-The execution platform runs what `EXEC_PLATFORM` names, and tasks on `scratch`.
-Where a target runs is no part of its cache key, so a result built on either platform's worker is reused.
+#### Execution platform selection
 
-If a `run()` executes another architecture's programs, the kernel needs a registered emulator for that architecture.
-Otherwise the command can fail with `exec format error`.
-Against a coordinator, such a target is refused before anything runs, with a message naming both platforms:
-give `--platform` to build for the platform that runs the commands, or `--emulate` to let them run under emulation
-on a worker that has an emulator for the image's platform.
-With `--emulate`, a platform that no worker of the deployment emulates fails the target at once, with a message that
-says so; one the deployment offers emulation of waits for such a worker.
+The execution platform is resolved before reading `BUILD` files:
+1. The platform specified by `--exec-platform`.
+2. The coordinator's `--default-exec-platform` when building remotely.
+3. The host platform if supported by the executor.
+4. The sole platform offered by the executor.
+
+If the executor offers multiple platforms and none matches the host, pass `--exec-platform` explicitly.
+
+When using a remote coordinator with `--default-exec-platform`,
+clients on different host architectures share identical cache keys for `EXEC_PLATFORM` targets.
+
+If a `run()` step executes binaries for a foreign architecture without cross-compilation,
+the host kernel requires registered QEMU emulators (`binfmt_misc`).
+Without registered emulators, foreign binary execution fails with `exec format error`.
+On a remote coordinator, targets requiring emulation fail before execution unless `--emulate` is enabled
+(see [offered platforms and emulation](remote.md#offered-platforms-and-emulation)).
 
 ### Index delivery
 
-An [index](build.md#index) supplies its own platform list, so it cannot be named with `--platform`.
+An [index](build/image-index.md) defines its own platform list, so it cannot be combined with `--platform`.
 
-| Command naming an index | Images built and delivered |
+| Command | Action for index targets |
 | --- | --- |
-| `build` | Build all images into the cache |
-| `push` | Build and publish all images, preserving index order |
-| `publish` | Build and publish all images to each repository a publication gives the index, under every tag |
-| `load` | Build and load only the Docker daemon's platform |
-| `save` | Build and save only the host's platform |
+| `vamos build` | Builds all platform images into the build cache |
+| `vamos push` | Builds all images and pushes the multi-platform index to the registry |
+| `vamos publish` | Builds all images and publishes the index to each repository under every `--tag` |
+| `vamos load` | Builds and loads only the image matching the local Docker daemon's platform |
+| `vamos save` | Builds and exports only the image matching the host platform into the tarball |
 
-Selecting a platform missing from the index is an error.
-To select an arbitrary platform for delivery, name its pull or layer directly and use `--platform`.
+To export or load a specific foreign platform from an index,
+reference the underlying pull or layer target directly and pass `--platform`.
 
 ## Shared `.star` files
 
-Use Starlark `load()` to share functions and constants:
+Use the Starlark `load()` statement to share functions and constants across `BUILD` files:
 
 ```python
 load("//:defs.star", "go_checks")
@@ -293,7 +275,7 @@ load("//:defs.star", "go_checks")
 go_checks(name = "test", base = "tools", source = "source")
 ```
 
-For example, `defs.star` can contain:
+For example, `defs.star` can define reusable target macros:
 
 ```python
 def go_checks(name, base, source):
@@ -308,11 +290,9 @@ def go_checks(name, base, source):
     )
 ```
 
-Module labels start with `//` and name a `.star` file in the workspace.
-A mistake in a module is reported where it is in the `.star` file, and a module that loads itself,
-through the modules it loads, is an error.
-A module cannot declare targets at its top level while loading, nor name a target by a label that doesn't start
-with `//`; its functions can declare targets when called by a BUILD file.
-The arguments that a module's `dep()` gives are checked where a BUILD file uses it.
-References inside those functions resolve relative to the calling BUILD file's package.
-References in functions of `ctx` resolve relative to the target being configured.
+- Module labels begin with `//` and reference a `.star` file relative to the workspace root.
+- Modules cannot declare targets at top-level while loading;
+  macro functions declare targets when called from a `BUILD` file.
+- Labels within macro functions resolve relative to the calling `BUILD` file's package.
+- References in functions of `ctx` resolve relative to the target being configured.
+- Circular module dependencies produce an error during loading.
