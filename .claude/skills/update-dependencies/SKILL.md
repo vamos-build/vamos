@@ -38,7 +38,7 @@ So the user invokes this skill the same way both times, and a session that was c
 | Version | Must agree across |
 | --- | --- |
 | Go toolchain | Fedora `golang` in the devcontainer ≥ the `go` line of [go.mod](../../../go.mod); [Dockerfile](../../../Dockerfile)'s `golang:1.NN-bookworm` has go.mod's minor |
-| Go in the example | [examples/golang-cli/go.mod](../../../examples/golang-cli/go.mod)'s `go` line, its [BUILD](../../../examples/golang-cli/BUILD) tag `1.NN-alpine`, [vamos.lock](../../../examples/golang-cli/vamos.lock), its README's "`1.NN.x-alpine`", and the comment on line 62 of [smoke-checks.md](../../../.agents/kb/smoke-checks.md) |
+| Go in the example | the devcontainer's Go minor; [examples/golang-cli/go.mod](../../../examples/golang-cli/go.mod)'s `go` line, its [BUILD](../../../examples/golang-cli/BUILD) tag `1.NN-alpine`, [vamos.lock](../../../examples/golang-cli/vamos.lock), its README's "`1.NN.x-alpine`", and the comment on line 62 of [smoke-checks.md](../../../.agents/kb/smoke-checks.md) |
 | Node.js major | Fedora `nodejs24`/`nodejs24-npm`; `node:24-alpine` in the BUILD files of typescript-mcp, typescript-ui and strawberry-react/ui; [docs/user/tutorial.md](../../../docs/user/tutorial.md) (its BUILD walkthrough and mermaid diagram); the example READMEs' mermaid diagrams; `engines` and `@types/node` in typescript-mcp's package.json; `engines` in docs/site's package.json |
 | pnpm | Fedora `pnpm`; `packageManager` in [docs/site/package.json](../../../docs/site/package.json) and [examples/typescript-ui/package.json](../../../examples/typescript-ui/package.json); `pnpm@X` in [examples/typescript-ui/BUILD](../../../examples/typescript-ui/BUILD), [examples/strawberry-react/ui/BUILD](../../../examples/strawberry-react/ui/BUILD) and tutorial.md |
 | Python minor | Fedora `python3`; `python:3.NN` / `3.NN-slim` in the fastmcp and strawberry-react/backend BUILD files and vamos.lock files; `--python-version 3.NN` in each lockfile header and README command; `target-version`/`pythonVersion` in [examples/fastmcp/pyproject.toml](../../../examples/fastmcp/pyproject.toml); `uv venv --python 3.NN` in the strawberry-react README |
@@ -158,8 +158,9 @@ Ask once about the new majors found in this phase. Leave declined majors alone u
 
 ### Go example: [examples/golang-cli](../../../examples/golang-cli)
 
-It has no module dependencies, only its Go version. Its `go` line follows the newest Go minor
-whose `golang:1.NN-alpine` image is at least two weeks old; a new minor is a major here.
+It has no module dependencies, only its Go version. Its Go minor follows the devcontainer's `go version`,
+so the example moves to a new Go minor when the devcontainer does, not when `golang:1.NN-alpine` first appears.
+That move is still a major: ask about it with phase 2's others.
 Update its whole coherence group, then re-pin it as described under vamos.lock pins.
 
 ### Node packages

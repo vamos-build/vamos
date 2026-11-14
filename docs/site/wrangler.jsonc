@@ -4,7 +4,7 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "vamos-docs",
   "main": "worker.mjs",
-  "compatibility_date": "2026-10-19",
+  "compatibility_date": "2026-10-23",
   "previews": {},
   "assets": {
     "directory": "./dist",
