@@ -42,12 +42,12 @@ RUN dnf -y install \
 
 # Perfetto's trace processor, to query the traces that `vamos --trace` writes, by SQL.
 RUN case "$(uname -m)" in \
-      x86_64) arch=amd64 sum=32c739f71b2d39721afd294c0b038f2499a44a71b5b6bcdd85b83faca0b240b9 ;; \
-      aarch64) arch=arm64 sum=a82bf4111a340a7ea8577bcfd62e014e8e81b9e6a35a3190f5415fb800051ab0 ;; \
+      x86_64) arch=amd64 sum=7deb8c2572c6ae7ec80cd719d388041079827b0c44a1659694d5d88faa4f501e ;; \
+      aarch64) arch=arm64 sum=8f59e2cf7197c8de388ab4765a650eaf1774a405b1753c54a9741910b6f11350 ;; \
       *) echo "no trace_processor_shell for $(uname -m)" >&2; exit 1 ;; \
     esac \
  && curl -fsSL -o /tmp/perfetto.zip \
-      "https://github.com/google/perfetto/releases/download/v58.2/linux-$arch.zip" \
+      "https://github.com/google/perfetto/releases/download/v59.1/linux-$arch.zip" \
  && echo "$sum  /tmp/perfetto.zip" | sha256sum -c - \
  && unzip -j /tmp/perfetto.zip "linux-$arch/trace_processor_shell" -d /usr/local/bin \
  && chmod 755 /usr/local/bin/trace_processor_shell \
