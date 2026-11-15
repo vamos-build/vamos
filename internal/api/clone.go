@@ -125,7 +125,12 @@ func (o Outcome) Clone() Outcome {
 		e := o.Exported.Clone()
 		o.Exported = &e
 	}
-	o.Pruned = clonePointer(o.Pruned)
+	if o.Pruned != nil {
+		p := *o.Pruned
+		p.Warnings = slices.Clone(p.Warnings)
+		o.Pruned = &p
+	}
+	o.Trace = clonePointer(o.Trace)
 	if o.Published != nil {
 		p := Published{Destinations: slices.Clone(o.Published.Destinations)}
 		o.Published = &p

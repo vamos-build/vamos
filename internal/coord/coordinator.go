@@ -218,7 +218,7 @@ func (c *Coordinator) recover(kept []*record) error {
 		var err error
 		switch {
 		case !r.Evicted.IsZero():
-			c.jobs.RememberEvicted(r.ID)
+			c.jobs.RememberEvicted(r.ID, r.Trace)
 		case r.Outcome != nil:
 			err = c.restore(r)
 		case r.Publish != nil:
@@ -638,6 +638,13 @@ func (c *Coordinator) Cancel(_ context.Context, id api.JobID) error {
 	}
 	j.Cancel()
 	return nil
+}
+
+// Trace returns the blob of the job id's manifest while the coordinator remembers the job: while it is held, and
+// after it is evicted, from what its jobs table remembers, which a restart with Config.State restores from the
+// journal's tombstones.
+func (c *Coordinator) Trace(_ context.Context, id api.JobID) (cache.Blob, error) {
+	return c.jobs.Trace(id)
 }
 
 // Release lets go of the job id: a finished build is evicted at the next sweep, and a running one's demand is

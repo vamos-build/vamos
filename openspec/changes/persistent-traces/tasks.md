@@ -56,23 +56,19 @@
 
 ## 4. Job manifests and outcomes (`internal/api`, `internal/remote`)
 
-- [ ] 4.1 Add `api.JobTrace` (own spans, and per node its outcome, cause, attempt ID and the attempt trace it took, or
+- [x] 4.1 Add `api.JobTrace` (own spans, and per node its outcome, cause, attempt ID and the attempt trace it took, or
   none if it left the attempt running, with a count of entries dropped at the cap) and `api.CommandTrace` (client
   spans, offset, manifests), and `Outcome.Trace`, and `api.Pruned.Histories` and `Warnings`, which `Outcome.Clone`
   copies deeply. Document `Request` `Trace` and `EventSpans` as no longer used. Round-trip them in `api_test.go` and
   through `apitest.JSON`, and test that a clone's warnings are its own. Have `JobTrace.Save` fit spans beside entries
   with 1.1's trim, and test entries and spans that fit apart but not together, and entries that alone pass the cap.
   Verify with `go test ./internal/api/...`.
-- [ ] 4.2 Add `api.Executor.Trace(ctx, id)`, served by `remote` and answered by `run.Local` for its held jobs. In
-  `coord`, keep the manifest's blob in the journal's tombstone and answer from it for evicted jobs. Test in
-  `restart_test.go` that a released, evicted job still answers after a restart that kept the state. Make `sched.Jobs`'
-  memory of evicted jobs map each ID to its manifest's blob, restored by `RememberEvicted`, and test a released job's
-  trace by ID on a coordinator without `Config.State` too. Verify with
+- [x] 4.2 Add `api.Executor.Trace(ctx, id)`, served by `remote` and answered by `run.Local` for its held jobs. In
+  `coord`, keep the manifest's blob in the journal's tombstone and answer from it for evicted jobs. Make `sched.Jobs`'
+  memory of evicted jobs map each ID to its manifest's blob, restored by `RememberEvicted`. Test what needs no stored
+  manifest: the answers for running, unknown and manifest-less jobs, and that the evicted map and tombstone carry a
+  blob. 4.2's tests of a stored manifest by job ID are in 5.6, since jobs save manifests only from 5.1. Verify with
   `go test ./internal/api/... ./internal/remote ./internal/coord ./internal/run`.
-- [ ] 4.3 Extend `apitest.Contract`: every graph, push, export and publish job's outcome names a manifest that the
-  executor's content store holds, which `Trace` gives too, a prune's names none, two jobs that share an attempt name
-  the same attempt trace, and a cold pull's manifest names its resolve's attempt trace. Verify with
-  `go test ./internal/run ./internal/remote ./internal/coord`.
 
 ## 5. Always-on recording and attempt traces (`internal/sched`, `internal/run`, `internal/coord`, `internal/worker`)
 
@@ -102,7 +98,13 @@
 - [ ] 5.5 Make `pool.NextAssignment` always send a `Trace`, so workers always record. Check in `coord_test.go` that a
   worker's spans, retries included, land in the attempt's trace on the coordinator's clock. Verify with
   `go test ./internal/coord ./internal/worker`.
-- [ ] 5.6 Update the doc.go of `sched`, `run`, `coord` and `worker`, the trace transport section and its sequence
+- [ ] 5.6 (Moved from 4.2 and 4.3, which need 5.1's manifests.) Test in `restart_test.go` that a released, evicted
+  job's trace still answers by its ID after a restart that kept the state, and a released job's trace by ID on a
+  coordinator without `Config.State`. Extend `apitest.Contract`: every graph, push, export and publish job's outcome
+  names a manifest that the executor's content store holds, which `Trace` gives too, a prune's names none, two jobs
+  that share an attempt name the same attempt trace, and a cold pull's manifest names its resolve's attempt trace.
+  Verify with `go test ./internal/run ./internal/remote ./internal/coord`.
+- [ ] 5.7 Update the doc.go of `sched`, `run`, `coord` and `worker`, the trace transport section and its sequence
   diagram in `docs/design/scheduling.md`, and the owners in `.agents/kb/concurrency-model.md`. Verify with the
   documentation checks.
 

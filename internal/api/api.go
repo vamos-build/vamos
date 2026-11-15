@@ -51,6 +51,11 @@ type Executor interface {
 	// a watch from past its terminal event, which delivers nothing, renews the hold.
 	// A running build that is released has its demand withdrawn, as one whose hold lapsed does.
 	Release(ctx context.Context, id JobID) error
+	// Trace returns the blob of the job id's manifest, a JobTrace, while the executor remembers the job:
+	// while it is held, and after it is evicted for as long as the executor remembers evicted jobs.
+	// It fails with ErrRunning for a job that hasn't ended, ErrNoTrace for one that stored no manifest, or was evicted
+	// before the executor kept manifests by ID, and ErrNoJob for one it never knew or no longer remembers.
+	Trace(ctx context.Context, id JobID) (cache.Blob, error)
 }
 
 // The errors that the executor's methods return about jobs.
@@ -64,6 +69,9 @@ var (
 	// ErrSettling refuses a prune while attempts of ended jobs may still be writing, as a cancelled build's are
 	// until its workers have heard, or an earlier instance's until their leases expire; prune again shortly.
 	ErrSettling = errors.New("the executor's attempts are still settling; prune again shortly")
+	// ErrNoTrace says the job ended without storing its manifest, as a prune, or a job whose manifest couldn't be
+	// stored, does.
+	ErrNoTrace = errors.New("the job stored no trace")
 )
 
 // Capabilities is what an executor reports about itself.
@@ -140,6 +148,9 @@ type PushRequest struct {
 	// It is metadata, trusted as declared, like Emulate: no part of any action's key.
 	Workspace string `json:"workspace,omitempty"`
 	// Trace, if set, asks for the spans of a trace of the push, as events of the job.
+	// Stored traces, which Outcome.Trace names, replace it: a client that reads them sends it no longer,
+	// and it stays so that a request that does decodes.
+	// It stays so that an older client's request decodes.
 	Trace *tracing.CallContext `json:"trace,omitempty"`
 }
 
@@ -156,6 +167,9 @@ type PublishRequest struct {
 	// It is metadata, trusted as declared, like Emulate: no part of any action's key.
 	Workspace string `json:"workspace,omitempty"`
 	// Trace, if set, asks for the spans of a trace of the publication, as events of the job.
+	// Stored traces, which Outcome.Trace names, replace it: a client that reads them sends it no longer,
+	// and it stays so that a request that does decodes.
+	// It stays so that an older client's request decodes.
 	Trace *tracing.CallContext `json:"trace,omitempty"`
 }
 
@@ -176,6 +190,9 @@ type ExportRequest struct {
 	// It is metadata, trusted as declared, like Emulate: no part of any action's key.
 	Workspace string `json:"workspace,omitempty"`
 	// Trace, if set, asks for the spans of a trace of the export, as events of the job.
+	// Stored traces, which Outcome.Trace names, replace it: a client that reads them sends it no longer,
+	// and it stays so that a request that does decodes.
+	// It stays so that an older client's request decodes.
 	Trace *tracing.CallContext `json:"trace,omitempty"`
 }
 
@@ -197,6 +214,9 @@ type GraphRequest struct {
 	// It is metadata, trusted as declared, like Emulate: no part of any action's key.
 	Workspace string `json:"workspace,omitempty"`
 	// Trace, if set, asks for the spans of a trace of the run, as events of the job.
+	// Stored traces, which Outcome.Trace names, replace it: a client that reads them sends it no longer,
+	// and it stays so that a request that does decodes.
+	// It stays so that an older client's request decodes.
 	Trace *tracing.CallContext `json:"trace,omitempty"`
 	// Generation is the executor's cache generation that the client read before capturing the build's sources;
 	// a submission of an earlier generation than the executor's is refused, since what it captured may be gone.
@@ -218,9 +238,12 @@ type EventKind string
 const (
 	EventStatus EventKind = "status" // what is happening to nodes, such as "building" or "cached"
 	EventOutput EventKind = "output" // what a node's run() steps print, or printed when its cached result was made
-	EventSpans  EventKind = "spans"  // a batch of spans of the trace the job asked for
-	EventGap    EventKind = "gap"    // events before First were not retained; a watch from before it gets this first
-	EventDone   EventKind = "done"   // the job's last event, carrying its outcome
+	// EventSpans is a batch of spans of the trace the job asked for.
+	// Stored traces, which Outcome.Trace names, replace it: an executor that stores them sends it no longer,
+	// and it stays so that an executor's events that do decode.
+	EventSpans EventKind = "spans"
+	EventGap   EventKind = "gap"  // events before First were not retained; a watch from before it gets this first
+	EventDone  EventKind = "done" // the job's last event, carrying its outcome
 )
 
 // Event is one thing that happened in a job.
@@ -255,6 +278,9 @@ type Outcome struct {
 	Published *Published `json:"published,omitempty"`
 	Failure   *Failure   `json:"failure,omitempty"`   // why the job failed, if it did
 	Cancelled bool       `json:"cancelled,omitempty"` // it ended because it was cancelled
+	// Trace is the job's manifest, a JobTrace, which an executor that keeps traces stores for every job but a prune,
+	// whatever its outcome; nil if it couldn't be stored, or the executor keeps none.
+	Trace *cache.Blob `json:"trace,omitempty"`
 }
 
 // Published is what a publish job wrote, or tried to write: every destination, each repository under each tag.
@@ -370,6 +396,11 @@ type Pruned struct {
 	Results int `json:"results"`        // action results
 	Blobs   int `json:"blobs"`          // content blobs
 	Tags    int `json:"tags,omitempty"` // image tags removed from a coordinator's cache repository
+	// Histories counts the target histories removed, unused for cache.HistoryRetention.
+	Histories int `json:"histories,omitempty"`
+	// Warnings say what the prune failed to do that didn't fail it, such as removing a history,
+	// each for the client to print as a warning.
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 // Failure reports why a job failed.

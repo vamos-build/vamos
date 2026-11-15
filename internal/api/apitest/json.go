@@ -10,6 +10,7 @@ import (
 	"fmt"
 
 	"github.com/vamos-build/vamos/internal/api"
+	"github.com/vamos-build/vamos/internal/cache"
 )
 
 // JSON is an executor that passes every request, result and event through JSON on its way to and from ex,
@@ -50,6 +51,10 @@ func roundTripError(err error) error {
 		return fmt.Errorf("%w: %s", api.ErrRunning, err.Error())
 	case errors.Is(err, api.ErrFellBehind):
 		return fmt.Errorf("%w: %s", api.ErrFellBehind, err.Error())
+	case errors.Is(err, api.ErrExpired):
+		return fmt.Errorf("%w: %s", api.ErrExpired, err.Error())
+	case errors.Is(err, api.ErrNoTrace):
+		return fmt.Errorf("%w: %s", api.ErrNoTrace, err.Error())
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 		return err // the caller's own context ended the call
 	}
@@ -109,6 +114,12 @@ func (j *JSON) Result(ctx context.Context, id api.JobID) (api.Outcome, error) {
 // Release releases the job id on ex, through JSON.
 func (j *JSON) Release(ctx context.Context, id api.JobID) error {
 	return roundTripError(j.ex.Release(ctx, roundTrip(id)))
+}
+
+// Trace returns the blob of the job id's manifest on ex, through JSON.
+func (j *JSON) Trace(ctx context.Context, id api.JobID) (cache.Blob, error) {
+	b, err := j.ex.Trace(ctx, roundTrip(id))
+	return roundTrip(b), roundTripError(err)
 }
 
 // Prune starts a prune job on ex.

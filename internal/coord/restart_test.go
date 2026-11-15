@@ -419,6 +419,10 @@ func TestRestartRemembersExpired(t *testing.T) {
 	if _, err := r.c.Result(ctx, id); !errors.Is(err, api.ErrExpired) {
 		t.Errorf("the build's result after the restart: %v, want %v", err, api.ErrExpired)
 	}
+	// The build is remembered, so its trace is asked for by its ID rather than unknown; it stored none.
+	if _, err := r.c.Trace(ctx, id); !errors.Is(err, api.ErrNoTrace) {
+		t.Errorf("the build's trace after the restart: %v, want %v", err, api.ErrNoTrace)
+	}
 }
 
 // TestRestartForgetsUnreadable checks that a job's record that can't be read is reported and removed, so that the

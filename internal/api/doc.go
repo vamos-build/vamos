@@ -33,6 +33,10 @@
 // what runs finishes and is recorded, and the job fails saying it expired. A job released or long finished may be
 // evicted, after which its calls answer ErrExpired, for as long as the executor remembers the eviction, rather than
 // ErrNoJob, which means the executor never had it.
+// A job's manifest, a JobTrace, is named by its Outcome, and Trace gives it by the job's ID while the executor
+// remembers the job, after eviction too; a command's CommandTrace names each of its jobs' manifests.
+// Both are content blobs in tracing's stored format, within tracing.MaxTraceSize, and name the attempt traces that
+// results carry, which replace spans sent as events.
 // Capabilities report the cache generation, which a prune advances; a client reads it before capturing sources and
 // sends it with the graph, so that a submit after a prune is refused rather than building on what is gone.
 //

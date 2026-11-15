@@ -373,6 +373,18 @@ func (c *Client) Result(ctx context.Context, id api.JobID) (api.Outcome, error) 
 	return outcome, err
 }
 
+// Trace returns the blob of the job id's manifest, as api.Executor.Trace describes.
+func (c *Client) Trace(ctx context.Context, id api.JobID) (cache.Blob, error) {
+	var b cache.Blob
+	if err := c.getJSON(ctx, "asking for the job's trace", jobPath(pathTrace, id), "", &b); err != nil {
+		return cache.Blob{}, err
+	}
+	if err := b.Validate(); err != nil {
+		return cache.Blob{}, fmt.Errorf("the coordinator named the job's trace as %w", err)
+	}
+	return b, nil
+}
+
 // jobPath returns pattern, a path with the job's place in it, for the job id.
 func jobPath(pattern string, id api.JobID) string {
 	return strings.Replace(pattern, "{id}", url.PathEscape(string(id)), 1)

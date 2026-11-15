@@ -106,6 +106,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST "+pathCancel, s.cancel)
 	mux.HandleFunc("POST "+pathRelease, s.release)
 	mux.HandleFunc("GET "+pathResult, s.result)
+	mux.HandleFunc("GET "+pathTrace, s.trace)
 	mux.HandleFunc("POST "+pathPrune, s.prune)
 	mux.HandleFunc("POST "+pathMissing, s.missing)
 	mux.HandleFunc("POST "+pathReadMany, s.readMany)
@@ -368,6 +369,16 @@ func (s *Server) result(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, outcome)
+}
+
+// trace answers with the blob of the job's manifest.
+func (s *Server) trace(w http.ResponseWriter, r *http.Request) {
+	b, err := s.Executor.Trace(r.Context(), api.JobID(r.PathValue("id")))
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, b)
 }
 
 // blobOf returns the blob that r names: its digest in the path and its size in the query.

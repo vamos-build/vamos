@@ -22,6 +22,7 @@ const (
 	pathCancel       = "/v1/jobs/{id}/cancel"
 	pathRelease      = "/v1/jobs/{id}/release"
 	pathResult       = "/v1/jobs/{id}/result"
+	pathTrace        = "/v1/jobs/{id}/trace"
 	pathPrune        = "/v1/prune"
 	pathBlobs        = "/v1/blobs"
 	pathBlob         = "/v1/blobs/{digest}"
@@ -59,6 +60,7 @@ const (
 	codeBusy       errorCode = "busy"
 	codeExpired    errorCode = "expired"
 	codeSettling   errorCode = "settling"
+	codeNoTrace    errorCode = "no_trace"
 )
 
 // sentinels maps each code to its error, and the status a response carrying it has.
@@ -78,6 +80,7 @@ var sentinels = []struct {
 	{codeBusy, sched.ErrBusy, http.StatusServiceUnavailable},
 	{codeExpired, api.ErrExpired, http.StatusGone},
 	{codeSettling, api.ErrSettling, http.StatusConflict},
+	{codeNoTrace, api.ErrNoTrace, http.StatusNotFound},
 }
 
 // errOtherInstance says that a submission meant for one instance of the coordinator reached another.

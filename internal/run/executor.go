@@ -315,6 +315,12 @@ func (l *Local) Cancel(_ context.Context, id api.JobID) error {
 	return nil
 }
 
+// Trace returns the blob of the job id's manifest; the local executor's jobs are never evicted, so every job it
+// started is held.
+func (l *Local) Trace(_ context.Context, id api.JobID) (cache.Blob, error) {
+	return l.jobs.Trace(id)
+}
+
 // Release lets go of the job id; the local executor's jobs live as long as the command, so it only checks the job.
 func (l *Local) Release(_ context.Context, id api.JobID) error {
 	j, err := l.jobs.Lookup(id)
