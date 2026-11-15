@@ -45,10 +45,10 @@
 
 ## 3. Integration
 
-- [ ] 3.1 Run `scripts/check` and then `scripts/check full`, and confirm both pass.
-- [ ] 3.2 Run the build smoke checks in `.agents/kb/smoke-checks.md` against a workspace whose `WORKSPACE` names it,
+- [x] 3.1 Run `scripts/check` and then `scripts/check full`, and confirm both pass.
+- [x] 3.2 Run the build smoke checks in `.agents/kb/smoke-checks.md` against a workspace whose `WORKSPACE` names it,
   and against the example projects, whose empty or missing `WORKSPACE` files must still build.
-- [ ] 3.3 Run `openspec validate workspace-name --strict` and confirm it passes.
+- [x] 3.3 Run `openspec validate workspace-name --strict` and confirm it passes.
 
 ## Workflow follow-up
 
