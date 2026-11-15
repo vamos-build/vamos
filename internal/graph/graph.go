@@ -20,6 +20,8 @@ import (
 
 // Version changes whenever what a graph means changes,
 // so that a client and an executor of different versions refuse each other's graphs rather than build something else.
+// A field that no key reads and that a graph builds the same without, such as Node.Target, means nothing new,
+// and leaves it as it is.
 const Version = 4 // 4: a pull's pinned digest
 
 // Graph is everything a build runs:
@@ -57,6 +59,13 @@ type Node struct {
 	Label string `json:"label"` // as messages show it: "app" or "//ui:build"
 	Desc  string `json:"desc"`  // as messages describe it: `layer "//ui:build" (platform=linux/arm64, mode="debug")`
 	Pos   string `json:"pos"`   // the declaration's file:line:col
+	// Target identifies a pull, layer or task in its configuration, the same in every invocation that configures it
+	// alike: its canonical label, its platform and every parameter's value, sorted by name, whether given or
+	// defaulted, as in `//ui:build platform=linux/arm64 mode="debug"`.
+	// It is metadata, which keys a target's history: no action key reads it, unlike Desc, which leaves out what
+	// the command's own platform and defaults give.
+	// A node without one, as from an older client, keeps no history.
+	Target string `json:"target,omitempty"`
 
 	Source *Source `json:"source,omitempty"`
 	Pull   *Pull   `json:"pull,omitempty"`

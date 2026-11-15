@@ -38,7 +38,10 @@
 // In buildfile.go, declaration and evalContext own deferred evaluation and builtin scope;
 // loadError preserves nested failures.
 // In config.go, confLabel, workspace.edge, workspace.template and configurer own target identity
-// and dependency expansion; lowering constructs graph nodes.
+// and dependency expansion; lowering constructs graph nodes,
+// and workspace.targetIdentity gives each pull, layer and task its graph.Node.Target,
+// which, unlike Desc, names the platform and every parameter's value even where the command's or a default gives them,
+// so that target history keys a configuration alike in every invocation.
 // workspace.readGlobs captures sources after configuration.
 // Step values and their lowering live in step.go; changes must also reach graph and run.
 // Pulls, in pulls.go, returns the pulls that vamos update pins: those named, or every pull of the workspace, whose

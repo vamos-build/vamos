@@ -48,9 +48,9 @@
 
 ## 3. Target identity in the graph (`internal/graph`, `internal/load`)
 
-- [ ] 3.1 Add `graph.Node.Target`: the canonical label, platform and every parameter's value. Document it as
+- [x] 3.1 Add `graph.Node.Target`: the canonical label, platform and every parameter's value. Document it as
   metadata that no key reads, and say why `graph.Version` stays at 4. Verify with `go test ./internal/graph`.
-- [ ] 3.2 Set `Target` from `confLabel` for pulls, layers and tasks in `load`. Sort the parameters by name. Test that
+- [x] 3.2 Set `Target` from `confLabel` for pulls, layers and tasks in `load`. Sort the parameters by name. Test that
   one target gets the same `Target` whether its platform and parameters are given or defaulted, and whatever order its
   parameters are declared in, and different ones across configurations. Verify with `go test ./internal/load`.
 
