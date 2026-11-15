@@ -39,6 +39,15 @@ func anAppOfAGlob(nonce, include string) string {
 	`
 }
 
+// anAppOnThePull declares the pull "base" of the scenario's registry's base:tag, and the layer "app" on it, with nonce,
+// so that its first build runs.
+func anAppOnThePull(nonce, tag string) string {
+	return `
+		pull(name="base", image="<registry>/base", tag="` + tag + `")
+		layer(name="app", base="base", steps=[env(NONCE="` + nonce + `")])
+	`
+}
+
 // TestMisses_EveryMissHasOneCause specifies, as the cache reference says, that "each layer or task that runs, rather
 // than being reused, gets one cause in its trace".
 func TestMisses_EveryMissHasOneCause(t *testing.T) {
@@ -90,6 +99,33 @@ func TestMisses_TargetHistory(t *testing.T) {
 		w.ThenItSucceeds()
 		w.ThenTheTargetsWere(statuses{layer("app"): ran})
 		w.ThenTheTraceSpanSaysAtLeast("executor", `layer "app"`, traceArgs{"miss": "lost"})
+	})
+}
+
+// TestMisses_ConcurrentBuildsEachAddTheirAction specifies, as the cache reference says, that "builds of a target that
+// run at once each add their action to its history".
+func TestMisses_ConcurrentBuildsEachAddTheirAction(t *testing.T) {
+	t.Run("Concurrent builds each add their action", func(t *testing.T) {
+		w := newMissWorld(t)
+		w.GivenARegistry()
+		w.GivenACoordinatorWithAWorker()
+		w.GivenAProjectThatPullsBusybox()
+		w.GivenTheBuildFileDeclares(`
+			glob(name="src", include=["a.txt"])
+			task(name="app", base="busybox", steps=[env(NONCE="` + testenv.NewNonce() + `"), add("src", "/src"),
+			    run(["sleep", "2"])])
+		`)
+		w.GivenTwoClientsBuiltAtOnceOnTheCoordinator("app", files{"a.txt": "one"}, files{"a.txt": "two"},
+			onTheCoordinator("<coordinator>"))
+		w.WhenIPrune(onTheCoordinator("<coordinator>"))
+		w.ThenItSucceeds()
+		for _, source := range []string{"one", "two"} {
+			w.GivenTheProjectHolds(files{"a.txt": source})
+			w.WhenIBuild("app", onTheCoordinator("<coordinator>"), traced())
+			w.ThenItSucceeds()
+			w.ThenTheTargetsWere(statuses{task("app"): ran})
+			w.ThenTheTraceSpanSaysAtLeast("executor", `task "app"`, traceArgs{"miss": "lost"})
+		}
 	})
 }
 
@@ -277,6 +313,38 @@ func TestMisses_AChangeOfTheTargetsOwnInputsIsOwnInputs(t *testing.T) {
 		w.ThenTheTraceSpanSaysAtLeast("executor", `layer "app"`, traceArgs{"miss": "own-inputs"})
 	})
 
+	t.Run("A base switched to another pull is own-inputs", func(t *testing.T) {
+		w := newMissWorld(t)
+		w.GivenARegistry()
+		w.GivenTheRegistryHoldsAnImage("<registry>/one:v1", "one", thisPlatform())
+		w.GivenTheRegistryHoldsAnImage("<registry>/two:v1", "two", thisPlatform())
+		w.GivenTheBuildFileDeclares(`
+			pull(name="one", image="<registry>/one", tag="v1")
+			pull(name="two", image="<registry>/two", tag="v1")
+			layer(name="app", base="one", steps=[env(NONCE="` + testenv.NewNonce() + `")])
+		`)
+		w.WhenIBuild("app")
+		w.ThenItSucceeds()
+		w.GivenTheBuildFileChanges(`layer(name="app", base="one"`, `layer(name="app", base="two"`)
+		w.WhenIBuild("app", traced())
+		w.ThenItSucceeds()
+		w.ThenTheTraceSpanSaysAtLeast("executor", `layer "app"`, traceArgs{"miss": "own-inputs"})
+		w.ThenTheTraceSpanSaysNothingOf("executor", `layer "app"`, "pull", "dependencies")
+	})
+
+	t.Run("A change of mode alone is a change", func(t *testing.T) {
+		w := newMissWorld(t)
+		w.GivenTheBuildFileDeclares(anAppOfAGlob(testenv.NewNonce(), `"run.sh"`))
+		w.GivenTheProjectHolds(files{"run.sh": "echo hello"})
+		w.WhenIBuild("app")
+		w.ThenItSucceeds()
+		w.GivenTheProjectModes(modes{"run.sh": 0o755})
+		w.WhenIBuild("app", traced())
+		w.ThenItSucceeds()
+		w.ThenTheTraceSpanSaysAtLeast("executor", `layer "app"`,
+			traceArgs{"miss": "own-inputs", "changed": []any{"run.sh"}})
+	})
+
 	t.Run("A glob that selects too much shows the files it picked up", func(t *testing.T) {
 		w := newMissWorld(t)
 		w.GivenTheBuildFileDeclares(anAppOfAGlob(testenv.NewNonce(), `"src/**"`))
@@ -349,6 +417,67 @@ func TestMisses_AChangeOnlyInWhatADependencySuppliesIsDependency(t *testing.T) {
 			traceArgs{"miss": "dependency", "dependencies": []any{`layer "runtime"`, `task "gen"`}})
 	})
 
+	t.Run("A pull whose tag was edited", func(t *testing.T) {
+		w := newMissWorld(t)
+		w.GivenARegistry()
+		w.GivenTheRegistryHoldsAnImage("<registry>/base:v1", "v1", thisPlatform())
+		w.GivenTheRegistryHoldsAnImage("<registry>/base:v2", "v2", thisPlatform())
+		w.GivenTheBuildFileDeclares(anAppOnThePull(testenv.NewNonce(), "v1"))
+		w.WhenIBuild("app")
+		w.ThenItSucceeds()
+		w.GivenTheBuildFileChanges(`tag="v1"`, `tag="v2"`)
+		w.WhenIBuild("app", traced())
+		w.ThenItSucceeds()
+		w.ThenTheTraceSpanSaysAtLeast("executor", `layer "app"`,
+			traceArgs{"miss": "dependency", "dependencies": []any{`pull "base"`}})
+	})
+
+	t.Run("A base switched to an identical layer, then changed", func(t *testing.T) {
+		w := newMissWorld(t)
+		nonce := testenv.NewNonce()
+		w.GivenTheBuildFileDeclares(`
+			layer(name="one", base="scratch", steps=[env(SAME="` + nonce + `")])
+			layer(name="two", base="scratch", steps=[env(SAME="` + nonce + `")])
+			layer(name="app", base="one", steps=[env(APP="app")])
+		`)
+		w.WhenIBuild("app")
+		w.ThenItSucceeds()
+		w.GivenTheBuildFileChanges(`layer(name="app", base="one"`, `layer(name="app", base="two"`)
+		w.WhenIBuild("app")
+		w.ThenItSucceeds()
+		w.ThenTheTargetsWere(statuses{layer("app"): reused})
+		w.GivenTheBuildFileChanges(`layer(name="two", base="scratch", steps=[env(SAME="`+nonce+`")])`,
+			`layer(name="two", base="scratch", steps=[env(SAME="`+nonce+`", MODE="changed")])`)
+		w.WhenIBuild("app", traced())
+		w.ThenItSucceeds()
+		w.ThenTheTraceSpanSaysAtLeast("executor", `layer "app"`,
+			traceArgs{"miss": "dependency", "dependencies": []any{`layer "two"`}})
+	})
+
+	t.Run("A moved pull and a changed task together are dependency", func(t *testing.T) {
+		w := newMissWorld(t)
+		w.GivenARegistry()
+		w.GivenTheRegistryHoldsAnImage("<registry>/base:v1", "first", thisPlatform())
+		nonce := testenv.NewNonce()
+		w.GivenTheBuildFileDeclares(`
+			glob(name="src", include=["a.txt"])
+			pull(name="base", image="<registry>/base", tag="v1")
+			task(name="gen", base="scratch", steps=[env(GEN="` + nonce + `"), add("src", "/out")],
+			    source="/out", include=["**"])
+			layer(name="app", base="base", steps=[add("gen", "/gen")])
+		`)
+		w.GivenTheProjectHolds(files{"a.txt": "a"})
+		w.WhenIBuild("app")
+		w.ThenItSucceeds()
+		w.GivenTheRegistryHoldsAnImage("<registry>/base:v1", "moved", thisPlatform())
+		w.GivenTheLockfileHolds(lockfilePinning(pin{"<registry>/base:v1", "v1", "<digest of moved>"}))
+		w.GivenTheProjectHolds(files{"a.txt": "a, edited"}) // which changes the files gen makes
+		w.WhenIBuild("app", traced())
+		w.ThenItSucceeds()
+		w.ThenTheTraceSpanSaysAtLeast("executor", `layer "app"`,
+			traceArgs{"miss": "dependency", "dependencies": []any{`pull "base"`, `task "gen"`}})
+	})
+
 	t.Run("A rebuilt task changes its epoch alone", func(t *testing.T) {
 		w := newMissWorld(t)
 		w.GivenTheBuildFileDeclares(`
@@ -366,6 +495,64 @@ func TestMisses_AChangeOnlyInWhatADependencySuppliesIsDependency(t *testing.T) {
 		w.ThenItSucceeds()
 		w.ThenTheTraceSpanSaysAtLeast("executor", `layer "app"`,
 			traceArgs{"miss": "dependency", "dependencies": []any{`task "gen"`}})
+	})
+}
+
+// TestMisses_AMovedPullIsUpstream specifies, as the cache reference says, that a target misses for "upstream" when
+// "only the image its base pull's reference names moved: a tag that moved, or an updated pin; the pull and both
+// digests are named".
+func TestMisses_AMovedPullIsUpstream(t *testing.T) {
+	t.Run("A tag that moved, updated with vamos update", func(t *testing.T) {
+		w := newMissWorld(t)
+		w.GivenARegistry()
+		w.GivenTheRegistryHoldsAnImage("<registry>/base:v1", "first", thisPlatform())
+		w.GivenTheBuildFileDeclares(anAppOnThePull(testenv.NewNonce(), "v1"))
+		w.WhenIBuild("app")
+		w.ThenItSucceeds()
+		w.GivenTheRegistryHoldsAnImage("<registry>/base:v1", "moved", thisPlatform())
+		w.WhenIUpdate(onlyThePulls("base"))
+		w.ThenItSucceeds()
+		w.WhenIBuild("app", traced())
+		w.ThenItSucceeds()
+		w.ThenTheTraceSpanSaysAtLeast("executor", `layer "app"`, traceArgs{"miss": "upstream",
+			"pull": `pull "base"`, "before": "<digest of first>", "after": "<digest of moved>"})
+	})
+
+	t.Run("An updated pin", func(t *testing.T) {
+		w := newMissWorld(t)
+		w.GivenARegistry()
+		w.GivenTheRegistryHoldsAnImage("<registry>/base:v1", "first", thisPlatform())
+		w.GivenTheBuildFileDeclares(anAppOnThePull(testenv.NewNonce(), "v1"))
+		w.WhenIBuild("app")
+		w.ThenItSucceeds()
+		w.GivenTheRegistryHoldsAnImage("<registry>/base:v1", "moved", thisPlatform())
+		w.GivenTheLockfileHolds(lockfilePinning(pin{"<registry>/base:v1", "v1", "<digest of moved>"}))
+		w.WhenIBuild("app", traced())
+		w.ThenItSucceeds()
+		w.ThenTheTraceSpanSaysAtLeast("executor", `layer "app"`, traceArgs{"miss": "upstream",
+			"pull": `pull "base"`, "before": "<digest of first>", "after": "<digest of moved>"})
+	})
+
+	t.Run("A tag moved to another manifest of the same image is compared from there", func(t *testing.T) {
+		w := newMissWorld(t)
+		w.GivenARegistry()
+		w.GivenTheRegistryHoldsAnImage("<registry>/base:v1", "first", thisPlatform())
+		w.GivenTheBuildFileDeclares(anAppOnThePull(testenv.NewNonce(), "v1"))
+		w.WhenIBuild("app")
+		w.ThenItSucceeds()
+		w.GivenTheRegistryHoldsAnIndexOf("<registry>/base:v1", "same", "first", thisPlatform())
+		w.WhenIUpdate(onlyThePulls("base"))
+		w.ThenItSucceeds()
+		w.WhenIBuild("app")
+		w.ThenItSucceeds()
+		w.ThenTheTargetsWere(statuses{layer("app"): reused})
+		w.GivenTheRegistryHoldsAnImage("<registry>/base:v1", "moved", thisPlatform())
+		w.WhenIUpdate(onlyThePulls("base"))
+		w.ThenItSucceeds()
+		w.WhenIBuild("app", traced())
+		w.ThenItSucceeds()
+		w.ThenTheTraceSpanSaysAtLeast("executor", `layer "app"`, traceArgs{"miss": "upstream",
+			"pull": `pull "base"`, "before": "<digest of same>", "after": "<digest of moved>"})
 	})
 }
 

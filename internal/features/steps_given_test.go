@@ -587,6 +587,25 @@ func (w *world) GivenTheRegistryHoldsAnImage(image, label, platform string) {
 	w.noteHeldDigest(label, img.Digest)
 }
 
+// GivenTheRegistryHoldsAnIndexOf pushes to the image name image, in which <registry> stands for the scenario's
+// registry, an index of the one image for platform that an earlier step put in the registry as of, which label then
+// names: another manifest of the same image, whose digest <digest of label> stands for.
+func (w *world) GivenTheRegistryHoldsAnIndexOf(image, label, of, platform string) {
+	w.t.Helper()
+	img, ok := w.held[w.heldKey(of, platform)]
+	if !ok {
+		w.t.Fatalf("no Given step put %s for %s in the registry", of, platform)
+	}
+	index := mutate.AppendManifests(empty.Index, mutate.IndexAddendum{
+		Add:        img,
+		Descriptor: v1.Descriptor{Platform: w.parsedPlatform(platform)},
+	})
+	if err := remote.WriteIndex(w.registryRef(image), index, w.readingTheRegistry()...); err != nil {
+		w.t.Fatal(err)
+	}
+	w.noteHeldDigest(label, index.Digest)
+}
+
 // heldImage returns a new image of random files for platform, which label names, with the platform.
 func (w *world) heldImage(label, platform string) v1.Image {
 	w.t.Helper()

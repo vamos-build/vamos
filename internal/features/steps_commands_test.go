@@ -67,6 +67,9 @@ var everyCommandGraphAndUpdate = append(slices.Clone(everyCommandAndGraph), "upd
 // everyCommandGraphUpdateAndTrace are everyCommandGraphAndUpdate and trace, which reads from an executor as they do.
 var everyCommandGraphUpdateAndTrace = append(slices.Clone(everyCommandGraphAndUpdate), "trace")
 
+// everyCommandGraphUpdateTraceAndPrune are everyCommandGraphUpdateAndTrace and prune, which a coordinator runs too.
+var everyCommandGraphUpdateTraceAndPrune = append(slices.Clone(everyCommandGraphUpdateAndTrace), "prune")
+
 // to sends to the path name, relative to the folder that the command sends to,
 // rather than to the target's name, with .tar for save. Save and export take it.
 func to(name string) option {
@@ -458,11 +461,12 @@ func (w *world) sentName(image string) string {
 	return reference.FamiliarString(reference.TagNameOnly(named))
 }
 
-// WhenIPrune prunes the build cache, which sends nothing.
-func (w *world) WhenIPrune() {
+// WhenIPrune prunes the build cache, the coordinator's if options name one, which sends nothing.
+func (w *world) WhenIPrune(options ...option) {
 	w.t.Helper()
+	c := w.apply("prune", options)
 	w.sendsNothing("WhenIPrune")
-	w.run("prune")
+	w.run(append([]string{"prune"}, c.flags...)...)
 }
 
 // WhenIExport exports target to the folder target, in a folder of the command's own, unless options say where.

@@ -42,10 +42,34 @@ import (
 // the coordinator.
 func (w *world) GivenACoordinator() {
 	w.t.Helper()
-	local, err := run.NewLocal(testenv.PrivateStores(w.t).Options)
+	w.coordinatorStores = testenv.PrivateStores(w.t).Options
+	w.startLocalCoordinator()
+}
+
+// GivenTheCoordinatorRestartsWithoutItsState stops the coordinator of GivenACoordinator and starts another on its
+// stores, at another address, which <coordinator> then names, remembering none of the first's jobs, as a coordinator
+// restarted without its state does.
+func (w *world) GivenTheCoordinatorRestartsWithoutItsState() {
+	w.t.Helper()
+	if w.coordinatorStores.GraphRoot == "" {
+		w.t.Fatal("no GivenACoordinator step started a coordinator to restart")
+	}
+	w.coordinatorServer.Close()
+	if err := w.coordinatorLocal.Close(); err != nil {
+		w.t.Fatal(err)
+	}
+	w.coordinator = ""
+	w.startLocalCoordinator()
+}
+
+// startLocalCoordinator starts a coordinator that runs builds in this process, on the coordinator's stores.
+func (w *world) startLocalCoordinator() {
+	w.t.Helper()
+	local, err := run.NewLocal(w.coordinatorStores)
 	if err != nil {
 		w.t.Fatal(err)
 	}
+	w.coordinatorLocal = local
 	w.t.Cleanup(func() { local.Close() })
 	content, err := local.ContentStore()
 	if err != nil {
@@ -286,7 +310,16 @@ func (w *world) front(served *server) string {
 		w.t.Fatal(err)
 	}
 	w.watching = make(chan struct{}, 1)
+	w.timeline = &jobTimeline{jobs: map[string]*jobTimes{}}
 	proxy := &httputil.ReverseProxy{FlushInterval: -1} // so that events stream
+	proxy.ModifyResponse = func(r *http.Response) error {
+		// remote's pathEvents, /v1/jobs/{id}/events, whose IDs are hex, which no escaping changes
+		if job, ok := strings.CutPrefix(r.Request.URL.Path, "/v1/jobs/"); ok && strings.HasSuffix(job, "/events") {
+			job = strings.TrimSuffix(job, "/events")
+			r.Body = &eventWatch{ReadCloser: r.Body, job: job, timeline: w.timeline}
+		}
+		return nil
+	}
 	proxy.Rewrite = func(pr *httputil.ProxyRequest) {
 		pr.SetURL(backend)
 		if r := pr.Out; r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/events") {
@@ -317,9 +350,10 @@ func (w *world) atCoordinator(s string) string {
 }
 
 // onTheCoordinator builds on the coordinator at url, with --coordinator, in which <coordinator> stands for the
-// scenario's. Every command takes it, and graph and update, which ask the coordinator which platform to configure for.
+// scenario's. Every command takes it, and graph and update, which ask the coordinator which platform to configure for,
+// and trace and prune, which read and prune its build cache.
 func onTheCoordinator(url string) option {
-	return option{"onTheCoordinator", everyCommandGraphUpdateAndTrace, func(w *world, c *commandLine) {
+	return option{"onTheCoordinator", everyCommandGraphUpdateTraceAndPrune, func(w *world, c *commandLine) {
 		w.t.Helper()
 		c.flags = append(c.flags, "--coordinator", w.atCoordinator(url))
 	}}
@@ -362,6 +396,99 @@ func (w *world) GivenACoordinatorWithAWorker(args ...string) {
 // signal drains it first, as WhenIInterruptTheCoordinatorWhileIBuild does.
 func (w *world) GivenAnotherClientBuildsOnTheCoordinator(target string, options ...option) {
 	w.t.Helper()
+	w.jobsMu.Lock()
+	before := len(w.jobIDs)
+	w.jobsMu.Unlock()
+	w.otherBuild = w.startAnotherClient(w.project(), target, options)
+	// A client watches a job only once the coordinator has accepted it.
+	select {
+	case <-w.watching:
+	case <-w.otherBuild.done:
+		w.t.Fatalf("the other client's build ended before it watched its job, with %v, printing:\n%s",
+			w.otherBuild.err, w.otherBuild.output.String())
+	case <-time.After(20 * time.Second):
+		w.t.Fatal("the other client didn't watch a job on the coordinator")
+	}
+	w.jobsMu.Lock()
+	defer w.jobsMu.Unlock()
+	if len(w.jobIDs) != before+1 {
+		w.t.Fatalf("the coordinator accepted %d jobs of the other client, want 1", len(w.jobIDs)-before)
+	}
+	w.otherJob = w.jobIDs[before]
+}
+
+// GivenTwoClientsBuiltAtOnceOnTheCoordinator builds target on the scenario's coordinator, which options must name,
+// from two clients at once, the first with the project's files as they are and also those of first, the second with
+// them and those of second, and waits until both have built it, failing the scenario if either fails.
+func (w *world) GivenTwoClientsBuiltAtOnceOnTheCoordinator(target string, first, second files, options ...option) {
+	w.t.Helper()
+	deadline := time.After(5 * time.Minute) // for the whole step, so that a client that stalls fails it
+	w.jobsMu.Lock()
+	before := len(w.jobIDs)
+	w.jobsMu.Unlock()
+	var clients []*otherClient
+	for _, overlay := range []files{first, second} {
+		kept, root := maps.Clone(w.files), w.root
+		maps.Copy(w.files, overlay)
+		fsys := w.project()
+		w.files, w.root = kept, root
+		clients = append(clients, w.startAnotherClient(fsys, target, options))
+	}
+	for i, c := range clients {
+		if err := c.wait(deadline); err != nil {
+			w.t.Fatalf("client %d's build %v, printing:\n%s", i+1, err, c.output.String())
+		}
+	}
+	// At once: each job's target was building, or queued to, before the other job was done, as their events said
+	// when the coordinator's front read them. That the two history writes ran at the same moment would take a barrier
+	// within both attempts, which testing-gaps.md records.
+	w.jobsMu.Lock()
+	jobs := slices.Clone(w.jobIDs[before:])
+	w.jobsMu.Unlock()
+	if len(jobs) != 2 {
+		w.t.Fatalf("the coordinator accepted %d jobs of the two clients, want 2", len(jobs))
+	}
+	timeline := w.watchedJobs()
+	one, two := timeline.times(jobs[0]), timeline.times(jobs[1])
+	for i, j := range []jobTimes{one, two} {
+		if j.building.IsZero() || j.done.IsZero() {
+			w.t.Fatalf("job %s's events didn't say it built a target and was done", jobs[i])
+		}
+	}
+	if !one.building.Before(two.done) || !two.building.Before(one.done) {
+		w.t.Fatalf("the two jobs' targets didn't build at once: %v to %v, and %v to %v", one.building, one.done,
+			two.building, two.done)
+	}
+}
+
+// wait waits until the client's build has ended, or deadline passes, and returns why it didn't succeed, if it didn't.
+func (c *otherClient) wait(deadline <-chan time.Time) error {
+	select {
+	case <-c.done:
+		if c.err != nil {
+			return fmt.Errorf("failed with %w", c.err)
+		}
+		return nil
+	case <-deadline:
+		return errors.New("didn't end in time")
+	}
+}
+
+// otherClient is a client that a Given step started, apart from the scenario's commands.
+type otherClient struct {
+	cancel context.CancelFunc
+	done   chan struct{} // closed once its command has ended, with err
+	err    error
+	output *syncBuffer
+}
+
+// startAnotherClient starts building target from the project fsys, as another client would, until the scenario
+// ends, when it is interrupted. What it prints is its own, which only the other client's steps check, but which the
+// scenario logs once it ends. It takes no option that traces or interrupts, which are for the commands that When
+// steps run. Its watch of its job tells the scenario's watch signal, as any command's does, so a later step that
+// waits on that signal drains it first, as WhenIInterruptTheCoordinatorWhileIBuild does.
+func (w *world) startAnotherClient(fsys afero.Fs, target string, options []option) *otherClient {
+	w.t.Helper()
 	if w.coordinator == "" {
 		w.t.Fatal("no Given step started a coordinator for another client to build on")
 	}
@@ -372,41 +499,210 @@ func (w *world) GivenAnotherClientBuildsOnTheCoordinator(target string, options 
 	if w.interruptOn != "" || w.interruptIn != 0 || w.interruptBy != 0 {
 		w.t.Fatal("another client's build isn't interrupted by an option; the scenario's end interrupts it")
 	}
-	fsys := w.project()
 	args := w.commandLine(fsys, append([]string{"build", target}, c.flags...))
 	select {
 	case <-w.watching: // told of a watch by an earlier command, not this build's
 	default:
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	var output syncBuffer
-	var err error
+	other := &otherClient{cancel: cancel, done: make(chan struct{}), output: &syncBuffer{}}
 	go func() {
-		defer close(done)
+		defer close(other.done)
 		cmd := cli.NewRootCommand(w.commandConfig(fsys))
-		cmd.SetOut(&output)
-		cmd.SetErr(&output)
+		cmd.SetOut(other.output)
+		cmd.SetErr(other.output)
 		cmd.SetArgs(args)
-		err = cmd.ExecuteContext(ctx)
+		other.err = cmd.ExecuteContext(ctx)
 	}()
 	w.t.Cleanup(func() {
 		cancel()
 		select {
-		case <-done:
-			w.t.Logf("the other client's build ended with %v, printing:\n%s", err, output.String())
+		case <-other.done:
+			w.t.Logf("the other client's build ended with %v, printing:\n%s", other.err, other.output.String())
 		case <-time.After(time.Minute):
 			w.t.Error("the other client's build didn't end within a minute of being interrupted")
 		}
 	})
-	// A client watches a job only once the coordinator has accepted it.
+	return other
+}
+
+// GivenTheOtherClientIsInterruptedOnceJoined interrupts the build of GivenAnotherClientBuildsOnTheCoordinator, as
+// Ctrl-C would, once another job on the coordinator is told that it shares another build's attempt, as the scenario's
+// next command's will be, so that the other client leaves an attempt that a build still waits on.
+func (w *world) GivenTheOtherClientIsInterruptedOnceJoined() {
+	w.t.Helper()
+	other, job, timeline := w.otherClient(), w.otherJob, w.watchedJobs()
+	ended := make(chan struct{})
+	w.t.Cleanup(func() { close(ended) })
+	go func() {
+		for {
+			if timeline.joinedBy(job) {
+				other.cancel()
+				return
+			}
+			select {
+			case <-other.done:
+				return
+			case <-ended:
+				return
+			case <-time.After(10 * time.Millisecond):
+			}
+		}
+	}()
+}
+
+// GivenTheOtherClientIsBuildingIt waits until the job of GivenAnotherClientBuildsOnTheCoordinator builds a target,
+// rather than having been merely accepted, so that the scenario's next build of it joins the attempt the other
+// started, rather than starting one the other joins.
+func (w *world) GivenTheOtherClientIsBuildingIt() {
+	w.t.Helper()
+	other, job, timeline := w.otherClient(), w.otherJob, w.watchedJobs()
+	deadline := time.After(time.Minute)
+	for timeline.times(job).building.IsZero() {
+		select {
+		case <-other.done:
+			w.t.Fatalf("the other client's build ended, with %v, before building, printing:\n%s", other.err,
+				other.output.String())
+		case <-deadline:
+			w.t.Fatal("the other client's build didn't start building within a minute")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
+
+// watchedJobs returns the timeline of the jobs whose events the scenario's coordinator streams, failing the scenario
+// if its coordinator isn't one whose events are watched.
+func (w *world) watchedJobs() *jobTimeline {
+	w.t.Helper()
+	if w.timeline == nil {
+		w.t.Fatal("the scenario's coordinator streams events that no step watches")
+	}
+	return w.timeline
+}
+
+// jobTimeline is what the events of a coordinator's jobs said, and when, by job ID.
+type jobTimeline struct {
+	mu   sync.Mutex
+	jobs map[string]*jobTimes
+}
+
+// jobTimes are when a job's events first said a target builds, and that the job was done, and whether they said a
+// target shares another build's attempt.
+type jobTimes struct {
+	building, done time.Time
+	joined         bool
+}
+
+// times returns what job's events said so far.
+func (t *jobTimeline) times(job string) jobTimes {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if j := t.jobs[job]; j != nil {
+		return *j
+	}
+	return jobTimes{}
+}
+
+// joinedBy reports whether a job other than job was told that a target of it shares another build's attempt.
+func (t *jobTimeline) joinedBy(job string) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for id, j := range t.jobs {
+		if id != job && j.joined {
+			return true
+		}
+	}
+	return false
+}
+
+// eventWatch passes a job's events through, noting in timeline when they say what jobTimes holds.
+type eventWatch struct {
+	io.ReadCloser
+	job      string
+	timeline *jobTimeline
+	partial  []byte // the start of a line that a read ended within
+}
+
+func (e *eventWatch) Read(p []byte) (int, error) {
+	n, err := e.ReadCloser.Read(p)
+	e.partial = append(e.partial, p[:n]...)
+	for {
+		i := bytes.IndexByte(e.partial, '\n')
+		if i < 0 {
+			break
+		}
+		var line struct {
+			Event *api.Event `json:"event"`
+		}
+		if json.Unmarshal(e.partial[:i], &line) == nil && line.Event != nil {
+			e.note(*line.Event)
+		}
+		e.partial = e.partial[i+1:]
+	}
+	return n, err
+}
+
+// note notes what ev says of the job, as it arrives.
+func (e *eventWatch) note(ev api.Event) {
+	e.timeline.mu.Lock()
+	defer e.timeline.mu.Unlock()
+	j := e.timeline.jobs[e.job]
+	if j == nil {
+		j = &jobTimes{}
+		e.timeline.jobs[e.job] = j
+	}
+	switch {
+	case ev.Kind == api.EventStatus && (strings.HasPrefix(ev.Status, "building") ||
+		strings.HasPrefix(ev.Status, "rebuilding")):
+		if j.building.IsZero() {
+			j.building = time.Now()
+		}
+		if strings.HasSuffix(ev.Status, "shared with another build") { // not with a target of its own job
+			j.joined = true
+		}
+	case ev.Kind == api.EventDone && j.done.IsZero():
+		j.done = time.Now()
+	}
+}
+
+// ThenTheOtherClientIsInterrupted waits until the build of GivenAnotherClientBuildsOnTheCoordinator has ended, and
+// checks that an interrupt ended it.
+func (w *world) ThenTheOtherClientIsInterrupted() {
+	w.t.Helper()
+	w.otherClientEnded()
+	if !errors.Is(w.otherBuild.err, context.Canceled) {
+		w.t.Fatalf("the other client's build ended with %v, not interrupted, printing:\n%s", w.otherBuild.err,
+			w.otherBuild.output.String())
+	}
+}
+
+// ThenTheOtherClientSucceeds waits until the build of GivenAnotherClientBuildsOnTheCoordinator has ended, and checks
+// that it succeeded.
+func (w *world) ThenTheOtherClientSucceeds() {
+	w.t.Helper()
+	w.otherClientEnded()
+	if w.otherBuild.err != nil {
+		w.t.Fatalf("the other client's build failed with %v, printing:\n%s", w.otherBuild.err,
+			w.otherBuild.output.String())
+	}
+}
+
+// otherClient returns the client of GivenAnotherClientBuildsOnTheCoordinator.
+func (w *world) otherClient() *otherClient {
+	w.t.Helper()
+	if w.otherBuild == nil {
+		w.t.Fatal("no GivenAnotherClientBuildsOnTheCoordinator step started another client")
+	}
+	return w.otherBuild
+}
+
+// otherClientEnded waits until the other client's build has ended, within five minutes.
+func (w *world) otherClientEnded() {
+	w.t.Helper()
 	select {
-	case <-w.watching:
-	case <-done:
-		w.t.Fatalf("the other client's build ended before it watched its job, with %v, printing:\n%s",
-			err, output.String())
-	case <-time.After(20 * time.Second):
-		w.t.Fatal("the other client didn't watch a job on the coordinator")
+	case <-w.otherClient().done:
+	case <-time.After(5 * time.Minute):
+		w.t.Fatal("the other client's build didn't end within five minutes")
 	}
 }
 

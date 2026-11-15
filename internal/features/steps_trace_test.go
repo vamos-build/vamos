@@ -5,7 +5,9 @@ import (
 	"cmp"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"maps"
 	"os"
 	"os/exec"
@@ -181,7 +183,8 @@ func (w *world) ThenTheTraceSpanIsWithin(process, name, outerProcess, outer stri
 }
 
 // ThenEverySpanEndsBeforeAnyStarts checks that every span of process that first names ends before any span of process
-// that then names starts, by the trace's clock, stopping the scenario if either names none.
+// that then names starts, by the trace's clock, within a microsecond, which the trace's floating-point times can't
+// tell apart, stopping the scenario if either names none.
 func (w *world) ThenEverySpanEndsBeforeAnyStarts(process, first, then string) {
 	w.t.Helper()
 	tr := w.theTrace()
@@ -192,7 +195,7 @@ func (w *world) ThenEverySpanEndsBeforeAnyStarts(process, first, then string) {
 	}
 	for _, b := range before {
 		for _, a := range after {
-			if b.end > a.TS {
+			if b.end > a.TS+1 { // in microseconds
 				w.t.Errorf("%q ends after %q starts", b.Name, a.Name)
 			}
 		}
@@ -683,6 +686,13 @@ func (w *world) traceName(name string) string {
 			w.t.Fatal("no step read a printed trace's digest")
 		}
 		return w.printedTrace
+	case name == "<other client's trace>":
+		w.otherClientEnded()
+		found := printedTrace.FindAllStringSubmatch(w.otherBuild.output.String(), -1)
+		if len(found) != 1 {
+			w.t.Fatalf("the other client named %d traces, want 1:\n%s", len(found), w.otherBuild.output.String())
+		}
+		return found[0][1]
 	case name == "<job>":
 		w.jobsMu.Lock()
 		defer w.jobsMu.Unlock()
@@ -724,6 +734,17 @@ func (w *world) GivenTheAttemptTraceOfIsRemoved(name string) {
 	d := digest.Digest(w.spanArg(name, "attempt trace"))
 	if err := os.Remove(filepath.Join(w.cacheDir(), "cas", "sha256", d.Encoded())); err != nil {
 		w.t.Fatal(err)
+	}
+}
+
+// ThenItWritesNoTrace checks that the last command, which was to write a trace, wrote no file.
+func (w *world) ThenItWritesNoTrace() {
+	w.t.Helper()
+	if w.tracePath == "" {
+		w.t.Fatal("the last command wasn't to write a trace")
+	}
+	if _, err := os.Stat(w.tracePath); !errors.Is(err, fs.ErrNotExist) {
+		w.t.Errorf("%s is there, or can't be checked (%v); want no file", w.tracePath, err)
 	}
 }
 

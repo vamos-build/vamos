@@ -22,7 +22,9 @@ import (
 	"github.com/spf13/afero"
 	"github.com/vamos-build/vamos/internal/cli"
 	"github.com/vamos-build/vamos/internal/graph"
+	"github.com/vamos-build/vamos/internal/run"
 	"github.com/vamos-build/vamos/internal/testenv"
+	"go.podman.io/storage"
 )
 
 // The steps are split by subject, in files that sort together:
@@ -66,19 +68,24 @@ type world struct {
 	root    string          // the folder that holds the project, if it is on disk
 	before  map[string]bool // the store's unnamed images when the scenario began, if it builds
 
-	coordinator       string             // the URL of the scenario's coordinator, <coordinator>, once started
-	jobs              atomic.Int64       // the jobs that the scenario's coordinator was given
-	toldMu            sync.Mutex         // guards told
-	told              []toldJob          // what each job the scenario's coordinator was given told it, in order
-	served            atomic.Int64       // the requests that the scenario's coordinator was sent
-	coordinatorServer *httptest.Server   // that serves <coordinator>, counting what it is sent
-	watching          chan struct{}      // told, if it has room, once front sends on a command's watch of a job
-	interruptedAt     time.Time          // when WhenIInterruptTheCoordinatorWhileIBuild interrupted the coordinator
-	buildTook         time.Duration      // how long after that the build ended
-	local             *server            // the coordinator that GivenALocalCoordinator started
-	interruptLocal    context.CancelFunc // interrupts it
-	localErr          error              // what it ended with, once interrupted
-	localTook         time.Duration      // how long it took to end, once interrupted
+	coordinator       string               // the URL of the scenario's coordinator, <coordinator>, once started
+	coordinatorStores storage.StoreOptions // the stores of GivenACoordinator's, which a restart opens again
+	coordinatorLocal  *run.Local           // the executor of GivenACoordinator's
+	timeline          *jobTimeline         // what the events of the coordinator's jobs said, if a step watches them
+	otherJob          string               // the job of GivenAnotherClientBuildsOnTheCoordinator's client
+	otherBuild        *otherClient         // the client of GivenAnotherClientBuildsOnTheCoordinator, if started
+	jobs              atomic.Int64         // the jobs that the scenario's coordinator was given
+	toldMu            sync.Mutex           // guards told
+	told              []toldJob            // what each job the scenario's coordinator was given told it, in order
+	served            atomic.Int64         // the requests that the scenario's coordinator was sent
+	coordinatorServer *httptest.Server     // that serves <coordinator>, counting what it is sent
+	watching          chan struct{}        // told, if it has room, once front sends on a command's watch of a job
+	interruptedAt     time.Time            // when WhenIInterruptTheCoordinatorWhileIBuild interrupted the coordinator
+	buildTook         time.Duration        // how long after that the build ended
+	local             *server              // the coordinator that GivenALocalCoordinator started
+	interruptLocal    context.CancelFunc   // interrupts it
+	localErr          error                // what it ended with, once interrupted
+	localTook         time.Duration        // how long it took to end, once interrupted
 
 	prepared   string                   // the folder the next command sends to, if Given steps have put something there
 	outside    string                   // a folder outside the project, for files that commands read, such as secrets

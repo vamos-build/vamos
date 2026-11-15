@@ -3,6 +3,7 @@ package features
 import (
 	"maps"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,6 +16,17 @@ import (
 func newTraceWorld(t *testing.T) *world {
 	t.Helper()
 	return newBuildingWorld(t)
+}
+
+// slowTaskSteps returns the names of the steps of aSlowTask(nonce)'s task: setting the nonce, then sleeping six
+// seconds, long enough for another build to join it.
+func slowTaskSteps(nonce string) []string {
+	return []string{`env(NONCE="` + nonce + `")`, `run(["sleep", "6"])`}
+}
+
+// aSlowTask declares the task "slow", on busybox, whose steps are slowTaskSteps(nonce).
+func aSlowTask(nonce string) string {
+	return `task(name="slow", base="busybox", steps=[` + strings.Join(slowTaskSteps(nonce), ", ") + `])`
 }
 
 // aTaskAndALayer declares the task "gen", which joins the files of the glob "src", and the layer "app", which adds
@@ -510,6 +522,16 @@ func TestTrace_ACommandPrintsItsTrace(t *testing.T) {
 		w.ThenItPrintsNoTrace()
 	})
 
+	t.Run("--trace writes a command that ran no job", func(t *testing.T) {
+		w := newWorld(t)
+		w.GivenTheProjectHolds(files{"BUILD": "layer(name=\"app\", base=\"scratch\")\nnope("})
+		w.WhenIBuild("app", traced())
+		w.ThenItFailsWith("/project/BUILD:2:6: got end of file, want ')'")
+		w.ThenItPrintsNoTrace()
+		w.ThenTheTraceSpanHolds("vamos", "vamos build app", "load")
+		w.ThenTheTraceSpanSaysAtLeast("vamos", "load", traceArgs{"error": "*got end of file*"})
+	})
+
 	t.Run("A trace that can't be stored is warned about", func(t *testing.T) {
 		w := newTraceWorld(t)
 		w.GivenACoordinatorThatRefusesToStoreCommandTraces()
@@ -574,6 +596,25 @@ func TestTrace_VamosTraceWritesAStoredTrace(t *testing.T) {
 			"cache write")
 	})
 
+	t.Run("A job the coordinator no longer remembers", func(t *testing.T) {
+		w := newTraceWorld(t)
+		w.GivenACoordinator()
+		w.GivenTheBuildFileDeclares(`layer(name="app", base="scratch", steps=[env(NONCE="` + testenv.NewNonce() +
+			`")])`)
+		w.WhenIBuild("app", onTheCoordinator("<coordinator>"))
+		w.ThenItSucceeds()
+		w.ThenItPrintsItsTrace()
+		w.GivenTheCoordinatorRestartsWithoutItsState()
+		w.WhenIReadTheTrace("<job>", onTheCoordinator("<coordinator>"))
+		w.ThenItFailsWith("the coordinator doesn't know the job <job> any more; " +
+			"the trace digest that its command printed still reads its trace")
+		w.ThenItWritesNoTrace()
+		w.WhenIReadTheTrace("<printed trace>", onTheCoordinator("<coordinator>"))
+		w.ThenItSucceeds()
+		w.ThenTheTraceSpanHolds("executor", `layer "app"`, "cache lookup", "start", `env(NONCE="*`, "commit",
+			"cache write")
+	})
+
 	for _, example := range []struct {
 		name, trace, error string
 	}{
@@ -628,11 +669,62 @@ func TestTrace_AnAttemptsTraceIsKeptWithItsResult(t *testing.T) {
 		w.GivenACoordinatorWithAWorker()
 		w.GivenAProjectThatPullsBusybox()
 		w.GivenTheBuildFileDeclares(`task(name="slow", base="busybox", steps=[env(NONCE="` + testenv.NewNonce() +
-			`"), run(["sleep", "3"])])`)
+			`"), run(["sleep", "6"])])`)
 		w.GivenAnotherClientBuildsOnTheCoordinator("slow", onTheCoordinator("<coordinator>"))
+		w.GivenTheOtherClientIsBuildingIt()
 		w.WhenIBuild("slow", onTheCoordinator("<coordinator>"), traced())
 		w.ThenItSucceeds()
-		w.ThenTheTraceSpanIsOnTrack("worker", `run(["sleep", "3"])`, `task "slow" (shared)`)
+		w.ThenTheTraceSpanIsOnTrack("worker", `run(["sleep", "6"])`, `task "slow" (shared)`)
+	})
+
+	t.Run("Two builds that share an attempt both show its steps", func(t *testing.T) {
+		w := newTraceWorld(t)
+		w.GivenARegistry()
+		w.GivenACoordinatorWithAWorker()
+		w.GivenAProjectThatPullsBusybox()
+		nonce := testenv.NewNonce()
+		w.GivenTheBuildFileDeclares(aSlowTask(nonce))
+		steps := slowTaskSteps(nonce)
+		w.GivenAnotherClientBuildsOnTheCoordinator("slow", onTheCoordinator("<coordinator>"))
+		w.GivenTheOtherClientIsBuildingIt()
+		w.WhenIBuild("slow", onTheCoordinator("<coordinator>"), traced())
+		w.ThenItSucceeds()
+		for _, step := range steps {
+			w.ThenTheTraceSpanIsOnTrack("worker", step, `task "slow" (shared)`)
+		}
+		w.ThenEverySpanEndsBeforeAnyStarts("worker", steps[0], steps[1])
+		w.ThenTheOtherClientSucceeds()
+		w.WhenIReadTheTrace("<other client's trace>", onTheCoordinator("<coordinator>"))
+		w.ThenItSucceeds()
+		for _, step := range steps { // its own, off the shared track
+			w.ThenTheTraceSpanIsOnTrack("worker", step, step)
+		}
+		w.ThenEverySpanEndsBeforeAnyStarts("worker", steps[0], steps[1])
+		w.ThenTheTraceHasNoSpan("executor", "trace incomplete")
+	})
+
+	t.Run("A build that left a shared attempt says so", func(t *testing.T) {
+		w := newTraceWorld(t)
+		w.GivenARegistry()
+		w.GivenACoordinatorWithAWorker()
+		w.GivenAProjectThatPullsBusybox()
+		nonce := testenv.NewNonce()
+		w.GivenTheBuildFileDeclares(aSlowTask(nonce))
+		steps := slowTaskSteps(nonce)
+		w.GivenAnotherClientBuildsOnTheCoordinator("slow", onTheCoordinator("<coordinator>"))
+		w.GivenTheOtherClientIsBuildingIt()
+		w.GivenTheOtherClientIsInterruptedOnceJoined()
+		w.WhenIBuild("slow", onTheCoordinator("<coordinator>"), traced())
+		w.ThenItSucceeds()
+		w.ThenTheOtherClientIsInterrupted()
+		for _, step := range steps {
+			w.ThenTheTraceSpanIsOnTrack("worker", step, `task "slow" (shared)`)
+		}
+		w.ThenEverySpanEndsBeforeAnyStarts("worker", steps[0], steps[1])
+		w.WhenIReadTheTrace("<other client's trace>", onTheCoordinator("<coordinator>"))
+		w.ThenItSucceeds()
+		w.ThenTheTraceSpanSaysAtLeast("executor", "trace incomplete",
+			traceArgs{"reason": "the job left the attempt running"})
 	})
 
 	t.Run("A reused target shows the time it saved", func(t *testing.T) {
