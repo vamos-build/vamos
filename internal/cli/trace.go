@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"sync"
@@ -17,8 +18,9 @@ const clientProcess = "vamos"
 
 // traceSession collects the spans of a command's trace, the client's and the executor's,
 // for the file that --trace names.
-// write takes mu before the recorder's lock; no recorder callback acquires mu.
-// It snapshots under those locks and writes the file after unlocking.
+// write snapshots the executor's spans under mu, and the recorder's under its own lock, apart;
+// no recorder callback acquires mu.
+// It writes the file after unlocking.
 // The owner must finish executor callbacks and client spans before write.
 type traceSession struct {
 	path     string // absolute
@@ -109,10 +111,13 @@ func (t *traceSession) setOffset(offset tracing.Offset) {
 }
 
 // write writes the trace: the client's spans, and the executor's, placed by the client's clock.
+// If the client's recorder refused spans, an instant says so where the first would have been.
 func (t *traceSession) write() error {
 	t.mu.Lock()
-	spans := append(t.recorder.Spans(), tracing.Shift(t.remote, t.offset)...)
+	remote := tracing.Shift(t.remote, t.offset)
 	t.mu.Unlock()
+	client, lost := t.recorder.Snapshot()
+	spans := append(tracing.Trim(client, lost, math.MaxInt), remote...)
 	return finish.WriteFile(t.path, func(w io.Writer) error {
 		return tracing.WriteChrome(w, spans)
 	})

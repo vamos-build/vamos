@@ -2,16 +2,16 @@
 
 ## 1. Stored spans (`internal/tracing`)
 
-- [ ] 1.1 Add the stored span encoding with its version and `kind`, and `MaxTraceSize` (16 MiB). Make a recorder count
+- [x] 1.1 Add the stored span encoding with its version and `kind`, and `MaxTraceSize` (16 MiB). Make a recorder count
   each span's encoded size as it ends, keep at most twice the cap, and refuse and count spans past that. Add the trim
   that fits a trace into the bytes it is given by dropping spans latest-started first, and adds one `trace truncated`
   instant, with the count of spans dropped while recording and trimming, on the track of the earliest-started span lost,
   leaving room for it. Table-test round trips, the recording limit, that a trim drops children before their target
   span and keeps the first steps, the instant's track and count, and that a trimmed trace always fits. Verify with
   `go test ./internal/tracing`.
-- [ ] 1.2 Add `WithRecorderAt(ctx, r)`, which records ctx's later spans in `r` and keeps ctx's parent span and track.
+- [x] 1.2 Add `WithRecorderAt(ctx, r)`, which records ctx's later spans in `r` and keeps ctx's parent span and track.
   Test that spans started from it nest and lie as ctx's would. Verify with `go test ./internal/tracing`.
-- [ ] 1.3 Update `internal/tracing/doc.go` for stored traces, the cap, the trim and `WithRecorderAt`. Verify with
+- [x] 1.3 Update `internal/tracing/doc.go` for stored traces, the cap, the trim and `WithRecorderAt`. Verify with
   `go doc ./internal/tracing` and the documentation checks in `.agents/kb/documentation.md`.
 
 ## 2. Results, provenance and target history (`internal/cache`)
