@@ -1406,19 +1406,52 @@ func TestSchedulerReuseWithoutOutput(t *testing.T) {
 	}
 }
 
-// BenchmarkSchedulerCached measures the walk of a large graph whose every target is cached: many pulls, and many
-// tasks on them, each adding the files of the one before, so that scheduling, not running, is what is timed.
+// BenchmarkSchedulerCached runs a graph of 2000 tasks whose results are all cached, as a build that changed nothing
+// does, so that what a hit costs shows.
 func BenchmarkSchedulerCached(b *testing.B) {
+	g, backend := cachedGraph(b, false)
+	for b.Loop() {
+		if _, err := New(g, backend, &recordedEvents{}, Options{Bound: 8}).Run(b.Context()); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+// BenchmarkSchedulerCachedJob runs BenchmarkSchedulerCached's graph as a job does, recorded, saving its manifest, in
+// a named workspace whose nodes name their targets, so that each hit reads its target's history.
+func BenchmarkSchedulerCachedJob(b *testing.B) {
+	g, backend := cachedGraph(b, true)
+	for b.Loop() {
+		ctx, trace := ForJob(b.Context())
+		if _, err := New(g, backend, &recordedEvents{}, Options{Bound: 8, Workspace: "com.acme"}).Run(ctx); err != nil {
+			b.Fatal(err)
+		}
+		if _, err := trace.Save(ctx, cache.NewMemory()); err != nil { // not kept, as no iteration's is read
+			b.Fatal(err)
+		}
+	}
+}
+
+// cachedGraph returns a graph of 50 pulls and 2000 tasks, each adding the one before, and a backend that has built
+// it, with its nodes naming targets, and built in the named workspace com.acme, if targets is set.
+func cachedGraph(b *testing.B, targets bool) (*graph.Graph, Backend) {
+	b.Helper()
 	const pulls, tasks = 50, 2000
 	m, f := fakeFixture(b)
 	sel := fileset.DefaultSelection()
 	sel.Include = []string{"."}
 	g := &graph.Graph{Version: graph.Version, ExecPlatform: "linux/amd64"}
+	target := func(name string) string {
+		if !targets {
+			return ""
+		}
+		return "//:" + name + " platform=linux/amd64"
+	}
 	for i := range pulls {
 		image := fmt.Sprintf("example.com/base%d:v1", i)
 		f.registry[image] = digest.FromString(image)
 		g.Nodes = append(g.Nodes, graph.Node{Label: "base", Desc: fmt.Sprintf(`pull "base%d"`, i),
-			Pull: &graph.Pull{Image: image, Platform: "linux/amd64"}})
+			Target: target(fmt.Sprint("base", i)), Pull: &graph.Pull{Image: image, Platform: "linux/amd64"}})
 	}
 	for i := range tasks {
 		name := fmt.Sprintf("t%d", i)
@@ -1428,22 +1461,24 @@ func BenchmarkSchedulerCached(b *testing.B) {
 			steps = append(steps, graph.Step{Op: graph.OpAdd, Display: `add("prev", "/prev")`, From: &from,
 				Dest: "/prev"})
 		}
-		g.Nodes = append(g.Nodes, graph.Node{Label: name, Desc: `task "` + name + `"`, Task: &graph.Task{
-			Base: graph.Ref(i % pulls), Steps: steps, Output: &graph.Output{Source: "/out", Selection: sel}}})
+		g.Nodes = append(g.Nodes, graph.Node{Label: name, Desc: `task "` + name + `"`, Target: target(name),
+			Task: &graph.Task{Base: graph.Ref(i % pulls), Steps: steps, Output: &graph.Output{Source: "/out",
+				Selection: sel}}})
 		g.Roots = append(g.Roots, graph.Ref(pulls+i))
 	}
 	if err := g.Validate(); err != nil {
 		b.Fatal(err)
 	}
 	backend := Backend{Content: m, Records: m, Checker: f, Runner: NewSharing(f, m, m)}
-	if _, err := New(g, backend, &recordedEvents{}, Options{Bound: 1}).Run(b.Context()); err != nil {
+	workspace := ""
+	if targets {
+		workspace = "com.acme"
+	}
+	opts := Options{Bound: 1, Workspace: workspace}
+	if _, err := New(g, backend, &recordedEvents{}, opts).Run(b.Context()); err != nil {
 		b.Fatal(err)
 	}
-	for b.Loop() {
-		if _, err := New(g, backend, &recordedEvents{}, Options{Bound: 8}).Run(b.Context()); err != nil {
-			b.Fatal(err)
-		}
-	}
+	return g, backend
 }
 
 // storeLocation returns the location of the image with ID id in a local store, as the local runner records it.
@@ -1679,4 +1714,74 @@ func (r *overlappingResolves) run(ctx context.Context, req Request, ev Output) (
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.fakeRunner.Run(ctx, req, ev)
+}
+
+// BenchmarkSchedulerColdChain builds a chain of 100 tasks, each adding the one before, from nothing, against a
+// content store that takes a millisecond over each write, as one across a network does: once with every write
+// delayed, and once with attempt traces' writes alone free, so that what storing attempt traces adds to a cold build
+// shows as the difference.
+func BenchmarkSchedulerColdChain(b *testing.B) {
+	const tasks = 100
+	sel := fileset.DefaultSelection()
+	sel.Include = []string{"."}
+	g := &graph.Graph{Version: graph.Version, ExecPlatform: "linux/amd64"}
+	g.Nodes = append(g.Nodes, graph.Node{Label: "base", Desc: `pull "base"`,
+		Pull: &graph.Pull{Image: "example.com/base:v1", Platform: "linux/amd64"}})
+	for i := range tasks {
+		name := fmt.Sprintf("t%d", i)
+		steps := []graph.Step{{Op: graph.OpRun, Display: `run(["` + name + `"])`, Argv: []string{name}}}
+		if i > 0 {
+			from := graph.Ref(i)
+			steps = append(steps, graph.Step{Op: graph.OpAdd, Display: `add("prev", "/prev")`, From: &from,
+				Dest: "/prev"})
+		}
+		g.Nodes = append(g.Nodes, graph.Node{Label: name, Desc: `task "` + name + `"`, Task: &graph.Task{
+			Base: 0, Steps: steps, Output: &graph.Output{Source: "/out", Selection: sel}}})
+	}
+	g.Roots = []graph.Ref{graph.Ref(tasks)}
+	if err := g.Validate(); err != nil {
+		b.Fatal(err)
+	}
+	for _, traces := range []struct {
+		name string
+		free bool
+	}{{"every write delayed", false}, {"attempt traces free", true}} {
+		b.Run(traces.name, func(b *testing.B) {
+			for b.Loop() {
+				m, f := fakeFixture(b)
+				d := &delayedWrites{Memory: m, delay: time.Millisecond, tracesFree: traces.free}
+				f.content = d
+				backend := Backend{Content: d, Records: m, Checker: f, Runner: NewSharing(f, d, m)}
+				ctx, _ := ForJob(b.Context())
+				if _, err := New(g, backend, &recordedEvents{}, Options{Bound: 8}).Run(ctx); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+// delayedWrites is a content store whose writes each take delay longer, as across a network, but for attempt
+// traces', if tracesFree.
+type delayedWrites struct {
+	*cache.Memory
+	delay      time.Duration
+	tracesFree bool
+}
+
+func (d *delayedWrites) Put(ctx context.Context, r io.Reader, limit int64) (cache.Blob, error) {
+	time.Sleep(d.delay)
+	return d.Memory.Put(ctx, r, limit)
+}
+
+func (d *delayedWrites) PutBytes(ctx context.Context, data []byte) (cache.Blob, error) {
+	if h, err := tracing.ReadHeader(data); !d.tracesFree || err != nil || h.Kind != tracing.KindAttempt {
+		time.Sleep(d.delay)
+	}
+	return d.Memory.PutBytes(ctx, data)
+}
+
+func (d *delayedWrites) Import(ctx context.Context, blob cache.Blob, r io.Reader) error {
+	time.Sleep(d.delay)
+	return d.Memory.Import(ctx, blob, r)
 }

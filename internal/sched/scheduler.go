@@ -881,8 +881,10 @@ func (s *Scheduler) runCached(
 			if err := s.replay(ctx, ref, log); err != nil {
 				return nil, s.failed(ref, fmt.Errorf("replaying its output from the build cache: %w", err))
 			}
-			span.Set(resultArgs(result)...)
-			span.Set(hitArgs(result, span)...)
+			if tracing.Enabled(ctx) { // the args cost more than the hit itself
+				span.Set(resultArgs(result)...)
+				span.Set(hitArgs(result, span)...)
+			}
 			s.recordHit(ctx, span, n, a, key, base.index)
 			jobTraceOf(ctx).Record(api.TraceEntry{Node: ref, Desc: target, Outcome: api.NodeHit,
 				Trace: cloneBlob(result.Trace)})
@@ -913,7 +915,9 @@ func (s *Scheduler) runCached(
 	if err != nil {
 		return nil, s.describe(ref, key, err)
 	}
-	span.Set(resultArgs(rep.Result)...)
+	if tracing.Enabled(ctx) {
+		span.Set(resultArgs(rep.Result)...)
+	}
 	history.add(ctx, span)
 	return rep.Result, nil
 }

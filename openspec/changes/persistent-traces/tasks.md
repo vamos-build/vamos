@@ -198,17 +198,17 @@
 
 ## 9. Integration
 
-- [ ] 9.1 Add a scheduler benchmark that runs `BenchmarkSchedulerCached`'s graph as a job would, recorded, in a named
+- [x] 9.1 Add a scheduler benchmark that runs `BenchmarkSchedulerCached`'s graph as a job would, recorded, in a named
   workspace with targets, so that history is read, reporting allocations. Run it and `BenchmarkSchedulerCached` before
   and after the change, and record any regression in the PR. Add a benchmark in `internal/cli` that assembles a command
   trace naming many attempt traces near the cap, reporting allocations and its peak heap, sampled from `runtime/metrics`
   while it runs and reported through `b.ReportMetric`, and record its result in the PR. Add a benchmark of a cold build
   of a dependency chain against a content store that delays writes, and record how much storing attempt traces adds to
   it. Verify by comparing `go test -bench . -benchmem ./internal/sched ./internal/cli` output.
-- [ ] 9.2 Run `scripts/check` and then `scripts/check full`, and confirm both pass.
+- [x] 9.2 Run `scripts/check` and then `scripts/check full`, and confirm both pass.
 - [ ] 9.3 Run the build smoke checks in `.agents/kb/smoke-checks.md`, open a stored trace from `vamos trace` in
   Perfetto, and run the Kubernetes checks, so that a coordinator's job trace is read by job ID.
-- [ ] 9.4 Run `openspec validate persistent-traces --strict` and confirm it passes.
+- [x] 9.4 Run `openspec validate persistent-traces --strict` and confirm it passes.
 
 ## Workflow follow-up
 
