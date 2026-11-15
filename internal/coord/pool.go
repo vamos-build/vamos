@@ -56,14 +56,15 @@ type attempt struct {
 	out   sched.Output // where what it prints goes
 	trace context.Context
 
-	worker *worker   // nil while pending
-	lease  time.Time // when it is lost unless renewed
-	killed bool      // no build needs it: the worker is told to kill it
-	lost   bool      // its lease expired
-	done   chan struct{}
-	report *remote.AttemptReport
-	err    error
-	clock  *tracing.Offset // how far the worker's clock is ahead of the coordinator's, as its heartbeats say
+	worker   *worker   // nil while pending
+	assigned time.Time // when it was given to its worker, from which its run is counted
+	lease    time.Time // when it is lost unless renewed
+	killed   bool      // no build needs it: the worker is told to kill it
+	lost     bool      // its lease expired
+	done     chan struct{}
+	report   *remote.AttemptReport
+	err      error
+	clock    *tracing.Offset // how far the worker's clock is ahead of the coordinator's, as its heartbeats say
 	// generation is the cache generation the attempt started in; a report from an earlier one than the current is
 	// refused, since what it published may name what a prune removed.
 	generation uint64
@@ -415,10 +416,16 @@ func (p *pool) NextAssignment(ctx context.Context, id string) (*remote.Assignmen
 		if w.running < w.info.Capacity {
 			if at := p.pick(w); at != nil {
 				at.worker = w
-				at.lease = p.now().Add(p.cfg.Lease)
+				at.assigned = p.now()
+				at.lease = at.assigned.Add(p.cfg.Lease)
 				w.running++
+				// Always traced, since an attempt always records its spans, which the worker sends.
+				trace := tracing.Call(at.trace)
+				if trace == nil {
+					trace = &tracing.CallContext{}
+				}
 				a := &remote.Assignment{Attempt: at.id, Request: at.req, Push: at.push, Lease: p.cfg.Lease,
-					Trace: tracing.Call(at.trace)}
+					Trace: trace}
 				p.mu.Unlock()
 				return a, nil
 			}
@@ -608,6 +615,11 @@ func (p *pool) Report(_ context.Context, id string, report remote.AttemptReport)
 		p.end(at, nil, fmt.Errorf("the build cache was pruned while the attempt ran: it started in generation %d, "+
 			"and the cache is at %d; run the command again", at.generation, current))
 		return remote.ErrStaleAttempt
+	}
+	if report.Report != nil {
+		// The run that made the result is this try, by the coordinator's clock: from its assignment to its report,
+		// so that waiting for a worker, and the tries before, aren't counted as what the result took.
+		report.Report.Ran = &sched.Interval{Start: at.assigned, End: p.now()}
 	}
 	p.end(at, &report, nil)
 	return nil

@@ -30,6 +30,7 @@ import (
 	"github.com/vamos-build/vamos/internal/remote"
 	"github.com/vamos-build/vamos/internal/run"
 	"github.com/vamos-build/vamos/internal/testenv"
+	"github.com/vamos-build/vamos/internal/tracing"
 	"github.com/vamos-build/vamos/internal/transfer"
 
 	"github.com/containerd/platforms"
@@ -392,6 +393,15 @@ func TestContract(t *testing.T) {
 			missing, err := m.Missing(t.Context(), blobs)
 			testenv.Must(t, err)
 			return missing
+		},
+		Read: func(t *testing.T, ex api.Executor, b cache.Blob) []byte {
+			t.Helper()
+			mu.Lock()
+			m := contents[ex]
+			mu.Unlock()
+			data, err := m.Read(t.Context(), b, tracing.MaxTraceSize)
+			testenv.Must(t, err)
+			return data
 		},
 		Platform:      run.HostPlatform,
 		Registry:      registry.New(registry.Logger(log.New(io.Discard, "", 0))),

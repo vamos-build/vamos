@@ -393,7 +393,7 @@ func TestRestartKeepsCancelled(t *testing.T) {
 }
 
 // TestRestartRemembersExpired checks that a build evicted before a restart is still known to have expired after it,
-// rather than taken for one the coordinator never had.
+// rather than taken for one the coordinator never had, and that its trace is still found by its ID.
 func TestRestartRemembersExpired(t *testing.T) {
 	r := newRestartable(t, Config{Grace: 100 * time.Millisecond})
 	startWorker(t, r.fixture, amd64, 2, fakeRun(r.fixture, nil))
@@ -419,9 +419,12 @@ func TestRestartRemembersExpired(t *testing.T) {
 	if _, err := r.c.Result(ctx, id); !errors.Is(err, api.ErrExpired) {
 		t.Errorf("the build's result after the restart: %v, want %v", err, api.ErrExpired)
 	}
-	// The build is remembered, so its trace is asked for by its ID rather than unknown; it stored none.
-	if _, err := r.c.Trace(ctx, id); !errors.Is(err, api.ErrNoTrace) {
-		t.Errorf("the build's trace after the restart: %v, want %v", err, api.ErrNoTrace)
+	// The build's manifest is still found by its ID, from its tombstone.
+	if outcome.Trace == nil {
+		t.Fatal("the build's outcome names no manifest")
+	}
+	if got, err := r.c.Trace(ctx, id); err != nil || got != *outcome.Trace {
+		t.Errorf("the build's trace after the restart = %v, %v; want %v", got, err, *outcome.Trace)
 	}
 }
 

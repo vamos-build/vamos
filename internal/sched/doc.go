@@ -56,12 +56,17 @@
 // so that it never waits on an emulator or on another job's permission.
 // Once a target fails nothing more is dispatched, what runs finishes and is recorded, and the first failure is the
 // job's, as a failure naming its node, which the client renders against its graph.
+// Every job records its trace through ForJob and saves its manifest, a JobTrace with an entry per node that went
+// through the cache, before it returns its outcome; Sharing records each attempt's spans apart and stores them as the
+// attempt's trace before it publishes, so that a result names the trace of the run that made it, and tells every job
+// that waits for the attempt of it through Traced, a job that leaves the attempt running of its ID alone.
 //
 // # Changes
 //
 // scheduler.go owns dispatch, keys, epochs, cached resolves, index assembly, tag pinning and the emulation check;
 // share.go owns attempts and the record writes; jobs.go owns events, retention and the bound on open jobs;
-// action.go owns the keyed payload; events.go carries spans to events; failure.go crosses a Runner's error as data,
+// action.go owns the keyed payload; jobtrace.go owns ForJob, JobTrace, Traced and the manifest's save;
+// events.go carries statuses, output and a client's spans to events; failure.go crosses a Runner's error as data,
 // AttemptFailure, and back; destination.go parses push destinations for both executors.
 // The run package implements Runner and Checker with buildah;
 // scheduler_test.go drives the scheduler with a fake, one target at a time and several.

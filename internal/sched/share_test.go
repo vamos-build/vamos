@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -341,48 +340,6 @@ func TestSharingForcedOverlap(t *testing.T) {
 	}
 	if b.runs.Load() != 2 {
 		t.Errorf("the Runner ran %d times, want twice", b.runs.Load())
-	}
-}
-
-// TestSharingStarterCancelledTrace checks that once the job that started a shared attempt is cancelled,
-// while another remains attached, the attempt's spans no longer reach the starter's trace,
-// and the other job still gets the result.
-func TestSharingStarterCancelledTrace(t *testing.T) {
-	b := &blockingRunner{release: make(chan struct{})}
-	s, _ := testSharing(b)
-	var mu sync.Mutex
-	var names []string
-	traced := tracing.WithRecorder(t.Context(), tracing.NewRecorder("executor", func(span tracing.Span) {
-		mu.Lock()
-		defer mu.Unlock()
-		names = append(names, span.Name)
-	}), "")
-	starter, cancel := context.WithCancel(traced)
-	starterDone := make(chan error, 1)
-	go func() {
-		_, err := s.attempt(starter, testRequest(false), &outputs{})
-		starterDone <- err
-	}()
-	waitFor(t, func() bool { return b.runs.Load() == 1 })
-	other := make(chan *cache.ActionResult, 1)
-	go func() {
-		r, err := s.attempt(t.Context(), testRequest(false), &outputs{})
-		testenv.Must(t, err)
-		other <- r
-	}()
-	waitFor(t, func() bool { return attachedCount(s) == 2 })
-	cancel()
-	if err := <-starterDone; !errors.Is(err, context.Canceled) {
-		t.Fatalf("the starter got %v, want %v", err, context.Canceled)
-	}
-	close(b.release)
-	if r := <-other; r == nil || r.Epoch != 1 {
-		t.Errorf("the other job got %+v, want the shared attempt's result", r)
-	}
-	mu.Lock()
-	defer mu.Unlock()
-	if !slices.Equal(names, []string{"started"}) {
-		t.Errorf("the starter's trace got spans %q, want only those that ended while it was attached", names)
 	}
 }
 

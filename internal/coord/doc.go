@@ -44,8 +44,12 @@
 // A record written before builds recorded their platforms resumes with the platforms configured.
 // A worker renews each attempt's lease by heartbeat, carrying its estimate of its clock's offset, made from the
 // coordinator's clock in earlier answers, and sends what it prints and traces as events, which reach the attached
-// builds and, shifted by that offset onto the coordinator's clock, the starting build's trace, nested where the
-// assignment's trace context says. An attempt told to die at a heartbeat ends then, freeing its worker's slot.
+// builds and, shifted by that offset onto the coordinator's clock, the attempt's trace, which sched.Sharing stores,
+// tries that were lost included; an assignment always carries a trace context, since every attempt records.
+// The successful try's run, from its assignment to its report, is the result's, as sched.Report.Ran gives it.
+// An attempt told to die at a heartbeat ends then, freeing its worker's slot.
+// Every job but a prune runs under Coordinator.traced, which stores its manifest before its outcome is returned,
+// and the journal's tombstone of an evicted job keeps the manifest's blob, so that Trace finds it by the job's ID.
 // pool.sweep loses attempts whose leases expired and forgets workers not seen for a lease; a heartbeat, events or
 // report that meets an expired attempt first loses it too, so that none renews or ends it between sweeps.
 // Submit refuses a graph for a platform the deployment doesn't offer, by configuration or by a worker registered now;

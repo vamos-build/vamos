@@ -441,17 +441,28 @@ func (c *Coordinator) Submit(ctx context.Context, req api.Request) (api.JobID, e
 func (c *Coordinator) build(g api.GraphRequest, native []string) func(ctx context.Context,
 	ev sched.Events) api.Outcome {
 	return func(ctx context.Context, ev sched.Events) api.Outcome {
-		// The generation is checked once the build is open, since no prune starts then: checked before, a prune
-		// could run between the check and the build's start.
-		if err := c.checkGeneration(ctx, g.Generation); err != nil {
-			return sched.Failed(err)
-		}
-		results, err := c.run(ctx, g, native, ev)
-		if err != nil {
-			return sched.Failed(err)
-		}
-		return api.Outcome{Results: results}
+		return c.traced(ctx, g.Trace, ev, func(ctx context.Context) api.Outcome {
+			// The generation is checked once the build is open, since no prune starts then: checked before, a prune
+			// could run between the check and the build's start.
+			if err := c.checkGeneration(ctx, g.Generation); err != nil {
+				return sched.Failed(err)
+			}
+			results, err := c.run(ctx, g, native, ev)
+			if err != nil {
+				return sched.Failed(err)
+			}
+			return api.Outcome{Results: results}
+		})
 	}
+}
+
+// traced runs work, a job's, as sched.RunJob does, storing its manifest in the coordinator's content store, and
+// reporting a manifest that can't be stored to Warn.
+func (c *Coordinator) traced(ctx context.Context, call *tracing.CallContext, ev sched.Events,
+	work func(context.Context) api.Outcome) api.Outcome {
+	id := jobOf(ctx)
+	return sched.RunJob(ctx, call, ev, func() (cache.ContentStore, error) { return c.content, nil },
+		func(err error) { c.cfg.Warn(fmt.Errorf("the job %s: %w", id, err)) }, work)
 }
 
 // begin starts a job as spec says, which runs work, with r its record, which the journal writes once the job is
@@ -580,8 +591,6 @@ func (c *Coordinator) offer(id api.JobID, native []string) func(platform string)
 // on a worker of its image's platform if native names it or the deployment offers it, as offer says.
 func (c *Coordinator) run(ctx context.Context, req api.GraphRequest, native []string, ev sched.Events) (
 	_ []api.Result, err error) {
-	ctx, flush := sched.ForCall(ctx, req.Trace, ev)
-	defer flush()
 	ctx, span := tracing.StartTrack(ctx, "run", "run", "graph", req.Graph.Digest.String(), "rebuild", req.Rebuild)
 	defer func() { span.EndWith(err) }()
 	data, err := c.content.Read(ctx, req.Graph, maxGraphSize)
@@ -721,30 +730,30 @@ func (c *Coordinator) submitPush(ctx context.Context, req api.PushRequest) (api.
 		return "", err
 	}
 	return c.begin(ctx, record{Push: &req}, sched.Spec{}, func(ctx context.Context, ev sched.Events) api.Outcome {
-		ctx, flush := sched.ForCall(ctx, req.Trace, ev)
-		defer flush()
-		ctx, span := tracing.StartTrack(ctx, "push", "push to "+req.Destination)
-		ctx = withBuild(ctx, buildInfo{job: jobOf(ctx)})
-		rep, err := c.pool.attempt(ctx, nil, &remote.PushWork{Mode: remote.ModePush, Result: req.Result,
-			Destination: req.Destination},
-			sched.OutputFunc(func(byte, []byte) {}))
-		span.EndWith(err)
-		switch {
-		case errors.Is(err, context.Canceled):
-			err = fmt.Errorf("%w: the push was cancelled, and the destination %s may or may not have been written; "+
-				"check it, or push again", err, req.Destination)
-		case err != nil:
-		case rep.Failure != nil:
-			err = rep.Failure.Err()
-		case rep.Pushed == nil:
-			err = errors.New("the worker pushed nothing")
-		}
-		if err != nil {
-			outcome := sched.Failed(err)
-			outcome.Failure.Nodes = []graph.Ref{req.Result.Node}
-			return outcome
-		}
-		return api.Outcome{Pushed: rep.Pushed}
+		return c.traced(ctx, req.Trace, ev, func(ctx context.Context) api.Outcome {
+			ctx, span := tracing.StartTrack(ctx, "push", "push to "+req.Destination)
+			ctx = withBuild(ctx, buildInfo{job: jobOf(ctx)})
+			rep, err := c.pool.attempt(ctx, nil, &remote.PushWork{Mode: remote.ModePush, Result: req.Result,
+				Destination: req.Destination},
+				sched.OutputFunc(func(byte, []byte) {}))
+			span.EndWith(err)
+			switch {
+			case errors.Is(err, context.Canceled):
+				err = fmt.Errorf("%w: the push was cancelled, and the destination %s may or may not have been "+
+					"written; check it, or push again", err, req.Destination)
+			case err != nil:
+			case rep.Failure != nil:
+				err = rep.Failure.Err()
+			case rep.Pushed == nil:
+				err = errors.New("the worker pushed nothing")
+			}
+			if err != nil {
+				outcome := sched.Failed(err)
+				outcome.Failure.Nodes = []graph.Ref{req.Result.Node}
+				return outcome
+			}
+			return api.Outcome{Pushed: rep.Pushed}
+		})
 	})
 }
 
@@ -763,49 +772,49 @@ func (c *Coordinator) submitPublish(ctx context.Context, req api.PublishRequest)
 		}
 	}
 	return c.begin(ctx, record{Publish: &req}, sched.Spec{}, func(ctx context.Context, ev sched.Events) api.Outcome {
-		ctx, flush := sched.ForCall(ctx, req.Trace, ev)
-		defer flush()
-		ctx, span := tracing.StartTrack(ctx, "publish", "publish")
-		ctx = withBuild(ctx, buildInfo{job: jobOf(ctx)})
-		uploads, i, err := c.uploadAll(ctx, req, ev)
-		if err != nil {
-			span.EndWith(err)
-			outcome := sched.Failed(err)
-			outcome.Failure.Nodes = []graph.Ref{req.Images[i].Result.Node}
-			return outcome
-		}
-		tagging := &remote.PushWork{Mode: remote.ModeTag, Tag: &remote.TagWork{
-			Images: req.Images, Tags: req.Tags, Uploads: uploads,
-		}}
-		if err := checkAssignmentSize(tagging); err != nil {
-			span.EndWith(err)
-			outcome := sched.Failed(err)
-			outcome.Failure.Nodes = []graph.Ref{req.Images[0].Result.Node}
-			return outcome
-		}
-		rep, err := c.pool.attempt(ctx, nil, tagging, outputOf(ev, req.Images[0].Result.Node))
-		switch {
-		case errors.Is(err, context.Canceled):
-			err = fmt.Errorf("%w: the publication was cancelled while it wrote its tags, which may or may not have "+
-				"been written; publish again", err)
-		case err != nil:
-		case rep.Failure != nil:
-			err = fmt.Errorf("%w; the tags may or may not have been written; publish again", rep.Failure.Err())
-		case rep.Tagged == nil:
-			err = errors.New("the worker reported no tags written")
-		}
-		if err != nil {
-			span.EndWith(err)
-			outcome := sched.Failed(err)
-			outcome.Failure.Nodes = []graph.Ref{req.Images[0].Result.Node}
-			return outcome
-		}
-		if rep.Tagged.Failure != nil {
-			span.EndWith(errors.New(rep.Tagged.Failure.Message))
-		} else {
-			span.End()
-		}
-		return *rep.Tagged
+		return c.traced(ctx, req.Trace, ev, func(ctx context.Context) api.Outcome {
+			ctx, span := tracing.StartTrack(ctx, "publish", "publish")
+			ctx = withBuild(ctx, buildInfo{job: jobOf(ctx)})
+			uploads, i, err := c.uploadAll(ctx, req, ev)
+			if err != nil {
+				span.EndWith(err)
+				outcome := sched.Failed(err)
+				outcome.Failure.Nodes = []graph.Ref{req.Images[i].Result.Node}
+				return outcome
+			}
+			tagging := &remote.PushWork{Mode: remote.ModeTag, Tag: &remote.TagWork{
+				Images: req.Images, Tags: req.Tags, Uploads: uploads,
+			}}
+			if err := checkAssignmentSize(tagging); err != nil {
+				span.EndWith(err)
+				outcome := sched.Failed(err)
+				outcome.Failure.Nodes = []graph.Ref{req.Images[0].Result.Node}
+				return outcome
+			}
+			rep, err := c.pool.attempt(ctx, nil, tagging, outputOf(ev, req.Images[0].Result.Node))
+			switch {
+			case errors.Is(err, context.Canceled):
+				err = fmt.Errorf("%w: the publication was cancelled while it wrote its tags, which may or may not "+
+					"have been written; publish again", err)
+			case err != nil:
+			case rep.Failure != nil:
+				err = fmt.Errorf("%w; the tags may or may not have been written; publish again", rep.Failure.Err())
+			case rep.Tagged == nil:
+				err = errors.New("the worker reported no tags written")
+			}
+			if err != nil {
+				span.EndWith(err)
+				outcome := sched.Failed(err)
+				outcome.Failure.Nodes = []graph.Ref{req.Images[0].Result.Node}
+				return outcome
+			}
+			if rep.Tagged.Failure != nil {
+				span.EndWith(errors.New(rep.Tagged.Failure.Message))
+			} else {
+				span.End()
+			}
+			return *rep.Tagged
+		})
 	})
 }
 

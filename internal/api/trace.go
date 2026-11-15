@@ -105,8 +105,13 @@ func (t JobTrace) Encode(lost tracing.Lost) ([]byte, error) {
 	return json.Marshal(t)
 }
 
+// BlobPutter is what a trace document is stored in: a content store, or a part of one.
+type BlobPutter interface {
+	PutBytes(ctx context.Context, data []byte) (cache.Blob, error)
+}
+
 // Save stores the manifest, encoded by Encode, in store, and returns its blob.
-func (t JobTrace) Save(ctx context.Context, store cache.ContentStore, lost tracing.Lost) (cache.Blob, error) {
+func (t JobTrace) Save(ctx context.Context, store BlobPutter, lost tracing.Lost) (cache.Blob, error) {
 	data, err := t.Encode(lost)
 	if err != nil {
 		return cache.Blob{}, fmt.Errorf("encoding the job's trace: %w", err)

@@ -46,12 +46,18 @@ func newFixture(t *testing.T, cfg Config) *fixture {
 		cfg.Heartbeat = 50 * time.Millisecond
 	}
 	m := cache.NewMemory()
-	c, err := New(m, m, cfg)
+	return newFixtureOver(t, m, m, cfg)
+}
+
+// newFixtureOver returns a coordinator configured by cfg, whose content store is content, over m.
+func newFixtureOver(t *testing.T, content cache.ContentStore, m *cache.Memory, cfg Config) *fixture {
+	t.Helper()
+	c, err := New(content, m, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { c.Close() })
-	server := httptest.NewServer((&remote.Server{Executor: c, Content: m, Workers: c.Workers()}).Handler())
+	server := httptest.NewServer((&remote.Server{Executor: c, Content: content, Workers: c.Workers()}).Handler())
 	t.Cleanup(server.Close)
 	return &fixture{c: c, m: m, url: server.URL}
 }

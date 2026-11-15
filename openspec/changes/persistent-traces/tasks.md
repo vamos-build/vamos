@@ -72,12 +72,14 @@
 
 ## 5. Always-on recording and attempt traces (`internal/sched`, `internal/run`, `internal/coord`, `internal/worker`)
 
-- [ ] 5.1 Replace `sched.ForCall` with `sched.ForJob`, which always records and returns a `JobTrace` that saves the
+- [x] 5.1 Replace `sched.ForCall` with `sched.ForJob`, which always records and returns a `JobTrace` that saves the
   manifest. Call it from every non-prune job of `run.Local` and the coordinator, saving before the outcome is returned,
-  under `context.WithoutCancel` with a 10-second timeout. Stop emitting `EventSpans`. A manifest that can't be saved
+  under `context.WithoutCancel` with a 10-second timeout. Until 7.1, keep sending a client that asks with `Trace` the
+  job's spans as `EventSpans`, and the spans of each attempt it took once the attempt ends, so that `--trace` holds
+  them until it reads stored traces; 7.1 removes that. A manifest that can't be saved
   leaves the outcome naming none and the job's outcome unchanged. Test both, and that a cancelled job's outcome names a
   stored manifest. Verify with `go test ./internal/sched ./internal/run ./internal/coord`.
-- [ ] 5.2 In `Sharing.attempt`, give every attempt, resolves included, its own recorder through `WithRecorderAt`, and a
+- [x] 5.2 In `Sharing.attempt`, give every attempt, resolves included, its own recorder through `WithRecorderAt`, and a
   random 128-bit ID that its trace and its `cache write` span carry. Write its capped trace when the runner returns,
   under `context.WithoutCancel` of the attempt's context with a 10-second timeout, apart from `publish`'s context; set
   `Result.Trace` and `Provenance.Started`/`Took` before `SetResult`; and tell every job that waits on `done`, with
@@ -87,24 +89,24 @@
   no blob while the joiner gets the whole trace, that a lone cancelled job gets the final trace even from a content
   store that refuses a cancelled context, that a job attached while `SetResult` is held up gets the same blob, and that
   a trace write that fails still records the result. Verify with `go test -race ./internal/sched ./internal/tracing`.
-- [ ] 5.3 Add `sched.Report.Ran`, the interval of the run that made the result, which `Took` and `Started` prefer to the
+- [x] 5.3 Add `sched.Report.Ran`, the interval of the run that made the result, which `Took` and `Started` prefer to the
   attempt's own. Set it in the local runner and, in the pool, from the successful try's assignment to its report. Test
   in `coord_test.go` that waiting for a worker and a failed try aren't counted. Verify with
   `go test ./internal/sched ./internal/coord ./internal/run`.
-- [ ] 5.4 Make `targetOutput` and resolves' outputs record each node's outcome, attempt ID and attempt trace in the
+- [x] 5.4 Make `targetOutput` and resolves' outputs record each node's outcome, attempt ID and attempt trace in the
   job's `JobTrace`. Set the hit span's `made`, `platform`, `took`, `saved` and `attempt trace` arguments from
   `Provenance` without reading the blob. Keep `Trace` out of the checkers and `lookup`. Test in `scheduler_test.go`.
   Verify with `go test ./internal/sched`.
-- [ ] 5.5 Make `pool.NextAssignment` always send a `Trace`, so workers always record. Check in `coord_test.go` that a
+- [x] 5.5 Make `pool.NextAssignment` always send a `Trace`, so workers always record. Check in `coord_test.go` that a
   worker's spans, retries included, land in the attempt's trace on the coordinator's clock. Verify with
   `go test ./internal/coord ./internal/worker`.
-- [ ] 5.6 (Moved from 4.2 and 4.3, which need 5.1's manifests.) Test in `restart_test.go` that a released, evicted
+- [x] 5.6 (Moved from 4.2 and 4.3, which need 5.1's manifests.) Test in `restart_test.go` that a released, evicted
   job's trace still answers by its ID after a restart that kept the state, and a released job's trace by ID on a
   coordinator without `Config.State`. Extend `apitest.Contract`: every graph, push, export and publish job's outcome
   names a manifest that the executor's content store holds, which `Trace` gives too, a prune's names none, two jobs
   that share an attempt name the same attempt trace, and a cold pull's manifest names its resolve's attempt trace.
   Verify with `go test ./internal/run ./internal/remote ./internal/coord`.
-- [ ] 5.7 Update the doc.go of `sched`, `run`, `coord` and `worker`, the trace transport section and its sequence
+- [x] 5.7 Update the doc.go of `sched`, `run`, `coord` and `worker`, the trace transport section and its sequence
   diagram in `docs/design/scheduling.md`, and the owners in `.agents/kb/concurrency-model.md`. Verify with the
   documentation checks.
 
@@ -144,7 +146,8 @@
 
 ## 7. The client: command traces, `--trace` and `vamos trace` (`internal/cli`)
 
-- [ ] 7.1 Make `inv.traced` always record. Measure the clock offset with one sample without `--trace` and three with it.
+- [ ] 7.1 Stop sending `EventSpans`, and the transitional streaming 5.1 kept for `--trace`. Make `inv.traced` always
+  record. Measure the clock offset with one sample without `--trace` and three with it.
   Once a command's jobs end, and before it releases them, store the `CommandTrace` in the executor's content store and
   print `vamos: trace <digest>` on stderr, warning instead if it can't be stored. Store it, assemble `--trace`'s file
   and release the jobs under `context.WithoutCancel` of the command's context, bounding storing and releasing at 10

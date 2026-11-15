@@ -37,31 +37,31 @@ func (l *Local) submitPublish(req api.PublishRequest) (api.JobID, error) {
 		}
 	}
 	return l.jobs.Start(false, func(ctx context.Context, ev sched.Events) api.Outcome {
-		ctx, flush := sched.ForCall(ctx, req.Trace, ev)
-		defer flush() // after the span ends
-		ctx, span := tracing.StartTrack(ctx, "publish", "publish")
-		if err := l.open(); err != nil {
-			span.EndWith(err)
-			return sched.Failed(err)
-		}
-		uploads := make([]remote.Uploaded, len(req.Images))
-		for i, image := range req.Images {
-			u, err := uploadResult(ctx, l.store, l.systemContext, image.Result, repos[i])
-			if err != nil {
+		return l.traced(ctx, req.Trace, ev, func(ctx context.Context) api.Outcome {
+			ctx, span := tracing.StartTrack(ctx, "publish", "publish")
+			if err := l.open(); err != nil {
 				span.EndWith(err)
-				outcome := sched.Failed(err)
-				outcome.Failure.Nodes = []graph.Ref{image.Result.Node}
-				return outcome
+				return sched.Failed(err)
 			}
-			uploads[i] = u
-		}
-		outcome := tagAll(ctx, l.systemContext, req.Images, dests, uploads)
-		if outcome.Failure != nil {
-			span.EndWith(errors.New(outcome.Failure.Message))
-		} else {
-			span.End()
-		}
-		return outcome
+			uploads := make([]remote.Uploaded, len(req.Images))
+			for i, image := range req.Images {
+				u, err := uploadResult(ctx, l.store, l.systemContext, image.Result, repos[i])
+				if err != nil {
+					span.EndWith(err)
+					outcome := sched.Failed(err)
+					outcome.Failure.Nodes = []graph.Ref{image.Result.Node}
+					return outcome
+				}
+				uploads[i] = u
+			}
+			outcome := tagAll(ctx, l.systemContext, req.Images, dests, uploads)
+			if outcome.Failure != nil {
+				span.EndWith(errors.New(outcome.Failure.Message))
+			} else {
+				span.End()
+			}
+			return outcome
+		})
 	})
 }
 

@@ -10,6 +10,8 @@ This file says where the contracts live and which tests hold them.
 | --- | --- | --- |
 | Dispatch, bound and failure order | `walk` in [sched](../../internal/sched/doc.go), `Options.Bound` | [scheduler_test.go](../../internal/sched/scheduler_test.go) |
 | Attempts shared by key, forced rebuilds, record writes | `sched.Sharing`, `sharing.publish` | `TestSharing*` in [share_test.go](../../internal/sched/share_test.go) |
+| Attempt traces: one recorder per attempt, stored before publishing, told to every waiting job | `Sharing.attempt`, `Sharing.saveTrace`, `sched.Traced`, `sched.AttemptTrace` | `TestSharing*` in [share_trace_test.go](../../internal/sched/share_trace_test.go), `TestAttemptTraceAcrossTries` |
+| Job manifests, saved before the outcome, under `WithoutCancel` | `sched.ForJob`, `sched.JobTrace`, `Local.traced`, `Coordinator.traced` | `TestForJob*`, `TestSchedulerManifest`, `TestJobManifests`, `apitest.Contract` |
 | Coordinator attempts, leases, kills, prune waiting | `pool` and `pool.mu` in [coord](../../internal/coord/doc.go) | [coord_test.go](../../internal/coord/coord_test.go) |
 | Worker fencing | [worker](../../internal/worker/doc.go) attempt.go | `TestWorkerFencesItself` |
 | Demand, grace period, eviction | `sched.Jobs`, `sched.Withdrawn`, `Jobs.Sweep`, `sched.Demanded`, `sched.Permitted` | `TestJobsExpire`, `TestBuildExpires`, `TestExpiredPendingAttemptEnds` |
@@ -22,17 +24,18 @@ This file says where the contracts live and which tests hold them.
 Parallel targets within one local job are still sequential; that is a separate decision from running jobs at once.
 
 Concurrency contracts belong with their symbols, not in a parallel list of locks here.
-The relevant owners are `sched.Events`, `spanBatch`, `blobTracker`, `cache.LogRecorder`,
+The relevant owners are `sched.Events`, `sched.JobTrace`, `blobTracker`, `cache.LogRecorder`,
 `tracing.Recorder`, `tracing.Active`, `cli.eventPrinter` and `cli.traceSession`.
 Their files are routed by the corresponding package `doc.go` files.
 Changes to callbacks must inspect both caller and consumer: data may be borrowed, callbacks may arrive in parallel,
 and invoking user code while holding an internal lock changes the deadlock and latency behavior.
 Do not infer that event consumers are single-threaded from the target scheduler.
 
-Each job must finish producing events before its final flush and terminal event.
-Inspect `forCall` and `transfer.Image` when adding asynchronous work;
+Each job must finish producing events, and its spans, before it saves its manifest and sends its terminal event.
+Inspect `sched.ForJob`, `Sharing.attempt` and `transfer.Image` when adding asynchronous work:
+a span that ends after the manifest or attempt trace is saved is lost;
 a context passed to a local method is not a remote trace protocol.
-Tracing should do no trace-only computation when disabled; guard argument preparation with `tracing.Enabled`.
+Every job records, so `tracing.Enabled` no longer spares an executor's work; keep trace-only arguments cheap.
 Track nesting, flow endpoints and timestamp encoding are owned by [tracing](../../internal/tracing/doc.go).
 The trace feature's `ThenPerfettoReadsTheTraceAsVamosMeansIt`, in
 [steps_trace_test.go](../../internal/features/steps_trace_test.go), verifies the importer's view,

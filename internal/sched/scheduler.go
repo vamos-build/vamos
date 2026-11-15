@@ -93,6 +93,16 @@ type Report struct {
 	Result    *cache.ActionResult `json:"result"`
 	Tag       string              `json:"tag,omitempty"` // the tag a resolve resolved, whose record is TagRecord
 	TagRecord *cache.TagRecord    `json:"tag_record,omitempty"`
+	// Ran is the run that made the result: locally the Runner's run, and on a coordinator the successful try, from
+	// its assignment to its report, so that waiting for a worker and failed tries aren't counted as what it took.
+	// A Runner that reports none, as an older worker's, leaves the attempt's own start and end to stand for it.
+	Ran *Interval `json:"ran,omitempty"`
+}
+
+// Interval is a span of time, from Start to End.
+type Interval struct {
+	Start time.Time `json:"start"`
+	End   time.Time `json:"end"`
 }
 
 // Output receives what one action prints.
@@ -745,13 +755,15 @@ func (s *Scheduler) resolve(ctx context.Context, ref graph.Ref, a *Action, runPl
 			}
 			if problem == nil {
 				tracing.Current(ctx).Set("cached", true)
+				jobTraceOf(ctx).Record(api.TraceEntry{Node: ref, Outcome: api.NodeHit})
 				return result, nil
 			}
 			tracing.Current(ctx).Set("unusable", problem.Error())
 		}
 	}
 	req := Request{Action: a, Tag: recorded, RunPlatform: runPlatform}
-	rep, err := s.runner.Run(ctx, req, s.output(ref))
+	out := &pullOutput{out: s.output(ref), ref: ref, desc: s.graph.Node(ref).Desc, ctx: ctx}
+	rep, err := s.runner.Run(ctx, req, out)
 	if errors.Is(err, ErrPinUnavailable) { // advised here, since jobs that name the pull otherwise share the attempt
 		return nil, fmt.Errorf("%w; if the registry no longer has it, vamos update %s pins what the tag names now",
 			err, s.graph.Node(ref).Label)
@@ -862,9 +874,9 @@ func (s *Scheduler) runCached(
 			if err := s.replay(ctx, ref, log); err != nil {
 				return nil, s.failed(ref, fmt.Errorf("replaying its output from the build cache: %w", err))
 			}
-			if tracing.Enabled(ctx) {
-				span.Set(resultArgs(result)...)
-			}
+			span.Set(resultArgs(result)...)
+			span.Set(hitArgs(result, span)...)
+			jobTraceOf(ctx).Record(api.TraceEntry{Node: ref, Outcome: api.NodeHit, Trace: cloneBlob(result.Trace)})
 			if flow := flowOf(result); flow != "" {
 				span.Produce(flow) // as the commit or collection that made it would
 			}
@@ -879,7 +891,7 @@ func (s *Scheduler) runCached(
 		return nil, s.failed(ref, fmt.Errorf("its base %s is for %s, not %s; a layer's base must be for its platform",
 			s.graph.Node(n.Base()).Label, base.platform, n.Layer.Platform))
 	}
-	out := &targetOutput{s: s, ref: ref, why: why, status: status}
+	out := &targetOutput{s: s, ref: ref, why: why, status: status, ctx: ctx}
 	rep, err := s.runner.Run(ctx, req, out)
 	if errors.Is(err, ErrEmulationNeeded) && refused != nil {
 		// The Runner found no emulating attempt for an unpermitted job to attach to, which it says before the
@@ -890,9 +902,7 @@ func (s *Scheduler) runCached(
 	if err != nil {
 		return nil, s.describe(ref, key, err)
 	}
-	if tracing.Enabled(ctx) {
-		span.Set(resultArgs(rep.Result)...)
-	}
+	span.Set(resultArgs(rep.Result)...)
 	return rep.Result, nil
 }
 
@@ -904,12 +914,19 @@ type targetOutput struct {
 	ref    graph.Ref
 	why    string
 	status func(string)
+	ctx    context.Context // the target's, within its span, which the attempt's cache write is recorded in
 	once   sync.Once
+
+	mu      sync.Mutex
+	starter Output // whose attempt runs it, as the first Join said; nil for its own
 }
 
 // Join reports the target's status, as running in the attempt that starter, if not nil, started.
 func (o *targetOutput) Join(starter Output) {
 	o.once.Do(func() {
+		o.mu.Lock()
+		o.starter = starter
+		o.mu.Unlock()
 		why := o.why
 		if starter != nil {
 			with := "another build"
@@ -930,6 +947,78 @@ func (o *targetOutput) Join(starter Output) {
 func (o *targetOutput) Output(stream byte, data []byte) {
 	o.Join(nil)
 	o.s.events.Output(o.ref, stream, data)
+}
+
+// Traced records what became of the target in the job's manifest: the attempt that served it, and its trace.
+// The attempt's cache write span is recorded too: by the job that started the attempt as its own, in the target's
+// span; by one that joined another job's on the target's shared track, beside where the attempt's spans go; and not
+// at all by a target that joined an attempt another target of the same job started, which records it once.
+func (o *targetOutput) Traced(t AttemptTrace) {
+	o.mu.Lock()
+	starter := o.starter
+	o.mu.Unlock()
+	same, _ := starter.(*targetOutput)
+	sameJob := same != nil && same.s == o.s
+	trace := jobTraceOf(o.ctx)
+	trace.Record(t.entry(o.ref, starter == nil))
+	switch {
+	case starter == nil:
+		tracing.Relay(o.ctx, t.Write)
+		trace.stream(t.Spans, t.Lost) // to a client that asked for spans as events, as the starter's
+	case !sameJob:
+		tracing.Relay(o.ctx, onSharedTrack(t.Write, o.s.graph.Node(o.ref).Desc))
+	}
+}
+
+// onSharedTrack returns spans, of an attempt another job started, moved to the shared track of the target desc,
+// part of no span, since the spans that held them are the other job's.
+func onSharedTrack(spans []tracing.Span, desc string) []tracing.Span {
+	shared := sharedTrack(desc)
+	out := make([]tracing.Span, len(spans))
+	for i, s := range spans {
+		s.Track, s.Parent = shared, ""
+		out[i] = s
+	}
+	return out
+}
+
+// pullOutput is the Output of the pull ref's resolve as it runs, which records what became of the pull in the job's
+// manifest once the attempt is done.
+type pullOutput struct {
+	out  Output
+	ref  graph.Ref
+	desc string
+	ctx  context.Context
+
+	mu     sync.Mutex
+	joined bool // the resolve runs in an attempt another job, or pull, started
+}
+
+// Output passes on what the resolve prints.
+func (o *pullOutput) Output(stream byte, data []byte) {
+	o.out.Output(stream, data)
+}
+
+// Join records whether the resolve runs in an attempt that another started.
+func (o *pullOutput) Join(starter Output) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.joined = starter != nil
+}
+
+// Traced records the attempt that resolved the pull in the job's manifest, with no cause, which a pull has none of,
+// and its cache write, if any, as its own.
+func (o *pullOutput) Traced(t AttemptTrace) {
+	o.mu.Lock()
+	started := !o.joined
+	o.mu.Unlock()
+	jobTraceOf(o.ctx).Record(t.entry(o.ref, started))
+	if started {
+		tracing.Relay(o.ctx, t.Write)
+		jobTraceOf(o.ctx).stream(t.Spans, t.Lost)
+		return
+	}
+	tracing.Relay(o.ctx, onSharedTrack(t.Write, o.desc))
 }
 
 // emulates returns the platform that the run() steps of req run under emulation for: an image's platform other than
@@ -1103,6 +1192,35 @@ func resultArgs(result *cache.ActionResult) []any {
 		args = append(args, "files", result.Output.Digest.String())
 	}
 	return args
+}
+
+// hitArgs returns what a reused result's span says of the run that made it, from its provenance, without reading
+// its trace: when it was made, on what platform, how long that took, what reusing it saved, the run's duration less
+// the hit's own so far, never below zero, and its attempt's trace; nothing for a result made before vamos kept
+// them.
+func hitArgs(result *cache.ActionResult, span *tracing.Active) []any {
+	p := result.Provenance
+	if p == nil || p.Started.IsZero() {
+		return nil
+	}
+	args := []any{"made", p.Started.UTC().Format(time.RFC3339Nano), "took", p.Took.String(),
+		"saved", max(p.Took-span.Elapsed(), 0).String()}
+	if p.Platform != "" {
+		args = append(args, "made on", p.Platform)
+	}
+	if result.Trace != nil {
+		args = append(args, "attempt trace", result.Trace.Digest.String())
+	}
+	return args
+}
+
+// cloneBlob returns a copy of b, or nil.
+func cloneBlob(b *cache.Blob) *cache.Blob {
+	if b == nil {
+		return nil
+	}
+	c := *b
+	return &c
 }
 
 // flowOf returns the key in a trace of what result, a layer's or task's, made, which spans that use it name too,

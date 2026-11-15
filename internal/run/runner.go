@@ -131,6 +131,16 @@ func (r *localRunner) Check(ctx context.Context, a *sched.Action, result *cache.
 // Run executes req: a resolve through the puller, or a layer or task in a container, publishing its artifact,
 // and returns what to record: the result, and for a resolve the tag record, which the caller writes.
 func (r *localRunner) Run(ctx context.Context, req sched.Request, ev sched.Output) (*sched.Report, error) {
+	start := time.Now()
+	rep, err := r.run(ctx, req, ev)
+	if rep != nil {
+		rep.Ran = &sched.Interval{Start: start, End: time.Now()}
+	}
+	return rep, err
+}
+
+// run runs req, as Run does, but for saying when.
+func (r *localRunner) run(ctx context.Context, req sched.Request, ev sched.Output) (*sched.Report, error) {
 	switch req.Action.Kind {
 	case sched.KindResolve:
 		// A resolve's result isn't recorded: the tag record is, and it carries no provenance.

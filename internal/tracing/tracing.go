@@ -210,36 +210,6 @@ func ForCall(ctx context.Context, call *CallContext, onEnd func(Span), process s
 	return WithRecorder(ctx, NewRecorder(process, onEnd), call.Parent)
 }
 
-// Revocable returns a context whose spans are recorded as ctx's would be, as part of its span and on its track,
-// until the function it returns is called; spans that end afterwards are dropped.
-// It is for work that may outlive the owner of ctx's trace, which revokes it before its last spans are sent:
-// once the function returns, no span of the context is being recorded, and none will be.
-// If ctx isn't traced, it returns ctx and a function that does nothing.
-func Revocable(ctx context.Context) (context.Context, func()) {
-	rec, _ := ctx.Value(contextKey{}).(*recording)
-	if rec == nil {
-		return ctx, func() {}
-	}
-	var (
-		mu      sync.RWMutex // held to read while a span is recorded, so that revoking waits for it
-		revoked bool
-	)
-	owner := rec.recorder
-	r := NewRecorder(owner.process, func(s Span) {
-		mu.RLock()
-		defer mu.RUnlock()
-		if !revoked {
-			owner.add(s)
-		}
-	})
-	revocable := &recording{recorder: r, parent: rec.parent, span: rec.span, track: rec.track}
-	return context.WithValue(ctx, contextKey{}, revocable), func() {
-		mu.Lock()
-		revoked = true
-		mu.Unlock()
-	}
-}
-
 // Call returns what asks an executor to trace a call made within ctx's span, or nil if ctx isn't traced.
 func Call(ctx context.Context) *CallContext {
 	rec, _ := ctx.Value(contextKey{}).(*recording)
@@ -251,7 +221,6 @@ func Call(ctx context.Context) *CallContext {
 
 // Relay records spans, which ended in another process as part of a call made within ctx's span, as ctx's own:
 // a coordinator relays a worker's spans so, having shifted them onto its clock.
-// Spans relayed after ctx's recording is revoked are dropped, as its own would be.
 func Relay(ctx context.Context, spans []Span) {
 	rec, _ := ctx.Value(contextKey{}).(*recording)
 	if rec == nil {
@@ -292,6 +261,14 @@ func (a *Active) ID() string {
 		return ""
 	}
 	return a.span.ID
+}
+
+// Elapsed returns how long the span has run so far, or 0 for a nil span.
+func (a *Active) Elapsed() time.Duration {
+	if a == nil {
+		return 0
+	}
+	return time.Since(a.span.Start) // which no one changes once the span has started
 }
 
 // Start starts a span named name, on the track of the span it is part of, with args, a list of keys and values.
