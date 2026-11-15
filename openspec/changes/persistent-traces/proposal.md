@@ -27,17 +27,19 @@ need shows up only as misses that look like any other.
   read until a prune.
 - Each miss carries a cause: `new` (no earlier build of the target in this configuration, its parameters and
   platform), `forced` (`--rebuild` or a regeneration), `lost` (the same key as before, but its result is gone, as
-  after a prune), `upstream` (a pulled tag now names another image), `dependency` (only because a target it depends
-  on missed) or `own-inputs` (a step, command or source of its own changed). An `own-inputs` miss caused by a source
-  names the files added, removed and changed, which is what reveals a glob that is too broad.
+  after a prune), `upstream` (a pulled tag now names another image), `dependency` (only because the base image or
+  files a target it depends on supplies changed, whether that target hit or missed) or `own-inputs` (a step,
+  command or source of its own changed). An `own-inputs` miss caused by a source names the files added, removed and
+  changed, which is what reveals a glob that is too broad.
 - To find causes, an executor keeps target history: a new kind of record, keyed by workspace name and target
   (label, parameters and platform), holding the last N actions the target used, written on hits and misses alike.
   A miss is compared with the nearest of those N, so that builds of several branches don't make each other's
   misses look larger than they are.
   Each entry holds inline, as a tag record holds its manifest, what attribution compares: the action's key, its
-  steps and commands, the keys of the targets it depends on, the digests of pulled images, and each
-  source's file names and digests. It refers to no content blob, so target history survives a prune, as tag records
-  do, and what follows a prune is `lost` with the files that changed still named.
+  steps and commands, the base image and files each target it depends on supplied, the digests of pulled images,
+  and each source's complete tree entries (path, type, mode, link target and content digest).
+  It refers to no content blob, so target history survives a prune, as tag records do: after a prune, a miss whose
+  action is unchanged is `lost`, and one whose action changed is still attributed to what changed.
 - An entry is added to target history atomically: concurrent builds of one target, on one executor, each add their
   own entry and none drops another's.
   A workspace without a name keeps no history, and its misses are `new` or `forced` alone.
