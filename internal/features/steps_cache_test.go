@@ -11,11 +11,13 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/opencontainers/go-digest"
 	"github.com/vamos-build/vamos/internal/cache"
 	"github.com/vamos-build/vamos/internal/cli"
 	"github.com/vamos-build/vamos/internal/run"
+	"github.com/vamos-build/vamos/internal/sched"
 	"github.com/vamos-build/vamos/internal/testenv"
 	imagemanifest "go.podman.io/image/v5/manifest"
 	"go.podman.io/storage"
@@ -629,5 +631,25 @@ func (w *world) ThenTheCommandLeavesNoContainer() {
 		if !w.containers[id] {
 			w.t.Errorf("the container store holds the container %s, which the command left", id)
 		}
+	}
+}
+
+// GivenTheHistoryOfWasLastUsed sets back when the history of the target, as the configured target of this platform
+// names it, such as "//:app", in the workspace named workspace, was last used, to ago before now, as if neither built
+// nor reused since, on the scenario's own stores.
+func (w *world) GivenTheHistoryOfWasLastUsed(workspace, target string, ago time.Duration) {
+	w.t.Helper()
+	store, err := cache.OpenDirectory(w.cacheDir())
+	if err != nil {
+		w.t.Fatal(err)
+	}
+	defer store.Close()
+	name := sched.HistoryName(workspace, target+" platform="+thisPlatform())
+	used := time.Now().Add(-ago)
+	if err := store.SetHistoryUsed(w.t.Context(), name, used); err != nil {
+		w.t.Fatal(err)
+	}
+	if h, err := store.History(w.t.Context(), name); err != nil || h == nil || !h.Used.Equal(used.UTC()) {
+		w.t.Fatalf("the history of %s in %s = %v, %v; want one last used at %v", target, workspace, h, err, used)
 	}
 }

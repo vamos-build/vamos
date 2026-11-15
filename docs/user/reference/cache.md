@@ -193,5 +193,6 @@ Each layer or task that runs, rather than being reused, gets one cause in its tr
 
 A miss is compared with the history entry that differs from it least, so builds of different branches don't
 inflate each other's changes.
-History names no file of the cache, so it survives a prune, and is removed by one only when its target has been
-neither built nor reused for 100 days.
+History names no file of the cache, so it survives a prune.
+A prune keeps the history of a target built or reused in the last 90 days, and removes it once its target has been
+neither built nor reused for 100: a reuse renews it at least once a week.
