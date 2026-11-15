@@ -212,7 +212,7 @@
   of a dependency chain against a content store that delays writes, and record how much storing attempt traces adds to
   it. Verify by comparing `go test -bench . -benchmem ./internal/sched ./internal/cli` output.
 - [x] 9.2 Run `scripts/check` and then `scripts/check full`, and confirm both pass.
-- [ ] 9.3 Run the build smoke checks in `.agents/kb/smoke-checks.md`, open a stored trace from `vamos trace` in
+- [x] 9.3 Run the build smoke checks in `.agents/kb/smoke-checks.md`, open a stored trace from `vamos trace` in
   Perfetto, and run the Kubernetes checks, so that a coordinator's job trace is read by job ID.
 - [x] 9.4 Run `openspec validate persistent-traces --strict` and confirm it passes.
 
