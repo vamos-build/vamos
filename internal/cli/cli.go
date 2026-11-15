@@ -1524,12 +1524,15 @@ func (inv *invocation) prune() error {
 		return err
 	}
 	p := outcome.Pruned
-	if inv.opts.coordinator != "" {
-		return inv.printf("Removed %d results and %d files from the build cache, and %d image tags from the cache "+
-			"repository\n", p.Results, p.Blobs, p.Tags)
+	for _, w := range p.Warnings {
+		inv.warn(errors.New(w))
 	}
-	return inv.printf("Removed %d images from the container store, and %d results and %d files "+
-		"from the build cache\n", p.Images, p.Results, p.Blobs)
+	if inv.opts.coordinator != "" {
+		return inv.printf("Removed %d results, %d files and %d target histories from the build cache, and %d image "+
+			"tags from the cache repository\n", p.Results, p.Blobs, p.Histories, p.Tags)
+	}
+	return inv.printf("Removed %d images from the container store, and %d results, %d files and %d target "+
+		"histories from the build cache\n", p.Images, p.Results, p.Blobs, p.Histories)
 }
 
 // graph prints the graph of the targets named, as JSON, without building or storing anything.

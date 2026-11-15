@@ -616,7 +616,7 @@ func (c *Coordinator) run(ctx context.Context, req api.GraphRequest, native []st
 	// An action whose image's platform the build runs natively waits for a worker of it rather than being emulated,
 	// even if none is registered now, as after a restart.
 	opts := sched.Options{Rebuild: req.Rebuild, Timestamp: req.Timestamp, Emulate: req.Emulate, OptIn: true,
-		Bound: c.cfg.Bound, Native: native, Offered: c.offer(jobOf(ctx), native)}
+		Bound: c.cfg.Bound, Native: native, Offered: c.offer(jobOf(ctx), native), Workspace: req.Workspace}
 	return sched.New(g, b, ev, opts).Run(ctx)
 }
 
@@ -712,6 +712,9 @@ func (c *Coordinator) Prune(ctx context.Context) (api.JobID, error) {
 			return sched.Failed(fmt.Errorf("the content is cleared, but the results aren't, so cached layers name "+
 				"logs that are gone: prune again; %w", err))
 		}
+		// Target histories unused for their retention go next, before the tags, whose failure ends the job;
+		// a failure here is a warning, and leaves what it couldn't remove for the next prune.
+		sched.PruneHistory(ctx, c.records, &pruned)
 		// The cache repository's tags go last: a record that named one is gone already, so a failure here leaves
 		// the registry holding images nothing names, which the next prune removes.
 		if c.cfg.CacheRepository != "" && c.cfg.Images != nil {

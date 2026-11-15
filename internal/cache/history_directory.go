@@ -178,3 +178,23 @@ func (d *Directory) PruneHistory(ctx context.Context, before time.Time) (int, er
 	}
 	return removed, errors.Join(errs...)
 }
+
+// SetHistoryUsed sets the Used of the history named name to used, as if it were last used then, under the history
+// lock, so that tests can age a history; it does nothing if there is none that can be read.
+func (d *Directory) SetHistoryUsed(ctx context.Context, name digest.Digest, used time.Time) error {
+	unlock, err := d.lockHistory(ctx)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	h, err := d.History(ctx, name)
+	if err != nil || h == nil {
+		return err
+	}
+	h.Used = used.UTC()
+	data, err := encodeHistory(h)
+	if err != nil {
+		return err
+	}
+	return d.writeRecordBytes(d.historyPath(name), data)
+}

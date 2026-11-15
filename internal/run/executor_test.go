@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/vamos-build/vamos/internal/api"
 	"github.com/vamos-build/vamos/internal/cache"
@@ -16,6 +17,7 @@ import (
 	"github.com/vamos-build/vamos/internal/testenv"
 
 	"github.com/containerd/platforms"
+	"github.com/opencontainers/go-digest"
 	"go.podman.io/storage"
 )
 
@@ -202,5 +204,39 @@ func TestCloseLeavesOthersMounts(t *testing.T) {
 	}
 	if mounted, err := other.Mounted(layer.ID); err != nil || mounted == 0 {
 		t.Errorf("another's layer after Close is mounted %d times, %v; want it left mounted", mounted, err)
+	}
+}
+
+// TestLocalPruneHistories checks that a local prune removes the target histories unused for their retention, and
+// keeps one recent and one built long ago but used since, counting what it removed.
+func TestLocalPruneHistories(t *testing.T) {
+	testenv.RequireBuildah(t)
+	stores := testenv.PrivateStores(t)
+	l, err := NewLocal(stores.Options)
+	testenv.Must(t, err)
+	t.Cleanup(func() { l.Close() })
+	_, err = l.ContentStore()
+	testenv.Must(t, err)
+	ctx := t.Context()
+	entry := cache.HistoryEntry{Key: digest.FromString("a"), Action: []byte(`{}`)}
+	for _, name := range []string{"recent", "reused", "unused"} {
+		testenv.Must(t, l.directory.AddHistory(ctx, digest.FromString(name), entry, nil, 8))
+	}
+	testenv.Must(t, l.directory.SetHistoryUsed(ctx, digest.FromString("reused"), time.Now().Add(-30*24*time.Hour)))
+	testenv.Must(t, l.directory.SetHistoryUsed(ctx, digest.FromString("unused"), time.Now().Add(-101*24*time.Hour)))
+	id, err := l.Prune(ctx)
+	testenv.Must(t, err)
+	j, err := l.jobs.Lookup(id)
+	testenv.Must(t, err)
+	testenv.Must(t, j.Watch(ctx, 0, func(api.Event) error { return nil }))
+	outcome, err := l.Result(ctx, id)
+	testenv.Must(t, err)
+	if outcome.Failure != nil || outcome.Pruned == nil || outcome.Pruned.Histories != 1 {
+		t.Errorf("the prune's outcome = %+v, %+v; want 1 history removed", outcome, outcome.Pruned)
+	}
+	for name, kept := range map[string]bool{"recent": true, "reused": true, "unused": false} {
+		if h, _ := l.directory.History(ctx, digest.FromString(name)); (h != nil) != kept {
+			t.Errorf("the %s history kept = %v; want %v", name, h != nil, kept)
+		}
 	}
 }

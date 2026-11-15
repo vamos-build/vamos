@@ -396,6 +396,7 @@ func (l *Local) run(ctx context.Context, req api.GraphRequest, ev sched.Events) 
 	b := sched.Backend{Content: l.content, Records: l.records, Checker: l.runner, Runner: l.sharing}
 	opts := sched.Options{
 		Rebuild: req.Rebuild, Timestamp: req.Timestamp, Emulate: req.Emulate, Bound: 1, Secrets: req.Secrets,
+		Workspace: req.Workspace,
 	}
 	return sched.New(g, b, ev, opts).Run(ctx)
 }

@@ -283,6 +283,9 @@ type Options struct {
 	// Native doesn't name, as the walk reaches an action for it; once it says so, the platform is native for the
 	// rest of the build. It is called by one goroutine at a time.
 	Offered func(platform string) bool
+	// Workspace is the name of the workspace the graph was loaded from, as api.GraphRequest.Workspace gives it,
+	// which keys its targets' history with their graph.Node.Target; an unnamed workspace keeps none.
+	Workspace string
 }
 
 // Scheduler walks a graph in dependency order, resolving each node's inputs, computing its key,
@@ -320,6 +323,7 @@ type builtImage struct {
 	platform  string           // as platforms.Format gives it; "" for Scratch
 	epoch     time.Time        // when it was made; files that targets add to it are stamped with this, or a later epoch
 	locations []cache.Location // where its bytes are
+	index     digest.Digest    // a pull's: the manifest its reference named, which target history keeps
 }
 
 // setTree is the files of a task, once they are in the content store.
@@ -664,6 +668,7 @@ func madeImage(result *cache.ActionResult) builtImage {
 		platform:  result.Platform,
 		epoch:     time.Unix(result.Epoch, 0),
 		locations: result.Locations,
+		index:     result.Index,
 	}
 }
 
@@ -803,8 +808,9 @@ func (s *Scheduler) prepareTarget(ref graph.Ref, why string) func(context.Contex
 		req.Emulated = true
 		refused = s.emulationRefused(ref, platform)
 	}
+	forced := s.rebuild[ref] // --rebuild named it, as a regeneration's why doesn't say
 	return func(ctx context.Context) completion {
-		result, err := s.runCached(ctx, ref, req, base, why, refused)
+		result, err := s.runCached(ctx, ref, req, base, why, forced, refused)
 		return completion{ref: ref, result: result, err: err}
 	}
 }
@@ -848,9 +854,10 @@ func (s *Scheduler) secrets(a *Action) map[string][]byte {
 // It reports whose attempt a run joined, if the Runner says, so that a target configured alike for several platforms
 // isn't taken to build again. refused is its failure if the Runner can't emulate it, or nil if it runs natively.
 func (s *Scheduler) runCached(
-	ctx context.Context, ref graph.Ref, req Request, base builtImage, why string, refused error,
+	ctx context.Context, ref graph.Ref, req Request, base builtImage, why string, forced bool, refused error,
 ) (_ *cache.ActionResult, err error) {
 	n := s.graph.Node(ref)
+	regenerated := why != "" && !forced
 	target := n.Desc
 	a, key := req.Action, req.Key
 	ctx, span := tracing.StartTrack(ctx, target, target, "key", key.String(), "base", a.Base)
@@ -876,6 +883,7 @@ func (s *Scheduler) runCached(
 			}
 			span.Set(resultArgs(result)...)
 			span.Set(hitArgs(result, span)...)
+			s.recordHit(ctx, span, n, a, key, base.index)
 			jobTraceOf(ctx).Record(api.TraceEntry{Node: ref, Outcome: api.NodeHit, Trace: cloneBlob(result.Trace)})
 			if flow := flowOf(result); flow != "" {
 				span.Produce(flow) // as the commit or collection that made it would
@@ -883,6 +891,7 @@ func (s *Scheduler) runCached(
 			return result, nil
 		default:
 			why = fmt.Sprintf("building, since the cached result can't be used: %v", problem)
+			regenerated = true // as good as lost, for attribution
 		}
 	}
 
@@ -891,7 +900,8 @@ func (s *Scheduler) runCached(
 		return nil, s.failed(ref, fmt.Errorf("its base %s is for %s, not %s; a layer's base must be for its platform",
 			s.graph.Node(n.Base()).Label, base.platform, n.Layer.Platform))
 	}
-	out := &targetOutput{s: s, ref: ref, why: why, status: status, ctx: ctx}
+	history := s.attributeMiss(ctx, span, n, a, key, base.index, forced, regenerated)
+	out := &targetOutput{s: s, ref: ref, why: why, status: status, ctx: ctx, cause: history.cause}
 	rep, err := s.runner.Run(ctx, req, out)
 	if errors.Is(err, ErrEmulationNeeded) && refused != nil {
 		// The Runner found no emulating attempt for an unpermitted job to attach to, which it says before the
@@ -903,6 +913,7 @@ func (s *Scheduler) runCached(
 		return nil, s.describe(ref, key, err)
 	}
 	span.Set(resultArgs(rep.Result)...)
+	history.add(ctx, span)
 	return rep.Result, nil
 }
 
@@ -915,6 +926,7 @@ type targetOutput struct {
 	why    string
 	status func(string)
 	ctx    context.Context // the target's, within its span, which the attempt's cache write is recorded in
+	cause  string          // why it missed, as attribute found it
 	once   sync.Once
 
 	mu      sync.Mutex
@@ -960,7 +972,9 @@ func (o *targetOutput) Traced(t AttemptTrace) {
 	same, _ := starter.(*targetOutput)
 	sameJob := same != nil && same.s == o.s
 	trace := jobTraceOf(o.ctx)
-	trace.Record(t.entry(o.ref, starter == nil))
+	e := t.entry(o.ref, starter == nil)
+	e.Cause = o.cause
+	trace.Record(e)
 	switch {
 	case starter == nil:
 		tracing.Relay(o.ctx, t.Write)

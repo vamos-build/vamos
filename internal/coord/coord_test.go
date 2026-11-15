@@ -1286,6 +1286,34 @@ type orderedStores struct {
 	*cache.Memory
 	mu    sync.Mutex
 	order []string
+	// historyFails, if set, makes PruneHistory remove what the memory store does and fail besides, as a prune that
+	// fails partway does.
+	historyFails bool
+}
+
+func (o *orderedStores) PruneHistory(ctx context.Context, before time.Time) (int, error) {
+	o.mu.Lock()
+	o.order = append(o.order, "histories")
+	fails := o.historyFails
+	o.mu.Unlock()
+	removed, err := o.Memory.PruneHistory(ctx, before)
+	if fails {
+		return removed, errors.New("removing a target history: device busy")
+	}
+	return removed, err
+}
+
+// clearedRepository is an image checker that records that the cache repository was cleared.
+type clearedRepository struct {
+	ImageChecker
+	stores *orderedStores
+}
+
+func (r clearedRepository) ClearRepository(context.Context, string) (int, error) {
+	r.stores.mu.Lock()
+	defer r.stores.mu.Unlock()
+	r.stores.order = append(r.stores.order, "tags")
+	return 3, nil
 }
 
 func (o *orderedStores) ClearContent(ctx context.Context) (int, error) {
@@ -1322,7 +1350,60 @@ func TestPruneOrder(t *testing.T) {
 	}
 	stores.mu.Lock()
 	defer stores.mu.Unlock()
-	if want := []string{"content", "results"}; !slices.Equal(stores.order, want) {
+	if want := []string{"content", "results", "histories"}; !slices.Equal(stores.order, want) {
 		t.Errorf("the prune cleared %v, want %v", stores.order, want)
+	}
+}
+
+// TestPruneHistories checks that a prune removes the target histories unused for their retention, and keeps one
+// recent and one built long ago but used since, counting what it removed; and that one that fails partway still
+// counts what it removed, lets the cache repository be cleared, and warns in the outcome.
+func TestPruneHistories(t *testing.T) {
+	for _, fails := range []bool{false, true} {
+		stores := &orderedStores{Memory: cache.NewMemory(), historyFails: fails}
+		c, err := New(stores, stores, Config{Lease: 50 * time.Millisecond, Heartbeat: 20 * time.Millisecond,
+			CacheRepository: "registry:5000/vamos-cache", Images: clearedRepository{stores: stores}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { c.Close() })
+		ctx := t.Context()
+		entry := cache.HistoryEntry{Key: digest.FromString("a"), Action: []byte(`{}`)}
+		for _, name := range []string{"recent", "reused", "unused"} {
+			if err := stores.AddHistory(ctx, digest.FromString(name), entry, nil, 8); err != nil {
+				t.Fatal(err)
+			}
+		}
+		stores.SetHistoryUsed(digest.FromString("reused"), time.Now().Add(-30*24*time.Hour))
+		stores.SetHistoryUsed(digest.FromString("unused"), time.Now().Add(-101*24*time.Hour))
+		time.Sleep(c.cfg.Lease)
+		id, err := c.Prune(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var outcome api.Outcome
+		if err := c.Watch(ctx, id, 0, func(e api.Event) error {
+			if e.Kind == api.EventDone {
+				outcome = *e.Outcome
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if outcome.Failure != nil || outcome.Pruned == nil {
+			t.Fatalf("the prune's outcome = %+v; want it pruned", outcome)
+		}
+		p := outcome.Pruned
+		if p.Histories != 1 || p.Tags != 3 {
+			t.Errorf("pruned %+v; want 1 history removed and the repository's tags cleared", p)
+		}
+		if fails != (len(p.Warnings) == 1) {
+			t.Errorf("a prune whose history removal fails = %v warned %v", fails, p.Warnings)
+		}
+		for name, kept := range map[string]bool{"recent": true, "reused": true, "unused": false} {
+			if h, _ := stores.History(ctx, digest.FromString(name)); (h != nil) != kept {
+				t.Errorf("the %s history kept = %v; want %v", name, h != nil, kept)
+			}
+		}
 	}
 }

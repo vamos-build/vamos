@@ -112,11 +112,11 @@
 
 ## 6. Target history and miss attribution (`internal/sched`)
 
-- [ ] 6.1 Add `sched.Options.Workspace`, set by `run.Local` and the coordinator from `GraphRequest.Workspace`, and
+- [x] 6.1 Add `sched.Options.Workspace`, set by `run.Local` and the coordinator from `GraphRequest.Workspace`, and
   `sched.HistoryName`. Build a `HistoryEntry` from the action and its suppliers: each one's `Target`, a pull's image
   reference and manifest digest too, and each source's tree the record doesn't already hold, read with `ReadTree`.
   Verify with `go test ./internal/sched`.
-- [ ] 6.2 Implement `attribute` as the pure function design.md orders: `forced` (`--rebuild`), `lost` (unusable results
+- [x] 6.2 Implement `attribute` as the pure function design.md orders: `forced` (`--rebuild`), `lost` (unusable results
   and regenerations included), `new`, then the nearest entry of the current `ActionVersion` by distance, ties to the
   most recent, then `own-inputs`, `upstream`, `dependency`, all derived from one structured difference. Table-test every
   cause, the nearest entry, ties, entries of another version, steps that differ in count, an output directory change, a
@@ -125,23 +125,24 @@
   added, removed and changed, mode included. Count the kind (layer or task) as an own input, and test a layer that
   became a task, and a regeneration, `lost` and not `forced`, whose miss replaces the target's hit in the manifest.
   Verify with `go test ./internal/sched -run Attribute`.
-- [ ] 6.3 In `runCached`, read history once on a miss and set `miss` and its arguments on the span and in the
+- [x] 6.3 In `runCached`, read history once on a miss and set `miss` and its arguments on the span and in the
   `JobTrace`, capping each file list at 100 with a count. Add the entry after success; on a hit, read `Newest`, and add
   only if the hit's fingerprint, key and suppliers, isn't the newest or `Used` is more than 7 days old. Treat a history
   failure as a span error. Test in `scheduler_test.go` that a fully cached build reads `Newest` once per target and
   adds nothing, that a hit on a record used over 7 days ago refreshes it, that a broken history store fails no target,
   that a failed target, a cancelled one, and a job that left a shared attempt which later succeeded for another job add
-  nothing, a base switched to a layer making the same image, then changed, attributed as `dependency`, a pull's tag
-  moved to another manifest of the same image, which a hit records, then to another image, whose `upstream` names the
-  second manifest as `before`, and two workspaces with different histories sharing one attempt, which get their own
-  causes and the same attempt trace. Verify with `go test ./internal/sched`.
-- [ ] 6.4 Have both executors' prune jobs call `PruneHistory` with a cutoff of now less `cache.HistoryRetention` right
+  nothing, and two workspaces with different histories sharing one attempt, which get their own causes and the same
+  attempt trace. A base switched to a layer making the same image, then changed, attributed as `dependency`, and a
+  pull's tag moved to another manifest of the same image, which a hit records, then to another image, whose `upstream`
+  names the second manifest as `before`, need real images, which the scheduler's fake can't make: 8.1's scenarios
+  cover them. Verify with `go test ./internal/sched`.
+- [x] 6.4 Have both executors' prune jobs call `PruneHistory` with a cutoff of now less `cache.HistoryRetention` right
   after `ClearResults`, the coordinator's before its cache repository's tags. Fill `api.Pruned.Histories` and
   `Warnings` from it, and have the client print the count with the others and each warning. Test that both executors
   keep a recent record and one built long ago but reused recently, remove an unused one and count it, and that a
   history prune that fails partway still counts what it removed, lets the coordinator clear its tags, and warns in the
   outcome, which the client prints. Verify with `go test ./internal/run ./internal/coord ./internal/cli`.
-- [ ] 6.5 Document target history, its retention and attribution in `internal/sched/doc.go` and in
+- [x] 6.5 Document target history, its retention and attribution in `internal/sched/doc.go` and in
   `docs/design/storage.md`'s identities. Verify with the documentation checks.
 
 ## 7. The client: command traces, `--trace` and `vamos trace` (`internal/cli`)

@@ -186,6 +186,16 @@ and adds no entry at all for an action too large even then,
 though it still takes that action's fingerprint as the newest and moves `Used`.
 The fields are encoded `Newest`, `Used`, then the rest, so that `Newest` reads them without decoding the entries.
 
+The scheduler keeps history for each layer and task of a named workspace whose node names its `Target`,
+and attributes each miss from it, as `sched.attribute` orders the causes:
+`forced` for a target `--rebuild` named, `lost` where a result was found but couldn't be used,
+or history holds the action's key, `new` where history holds no entry of the current `sched.ActionVersion`,
+and otherwise the nearest such entry, the most recent among the nearest, decides between `own-inputs`,
+`upstream`, a moved base pull alone, and `dependency`, what a supplier gave alone.
+A miss reads the history once and adds its entry once the target succeeds;
+a hit reads only the history's head, and adds its entry when its fingerprint isn't the newest,
+or the record wasn't used for a week, so that `Used` follows reuse within a week.
+
 ## Identities
 
 The system maintains distinct identifiers across the build lifecycle:
@@ -195,6 +205,9 @@ The system maintains distinct identifiers across the build lifecycle:
 | Configured target | `load.confLabel` | Distinguishing targets across configuration variants |
 | Graph blob digest | `graph.Encode`, `api.GraphRequest.Graph` | Content address of an immutable build plan |
 | Action key | `sched.Action`, `Scheduler.inputs` | Identifying identical target execution inputs for reuse |
+| Target identity | `graph.Node.Target`, `load` | A configured target's label, platform and every parameter's value, alike in every invocation |
+| Target history name | `sched.HistoryName` | Digest of the workspace's name and the target identity, naming its history record |
+| History fingerprint | `cache.HistoryEntry.Fingerprint` | An action's key and its suppliers' identities, which a hit compares with the newest add |
 | File tree digest | `cache.Tree` | Addressing file hierarchies independently of file timestamps |
 | Image ID / manifest digest | `api.Result`, `cache.TagRecord` | Addressing OCI image configs and registry manifests |
 

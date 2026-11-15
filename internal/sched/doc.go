@@ -9,8 +9,9 @@
 // A Scheduler never opens container storage: a Request carries everything an action needs, the tag record of a
 // resolve included, and the Runner reads no record and no graph. Request and Report cross as JSON, from a coordinator
 // to a worker and back.
-// Only Sharing writes the record store, once the runner has published the artifact and returned its Report,
-// so that no record names an artifact that isn't there; the latest write wins.
+// Only Sharing writes results and tag records, once the runner has published the artifact and returned its Report,
+// so that no record names an artifact that isn't there; the latest write wins. The Scheduler adds to target history,
+// which names no artifact.
 // Action keys exclude provenance, emulation, the platform an action runs on, locations and target naming;
 // ActionVersion changes when what a key covers, or how a target is built, changes.
 // An action runs on its image's platform where the executor runs that natively, as Options.Native and
@@ -60,12 +61,19 @@
 // through the cache, before it returns its outcome; Sharing records each attempt's spans apart and stores them as the
 // attempt's trace before it publishes, so that a result names the trace of the run that made it, and tells every job
 // that waits for the attempt of it through Traced, a job that leaves the attempt running of its ID alone.
+// In a named workspace, each layer and task keeps a history, named by HistoryName from the workspace and its
+// graph.Node.Target: a miss reads it once and attribute, a pure function, finds the cause, forced, lost, new,
+// own-inputs, upstream or dependency, against the nearest of its entries of the current ActionVersion; the entry is
+// added once the target succeeds. A hit reads only the history's head, and adds its entry if its fingerprint isn't
+// the newest or the history wasn't used for a week, so that a prune, which removes histories unused for
+// cache.HistoryRetention, keeps it. History is best-effort: a failure is a span's argument and fails no target.
 //
 // # Changes
 //
 // scheduler.go owns dispatch, keys, epochs, cached resolves, index assembly, tag pinning and the emulation check;
 // share.go owns attempts and the record writes; jobs.go owns events, retention and the bound on open jobs;
 // action.go owns the keyed payload; jobtrace.go owns ForJob, JobTrace, Traced and the manifest's save;
+// history.go owns target history, its entries, attribute and the order of causes;
 // events.go carries statuses, output and a client's spans to events; failure.go crosses a Runner's error as data,
 // AttemptFailure, and back; destination.go parses push destinations for both executors.
 // The run package implements Runner and Checker with buildah;

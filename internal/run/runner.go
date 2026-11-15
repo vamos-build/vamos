@@ -502,6 +502,11 @@ func (l *Local) prune(ctx context.Context) (api.Pruned, error) {
 		pruned.Images, err = l.removeCachedImages()
 		return err
 	})
+	// Histories are pruned whatever else failed, so that one failure that recurs, removing an image, doesn't keep
+	// every history forever; their own failure is a warning. A prune refused for the lock removes nothing.
+	if !errors.Is(err, cache.ErrLocked) {
+		sched.PruneHistory(ctx, l.directory, &pruned)
+	}
 	return pruned, err
 }
 

@@ -100,8 +100,8 @@ A [`sched.Request`](../../internal/sched/doc.go) carries all inputs an action re
 including resolved tag records for pull actions;
 the runner does not read the record store or the target graph directly.
 Requests and reports serialize to JSON for transport between the coordinator and workers over HTTP.
-Only `sched.Sharing` writes to the record store, and only after the runner has published target artifacts
-and returned its report.
+Only `sched.Sharing` writes results and tag records to the record store, and only after the runner has published
+target artifacts and returned its report; the scheduler adds to target history, which names no artifact.
 This sequencing guarantees that the record store never references missing artifacts;
 when concurrent writes occur, the latest write wins.
 
