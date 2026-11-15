@@ -17,7 +17,8 @@ the same spans can feed the tools operators already run, if vamos exports them i
   to an OpenTelemetry span. Span IDs are derived deterministically from the coordinator's instance, the job and
   vamos's span IDs; so is the trace ID, unless the build joined an outer trace, whose trace ID it then takes.
   The coordinator keeps that outer context with the job, so a trace exported and the same trace retrieved with
-  `--trace` agree, and a build can print the trace ID it actually used. Arrows between spans become span links, and so does each other build's use of a shared attempt.
+  `--trace` agree, and a build can print the trace ID it actually used. Arrows between spans become span links,
+  and so does each other build's use of a shared attempt.
   Sampling follows `OTEL_TRACES_SAMPLER`, keeping or dropping a build's trace whole.
 - **Joining an outer trace**: a client that finds a W3C `TRACEPARENT` in its environment sends it with its request,
   and the build's trace becomes a child of that trace, as a CI pipeline's, rather than starting its own.
