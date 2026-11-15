@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/opencontainers/go-digest"
 )
@@ -106,6 +107,10 @@ type ContentStore interface {
 	Read(ctx context.Context, b Blob, limit int64) ([]byte, error)
 	// ReadMany returns the content of each of blobs, verified, in order; each must be at most limit bytes.
 	ReadMany(ctx context.Context, blobs []Blob, limit int64) ([][]byte, error)
+	// Stat returns the blob that the store holds under d, its size included, or ErrMissing,
+	// so that a blob known by its digest alone can be read.
+	// It doesn't verify the content, and so never drops a blob, which a read then verifies.
+	Stat(ctx context.Context, d digest.Digest) (Blob, error)
 	// ClearContent removes every blob, returning how many there were.
 	ClearContent(ctx context.Context) (int, error)
 }
@@ -130,6 +135,30 @@ type RecordStore interface {
 	// Generation counts the times the results were cleared, kept with the records, so that a build captured
 	// against one generation can be refused once a prune has made another.
 	Generation(ctx context.Context) (uint64, error)
+
+	// History returns the target history named name, or nil if there is none that can be read.
+	// Histories are kept until PruneHistory removes them, even by ClearResults.
+	History(ctx context.Context, name digest.Digest) (*History, error)
+	// Newest returns the leading fields of the history named name, decoding none of its entries,
+	// or a zero head if there is none, or its leading fields can't be read.
+	// A record whose entries alone are damaged, which History refuses, still gives its head;
+	// the next add that isn't skipped for it rewrites the record.
+	Newest(ctx context.Context, name digest.Digest) (HistoryHead, error)
+	// AddHistory adds entry to the history named name, atomically against every other add to the store,
+	// so that concurrent adds all survive: it takes the entry's fingerprint as the newest,
+	// puts the entry first in place of any earlier entry with its key, unless it is too large to keep within
+	// MaxHistorySize even with its trees kept by digest alone, when it adds no entry and leaves the earlier one,
+	// keeps at most keep entries, the oldest going first, and as many as fit in MaxHistorySize,
+	// drops the trees no entry names, and sets Used to when it publishes.
+	// It publishes only a record that reads back, and fails, publishing nothing, otherwise.
+	// trees holds the files of the trees that entry's sources name, which the history may lack;
+	// a tree that neither holds is kept by its digest alone.
+	AddHistory(ctx context.Context, name digest.Digest, entry HistoryEntry,
+		trees map[digest.Digest][]HistoryFile, keep int) error
+	// PruneHistory removes every history whose Used is before before, under the same exclusion as adds.
+	// It goes on past a history it fails to remove, which stays for the next prune,
+	// and returns how many it removed and the failures joined.
+	PruneHistory(ctx context.Context, before time.Time) (int, error)
 }
 
 // verifier is a stream of a blob's content that checks, at its end, that the bytes made the blob's digest and size,

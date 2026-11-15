@@ -25,6 +25,7 @@ const (
 	pathPrune        = "/v1/prune"
 	pathBlobs        = "/v1/blobs"
 	pathBlob         = "/v1/blobs/{digest}"
+	pathStat         = "/v1/blobs/{digest}/stat"
 	pathMissing      = "/v1/blobs/missing"
 	pathReadMany     = "/v1/blobs/read"
 )

@@ -111,6 +111,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST "+pathReadMany, s.readMany)
 	mux.HandleFunc("POST "+pathBlobs, s.put)
 	mux.HandleFunc("HEAD "+pathBlob, s.has)
+	mux.HandleFunc("GET "+pathStat, s.stat)
 	mux.HandleFunc("GET "+pathBlob, s.get)
 	mux.HandleFunc("PUT "+pathBlob, s.importBlob)
 	if s.Workers != nil {
@@ -399,6 +400,16 @@ func (s *Server) has(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusOK)
+}
+
+// stat answers which blob, with its size, the store holds under the digest.
+func (s *Server) stat(w http.ResponseWriter, r *http.Request) {
+	b, err := s.Content.Stat(r.Context(), digest.Digest(r.PathValue("digest")))
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, b)
 }
 
 // rangeStart returns the offset that r's Range header asks to start from, "bytes=N-", or 0 without one.

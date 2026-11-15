@@ -5,10 +5,15 @@ package cachetest
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/vamos-build/vamos/internal/cache"
 
@@ -52,16 +57,22 @@ func Content(t *testing.T, f Fixture) {
 	t.Run("malformed digests", func(t *testing.T) { testMalformedDigests(t, f.New(t)) })
 	t.Run("trees", func(t *testing.T) { testReadTree(t, f.New(t)) })
 	t.Run("checkout corrupt file", func(t *testing.T) { testCheckoutCorruptFile(t, f.New(t)) })
+	t.Run("stat", func(t *testing.T) { testStat(t, f.New(t)) })
 }
 
 // Records checks the contract of a record store: the latest result for a key is kept, a key with none has no result,
-// malformed records are refused, tag records are kept until replaced, and clearing results leaves tags.
+// malformed records are refused, tag records are kept until replaced, and clearing results leaves tags;
+// and that target history keeps what its adds say, within its cap, whatever adds run at once,
+// survives clearing results, and is pruned by when it was last used.
 func Records(t *testing.T, f Fixture) {
-	s := f.New(t)
-	if s.Records == nil {
+	if f.New(t).Records == nil {
 		t.Skip("the implementation has no record store")
 	}
-	testRecordStore(t, s)
+	t.Run("results and tags", func(t *testing.T) { testRecordStore(t, f.New(t)) })
+	t.Run("history", func(t *testing.T) { testHistory(t, f.New(t)) })
+	t.Run("concurrent history adds", func(t *testing.T) { testConcurrentHistory(t, f.New(t)) })
+	t.Run("history cap", func(t *testing.T) { testHistoryCap(t, f.New(t)) })
+	t.Run("history prune", func(t *testing.T) { testPruneHistory(t, f.New(t)) })
 }
 
 // testContentStore checks that blobs are found by digest, verified as they are read, and put only within limits.
@@ -535,5 +546,256 @@ func testRecordStore(t *testing.T, s Stores) {
 	must(t, s.Records.SetResult(ctx, key, &cache.ActionResult{Epoch: 4}))
 	if r, err := s.Records.Result(ctx, key); err != nil || r == nil || r.Epoch != 4 {
 		t.Errorf("result set after clearing = %+v, %v; want epoch 4", r, err)
+	}
+}
+
+// testStat checks that Stat gives a held blob's size by its digest, ErrMissing for one not held,
+// and never drops a blob, even one that a read would find corrupt.
+func testStat(t *testing.T, s Stores) {
+	ctx := t.Context()
+	data := []byte("some content")
+	b, err := s.Content.PutBytes(ctx, data)
+	must(t, err)
+	if got, err := s.Content.Stat(ctx, b.Digest); err != nil || got != b {
+		t.Errorf("Stat = %+v, %v; want %+v", got, err, b)
+	}
+	if _, err := s.Content.Stat(ctx, digest.FromString("never put")); !errors.Is(err, cache.ErrMissing) {
+		t.Errorf("Stat of a blob never put = %v, want %v", err, cache.ErrMissing)
+	}
+	if _, err := s.Content.Stat(ctx, "sha256:../../escape"); err == nil {
+		t.Error("Stat accepted a malformed digest")
+	}
+	if s.Corrupt == nil {
+		return
+	}
+	s.Corrupt(t, b, []byte("other bytes"))
+	if got, err := s.Content.Stat(ctx, b.Digest); err != nil || got.Size != int64(len("other bytes")) {
+		t.Errorf("Stat of a corrupt blob = %+v, %v; want the size of what is held", got, err)
+	}
+	if got, err := s.Content.Stat(ctx, b.Digest); err != nil || got.Digest != b.Digest {
+		t.Errorf("Stat again = %+v, %v; want the blob still held", got, err)
+	}
+}
+
+// historyName returns the name of a history, as a digest of name.
+func historyName(name string) digest.Digest {
+	return digest.FromString("history " + name)
+}
+
+// historyEntry returns an entry of the key named key whose sources' trees are trees.
+func historyEntry(key string, trees ...digest.Digest) cache.HistoryEntry {
+	action := json.RawMessage(`{"key":"` + key + `"}`)
+	e := cache.HistoryEntry{Key: digest.FromString(key), ActionVersion: 1, Action: action}
+	for _, tree := range trees {
+		e.Adds = append(e.Adds, cache.Supplier{Tree: tree})
+	}
+	return e
+}
+
+// historyFiles returns n files whose paths take about size bytes each.
+func historyFiles(n, size int) []cache.HistoryFile {
+	files := make([]cache.HistoryFile, n)
+	for i := range files {
+		files[i] = cache.HistoryFile{Path: fmt.Sprintf("%d/%s", i, strings.Repeat("p", size)), Type: "file"}
+	}
+	return files
+}
+
+// historyKeys returns which of keys h's entries have, in h's order, by the names historyEntry took.
+func historyKeys(h *cache.History, keys ...string) []string {
+	if h == nil {
+		return nil
+	}
+	byKey := map[digest.Digest]string{}
+	for _, k := range keys {
+		byKey[digest.FromString(k)] = k
+	}
+	var out []string
+	for _, e := range h.Entries {
+		out = append(out, byKey[e.Key])
+	}
+	return out
+}
+
+// testHistory checks that a history keeps at most keep entries, most recent first and each key once,
+// with each tree once, that Newest follows adds, and that clearing results leaves it.
+func testHistory(t *testing.T, s Stores) {
+	ctx := t.Context()
+	name := historyName("app")
+	if h, err := s.Records.History(ctx, name); err != nil || h != nil {
+		t.Fatalf("history before any = %v, %v; want none", h, err)
+	}
+	if head, err := s.Records.Newest(ctx, name); err != nil || head != (cache.HistoryHead{}) {
+		t.Fatalf("newest before any = %+v, %v; want none", head, err)
+	}
+	src := digest.FromString("src")
+	trees := map[digest.Digest][]cache.HistoryFile{src: historyFiles(2, 1)}
+	before := time.Now().Add(-time.Second)
+	for _, key := range []string{"a", "b", "a", "c"} {
+		must(t, s.Records.AddHistory(ctx, name, historyEntry(key, src), trees, 2))
+		head, err := s.Records.Newest(ctx, name)
+		if err != nil || head.Newest != historyEntry(key, src).Fingerprint() || head.Used.Before(before) {
+			t.Errorf("newest after adding %s = %+v, %v; want its fingerprint, used now", key, head, err)
+		}
+	}
+	h, err := s.Records.History(ctx, name)
+	if err != nil || !slices.Equal(historyKeys(h, "a", "b", "c"), []string{"c", "a"}) {
+		t.Fatalf("history = %v, %v; want [c a], keeping 2", historyKeys(h, "a", "b", "c"), err)
+	}
+	if len(h.Trees) != 1 || len(h.Trees[src]) != 2 {
+		t.Errorf("trees %v; want src's alone, once", h.Trees)
+	}
+	if string(h.Entries[0].Action) != `{"key":"c"}` {
+		t.Errorf("the newest entry's action is %s; want it as added", h.Entries[0].Action)
+	}
+	if err := s.Records.AddHistory(ctx, name, cache.HistoryEntry{Key: "nope"}, nil, 2); err == nil {
+		t.Error("AddHistory accepted an entry with a malformed key")
+	}
+	for what, bad := range map[string]map[digest.Digest][]cache.HistoryFile{
+		"a malformed tree digest": {"sha256:nope": historyFiles(1, 1)},
+		"a file without a path":   {src: {{Type: "file"}}},
+		"a malformed file digest": {src: {{Path: "a", Type: "file", Digest: "sha256:nope"}}},
+	} {
+		if err := s.Records.AddHistory(ctx, name, historyEntry("d", src), bad, 2); err == nil {
+			t.Errorf("AddHistory accepted trees with %s", what)
+		}
+	}
+	// An action nested as deeply as JSON allows alone can't be nested inside a record, which would then not read.
+	deep := historyEntry("deep")
+	deep.Action = json.RawMessage(strings.Repeat("[", 9_999) + strings.Repeat("]", 9_999))
+	headBefore, err := s.Records.Newest(ctx, name)
+	must(t, err)
+	if err := s.Records.AddHistory(ctx, name, deep, nil, 2); err == nil {
+		t.Error("AddHistory accepted an action too deeply nested for its record to read back")
+	}
+	future := historyEntry("future")
+	future.Recorded = time.Date(10_000, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := s.Records.AddHistory(ctx, name, future, nil, 2); err == nil {
+		t.Error("AddHistory accepted an entry recorded at a time that can't be encoded")
+	}
+	if head, err := s.Records.Newest(ctx, name); err != nil || head.Newest != headBefore.Newest ||
+		!head.Used.Equal(headBefore.Used) {
+		t.Errorf("newest after refused adds = %+v, %v; want it as it was, %+v", head, err, headBefore)
+	}
+	h, err = s.Records.History(ctx, name)
+	if got := historyKeys(h, "a", "c"); err != nil || !slices.Equal(got, []string{"c", "a"}) {
+		t.Errorf("history after refused adds = %v, %v; want it as it was, [c a]", got, err)
+	}
+	if _, err := s.Records.History(ctx, "not a digest"); err == nil {
+		t.Error("History accepted a malformed name")
+	}
+	_, err = s.Records.ClearResults(ctx)
+	must(t, err)
+	if h, err := s.Records.History(ctx, name); err != nil || len(historyKeys(h, "a", "c")) != 2 {
+		t.Errorf("history after clearing results = %v, %v; want it kept", historyKeys(h, "a", "c"), err)
+	}
+}
+
+// testConcurrentHistory checks that adds to one history at once all survive.
+func testConcurrentHistory(t *testing.T, s Stores) {
+	ctx := t.Context()
+	name := historyName("app")
+	const adds = 16
+	var wg sync.WaitGroup
+	errs := make([]error, adds)
+	for i := range adds {
+		wg.Go(func() {
+			errs[i] = s.Records.AddHistory(ctx, name, historyEntry(fmt.Sprint(i)), nil, adds)
+		})
+	}
+	wg.Wait()
+	must(t, errors.Join(errs...))
+	h, err := s.Records.History(ctx, name)
+	must(t, err)
+	var keys []string
+	for i := range adds {
+		keys = append(keys, fmt.Sprint(i))
+	}
+	got := historyKeys(h, keys...)
+	slices.Sort(got)
+	slices.Sort(keys)
+	if !slices.Equal(got, keys) {
+		t.Errorf("after %d adds at once, the history holds %v; want each of them once", adds, got)
+	}
+}
+
+// testHistoryCap checks that adds keep a history within MaxHistorySize: the oldest entries go, a newest entry with
+// two large trees keeps its key with its trees by digest, and one too large even then adds no entry but becomes the
+// newest and moves Used.
+func testHistoryCap(t *testing.T, s Stores) {
+	ctx := t.Context()
+	name := historyName("app")
+	// Each of these trees takes about 4 MiB, so that the record holds three or four.
+	for i := range 6 {
+		tree := digest.FromString(fmt.Sprint("tree ", i))
+		trees := map[digest.Digest][]cache.HistoryFile{tree: historyFiles(4000, 1000)}
+		must(t, s.Records.AddHistory(ctx, name, historyEntry(fmt.Sprint(i), tree), trees, 8))
+	}
+	h, err := s.Records.History(ctx, name)
+	must(t, err)
+	got := historyKeys(h, "0", "1", "2", "3", "4", "5")
+	if len(got) < 2 || len(got) > 4 || got[0] != "5" || got[1] != "4" {
+		t.Errorf("history %v; want the newest few, most recent first, within the cap", got)
+	}
+	if data, _ := json.Marshal(h); len(data) > cache.MaxHistorySize {
+		t.Errorf("the history takes %d bytes; want at most %d", len(data), cache.MaxHistorySize)
+	}
+
+	// Two trees of about 10 MiB each: the newest entry keeps its key, and one of them by digest alone.
+	large, larger := digest.FromString("large"), digest.FromString("larger")
+	must(t, s.Records.AddHistory(ctx, name, historyEntry("wide", large, larger), map[digest.Digest][]cache.HistoryFile{
+		large:  historyFiles(10_000, 1000),
+		larger: historyFiles(10_000, 1100),
+	}, 8))
+	h, err = s.Records.History(ctx, name)
+	must(t, err)
+	if len(h.Entries) == 0 || h.Entries[0].Key != digest.FromString("wide") {
+		t.Fatalf("history %v; want the wide entry first", historyKeys(h, "wide"))
+	}
+	if _, ok := h.Trees[larger]; ok {
+		t.Error("the larger tree is kept whole beside the large one, past the cap")
+	}
+	if _, ok := h.Trees[large]; !ok {
+		t.Error("the large tree, which fits alone, isn't kept")
+	}
+
+	// An entry whose action alone passes the cap.
+	huge := historyEntry("huge")
+	huge.Action = json.RawMessage(`"` + strings.Repeat("x", cache.MaxHistorySize) + `"`)
+	before, err := s.Records.Newest(ctx, name)
+	must(t, err)
+	must(t, s.Records.AddHistory(ctx, name, huge, nil, 8))
+	h, err = s.Records.History(ctx, name)
+	must(t, err)
+	if h.Entries[0].Key != digest.FromString("wide") {
+		t.Errorf("after an entry too large to keep, the first entry is %s; want the wide one", h.Entries[0].Key)
+	}
+	head, err := s.Records.Newest(ctx, name)
+	if err != nil || head.Newest != huge.Fingerprint() || head.Used.Before(before.Used) {
+		t.Errorf("newest after an entry too large to keep = %+v, %v; want its fingerprint, used again", head, err)
+	}
+}
+
+// testPruneHistory checks that PruneHistory removes the histories used before its cutoff alone, and counts them.
+func testPruneHistory(t *testing.T, s Stores) {
+	ctx := t.Context()
+	must(t, s.Records.AddHistory(ctx, historyName("old"), historyEntry("a"), nil, 8))
+	cutoff := time.Now().Add(time.Second)
+	for cutoff.After(time.Now()) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	must(t, s.Records.AddHistory(ctx, historyName("new"), historyEntry("b"), nil, 8))
+	removed, err := s.Records.PruneHistory(ctx, cutoff)
+	if err != nil || removed != 1 {
+		t.Errorf("PruneHistory = %d, %v; want 1 removed", removed, err)
+	}
+	if h, err := s.Records.History(ctx, historyName("old")); err != nil || h != nil {
+		t.Errorf("the history used before the cutoff = %v, %v; want it gone", h, err)
+	}
+	if h, err := s.Records.History(ctx, historyName("new")); err != nil || h == nil {
+		t.Errorf("the history used after the cutoff = %v, %v; want it kept", h, err)
+	}
+	if removed, err := s.Records.PruneHistory(ctx, cutoff); err != nil || removed != 0 {
+		t.Errorf("PruneHistory again = %d, %v; want none removed", removed, err)
 	}
 }

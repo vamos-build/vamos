@@ -14,6 +14,8 @@ This file says what to review when changing it and which tests hold it.
 | Reproducible timestamps | `Scheduler.epoch`, `commitLayer` and `sched.Step.Epoch` |
 | Pruning policy | `Local.prune` in run, `Directory.Prune`, the stores' `ClearContent` and `ClearResults`, `pool.Report`, `coord.Registry.ClearRepository` |
 | Record writes | `sched.Sharing`; the runner returns a `sched.Report` and the puller the tag record to write |
+| Target history: record, cap, lock and retention | `cache.History` and `History.add` in [history.go](../../internal/cache/history.go), `Directory.lockHistory` in [history_directory.go](../../internal/cache/history_directory.go), `Memory.AddHistory`, `cache.HistoryRetention` |
+| What a result names beside its key | `cache.ActionResult`'s `Trace` and `Provenance`, which no checker reads, and `ContentStore.Stat` for reading a blob by its digest alone |
 
 Only run and cache name the cache directory, `run.CacheDir`; a client gets its content store from its executor.
 `graph.Version` addresses a different compatibility boundary from `sched.ActionVersion`.
@@ -33,6 +35,10 @@ and `sched.Request.Secrets`.
 | Cached resolves ask the runner nothing; legacy instances decode | `TestSchedulerCachedResolve`, `TestTagRecordLegacyInstances` |
 | Nothing reaches a registry once the record and images are cached | `TestPull_ResolvedTagsAreReused` |
 | Generation fencing, prune order, cache repository cleared | `TestGenerationFencing`, `TestPruneOrder`, `TestPruneClearsRepository` |
+| History adds all survive, keep and the cap hold, `ClearResults` keeps history, a prune judges by `Used` | `cachetest.Records`, `TestHistoryAdd`, `TestHistoryCap` |
+| History across processes, its lock's bound, a prune that goes on past a failure | `TestHistoryAcrossProcesses`, `TestHistoryLockGivesUp`, `TestPruneHistoryGoesOn` |
+| A result without a trace or timing decodes | `TestResultTrace` |
+| `Stat` gives a size and never drops a blob, through the remote store too | `cachetest.Content`, `TestContentStoreContract` |
 
 Pruning excludes every other use of the directory through its lock; see [concurrency-model.md](concurrency-model.md).
 Shared-cache test isolation rules are in [testing.md](testing.md).

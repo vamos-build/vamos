@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/opencontainers/go-digest"
 )
@@ -22,6 +23,10 @@ type ActionResult struct {
 	Epoch     int64      `json:"epoch"`            // the time its files were stamped with, in Unix seconds
 	// Provenance says what made the result; it is no part of the action's key.
 	Provenance *Provenance `json:"provenance,omitempty"`
+	// Trace is the stored trace of the attempt that made the result, if it was kept.
+	// Like Provenance, it is no part of the action's key, and unlike Log, nothing checks it before reuse:
+	// a result whose trace is gone is reused all the same.
+	Trace *Blob `json:"trace,omitempty"`
 }
 
 // Provenance describes the executor that made a result.
@@ -31,6 +36,10 @@ type Provenance struct {
 	Capabilities []string `json:"capabilities,omitempty"` // the Linux capabilities it gave run() steps
 	Version      string   `json:"version,omitempty"`      // of vamos, if known
 	Emulated     bool     `json:"emulated,omitempty"`     // its run() steps ran under emulation, for another platform
+	// Started and Took are when the run that made the result began, and how long it took,
+	// without waiting for a worker or failed tries; a result made before vamos kept them has neither.
+	Started time.Time     `json:"started,omitzero"`
+	Took    time.Duration `json:"took,omitempty"`
 }
 
 // Location is a place an image's bytes can be fetched from.
@@ -71,7 +80,7 @@ func (r *ActionResult) Validate() error {
 			}
 		}
 	}
-	for name, b := range map[string]*Blob{"output": r.Output, "log": r.Log} {
+	for name, b := range map[string]*Blob{"output": r.Output, "log": r.Log, "trace": r.Trace} {
 		if b != nil {
 			if err := b.Validate(); err != nil {
 				return fmt.Errorf("%s: %w", name, err)
@@ -82,6 +91,9 @@ func (r *ActionResult) Validate() error {
 		if err := l.Validate(); err != nil {
 			return err
 		}
+	}
+	if p := r.Provenance; p != nil && p.Took < 0 {
+		return fmt.Errorf("provenance took a negative %v", p.Took)
 	}
 	return nil
 }

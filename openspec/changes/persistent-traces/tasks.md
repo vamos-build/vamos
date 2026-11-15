@@ -16,13 +16,13 @@
 
 ## 2. Results, provenance and target history (`internal/cache`)
 
-- [ ] 2.1 Add `ActionResult.Trace` and `Provenance.Started` and `Took`, validated, and documented as no part of any
+- [x] 2.1 Add `ActionResult.Trace` and `Provenance.Started` and `Took`, validated, and documented as no part of any
   key. Show that a result without them still decodes. Verify with `go test ./internal/cache/...`.
-- [ ] 2.2 Add `History` (`Newest`, `Used`, `Entries`, `Trees`, encoded in that order), `HistoryEntry` and the trees they
+- [x] 2.2 Add `History` (`Newest`, `Used`, `Entries`, `Trees`, encoded in that order), `HistoryEntry` and the trees they
   share, with `Validate`, `MaxHistorySize` and `HistoryRetention`, 100 days. Adding drops the oldest entries until the
   record fits, and keeps an oversized tree by digest alone. Unit-test the cap and the oversized tree. Verify with
   `go test ./internal/cache`.
-- [ ] 2.3 Add `RecordStore.History`, `Newest`, which decodes only the record's leading fields, `AddHistory` (take the
+- [x] 2.3 Add `RecordStore.History`, `Newest`, which decodes only the record's leading fields, `AddHistory` (take the
   entry's fingerprint as the newest, put the entry first unless it is too large to keep, drop the earlier entry with
   the key, keep at most `keep`, drop unused trees, budget the whole record, set `Used`), and `PruneHistory(ctx,
   before)`, which removes records whose `Used` is before it, keeps going past a record it fails to remove, and returns
@@ -30,7 +30,7 @@
   `history/<name>`, published by rename, with adds and prunes under one history lock: an in-process mutex, then an
   exclusive `flock` on `history/lock`, taken without blocking and retried up to 10 seconds, mutex wait included, or
   the context's end. Make sure `ClearResults` leaves `history/`. Verify with `go test ./internal/cache/...`.
-- [ ] 2.4 Extend `cachetest.Records`: concurrent adds to one name all survive, `keep` holds, keys and trees
+- [x] 2.4 Extend `cachetest.Records`: concurrent adds to one name all survive, `keep` holds, keys and trees
   deduplicate, the cap evicts the oldest entries, a newest entry with two large trees keeps its key with its trees by
   digest, an entry too large even then adds no entry but becomes the newest fingerprint and moves `Used`, `Newest`
   follows adds, `ClearResults` keeps history, and `PruneHistory` removes only records whose `Used` is before its cutoff.
@@ -38,11 +38,11 @@
   going past a record it fails to remove, through an injected remover since the tests may run as root, and an add that
   gives up at its bound or the context's end while another process holds the lock. Verify with
   `go test -race ./internal/cache/...`.
-- [ ] 2.5 Add `ContentStore.Stat(ctx, digest)`, which gives the blob held under a digest or `ErrMissing`, to
+- [x] 2.5 Add `ContentStore.Stat(ctx, digest)`, which gives the blob held under a digest or `ErrMissing`, to
   `Directory`, `Memory` and `remote.Client`, with `remote.Server`'s endpoint, in one change so that every package
   builds. Extend `cachetest.Content` to cover it, and that it never drops a blob, which `TestContractHTTP` runs through
   the remote store. Verify with `go build ./... && go test ./internal/cache/... ./internal/remote`.
-- [ ] 2.6 Update `internal/cache/doc.go`, the storage design (`docs/design/storage.md`: the record store's class
+- [x] 2.6 Update `internal/cache/doc.go`, the storage design (`docs/design/storage.md`: the record store's class
   diagram, `ActionResult.Trace`, the history record, its lock, and that a prune keeps it until it goes unused) and
   `.agents/kb/storage.md`'s tables. Verify with the documentation checks in `.agents/kb/documentation.md`.
 

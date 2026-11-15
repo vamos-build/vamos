@@ -521,6 +521,25 @@ func (c *Client) Has(ctx context.Context, b cache.Blob) error {
 	})
 }
 
+// Stat returns the blob, with its size, that the coordinator's store holds under d.
+func (c *Client) Stat(ctx context.Context, d digest.Digest) (cache.Blob, error) {
+	if err := (cache.Blob{Digest: d}).Validate(); err != nil {
+		return cache.Blob{}, err
+	}
+	var b cache.Blob
+	path := strings.Replace(pathStat, "{digest}", string(d), 1)
+	if err := c.getJSON(ctx, "asking for a blob's size", path, "", &b); err != nil {
+		return cache.Blob{}, err
+	}
+	if b.Digest != d {
+		return cache.Blob{}, fmt.Errorf("asked for blob %s, the coordinator answered %s", d, b.Digest)
+	}
+	if err := b.Validate(); err != nil {
+		return cache.Blob{}, err
+	}
+	return b, nil
+}
+
 // postJSON posts v to path and decodes the answer into out, retrying transport failures.
 func (c *Client) postJSON(ctx context.Context, what, path, query string, v, out any) error {
 	body, err := json.Marshal(v)
