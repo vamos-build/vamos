@@ -127,8 +127,12 @@ func (x *drainingExecutor) Result(context.Context, api.JobID) (api.Outcome, erro
 	return x.outcome, nil
 }
 
+func (x *drainingExecutor) Capabilities(context.Context) (api.Capabilities, error) {
+	return api.Capabilities{}, errors.New("the executor has gone")
+}
+
 // TestWatchJobWriteFailure checks that a failure to write a job's events cancels the job,
-// that its spans and gaps still reach the trace while it is drained, and that a failure of the job's own
+// that the job still reaches the command's trace once it is drained, and that a failure of the job's own
 // is reported with the write's, and otherwise the write's failure alone.
 func TestWatchJobWriteFailure(t *testing.T) {
 	broken := errors.New("stdout is closed")
@@ -155,15 +159,8 @@ func TestWatchJobWriteFailure(t *testing.T) {
 			if !x.cancelled {
 				t.Error("the job wasn't cancelled")
 			}
-			if len(trace.remote) != 1 {
-				t.Errorf("the trace has executor spans %+v, want the one sent while draining", trace.remote)
-			}
-			gap := false
-			for _, s := range trace.recorder.Spans() {
-				gap = gap || s.Name == "trace incomplete"
-			}
-			if !gap {
-				t.Error("the trace doesn't say it is incomplete")
+			if doc, _ := trace.document(); len(doc.Jobs) != 1 || doc.Jobs[0].ID != "job" {
+				t.Errorf("the trace's jobs = %+v; want the drained job", doc.Jobs)
 			}
 		})
 	}
@@ -187,6 +184,10 @@ func (x endedExecutor) Watch(_ context.Context, _ api.JobID, _ int64, fn func(ap
 
 func (endedExecutor) Result(context.Context, api.JobID) (api.Outcome, error) {
 	return api.Outcome{}, errors.New("can't reach the coordinator")
+}
+
+func (endedExecutor) Capabilities(context.Context) (api.Capabilities, error) {
+	return api.Capabilities{}, errors.New("can't reach the coordinator")
 }
 
 // TestWatchJobOutcomeFromEvent checks that watchJob takes the job's outcome from its terminal event, without asking

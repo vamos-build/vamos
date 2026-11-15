@@ -164,7 +164,7 @@ func TestEstimateOffset(t *testing.T) {
 				clock = clock.Add(delay)
 				return answer, nil
 			}
-			got, err := EstimateOffset(context.Background(), now, remote)
+			got, err := EstimateOffset(context.Background(), 3, now, remote)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -192,11 +192,30 @@ func TestEstimateOffset(t *testing.T) {
 
 // TestEstimateOffsetFails checks that a failing call to the executor is reported.
 func TestEstimateOffsetFails(t *testing.T) {
-	_, err := EstimateOffset(context.Background(), time.Now, func(context.Context) (time.Time, error) {
+	calls := 0
+	_, err := EstimateOffset(context.Background(), 3, time.Now, func(context.Context) (time.Time, error) {
+		calls++
 		return time.Time{}, errors.New("unreachable")
 	})
-	if err == nil || err.Error() != "unreachable" {
-		t.Errorf("err = %v, want unreachable", err)
+	if err == nil || err.Error() != "unreachable" || calls != 1 {
+		t.Errorf("err = %v after %d calls, want unreachable after 1, so that one that stops answering costs one", err,
+			calls)
+	}
+}
+
+// TestEstimateOffsetKeepsGoodSamples checks that a failed sample ends the sampling, but a good one before it stands.
+func TestEstimateOffsetKeepsGoodSamples(t *testing.T) {
+	calls := 0
+	offset, err := EstimateOffset(context.Background(), 3, time.Now, func(context.Context) (time.Time, error) {
+		calls++
+		if calls > 1 {
+			return time.Time{}, errors.New("timed out")
+		}
+		return time.Now().Add(time.Hour), nil
+	})
+	if err != nil || offset.Offset < 59*time.Minute || calls != 2 {
+		t.Errorf("EstimateOffset = %v, %v after %d calls; want the first sample's hour ahead, after 2", offset, err,
+			calls)
 	}
 }
 

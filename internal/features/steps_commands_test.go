@@ -64,6 +64,9 @@ var everyCommandAndGraph = append(slices.Clone(everyCommand), "graph")
 // everyCommandGraphAndUpdate are everyCommand, graph and update, which configure a graph as they do.
 var everyCommandGraphAndUpdate = append(slices.Clone(everyCommandAndGraph), "update")
 
+// everyCommandGraphUpdateAndTrace are everyCommandGraphAndUpdate and trace, which reads from an executor as they do.
+var everyCommandGraphUpdateAndTrace = append(slices.Clone(everyCommandGraphAndUpdate), "trace")
+
 // to sends to the path name, relative to the folder that the command sends to,
 // rather than to the target's name, with .tar for save. Save and export take it.
 func to(name string) option {

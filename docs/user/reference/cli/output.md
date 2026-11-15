@@ -18,6 +18,13 @@ Index built! <destination> <digest>
 Files exported! <folder> <digest>
 ```
 
+A command that builds prints its trace's digest on standard error once its jobs end, whether it succeeded or
+failed, which [`vamos trace`](trace.md) reads:
+
+```text
+vamos: trace sha256:<hex>
+```
+
 Errors display a `vamos:` prefix and exit with status 1.
 Syntax and configuration errors in `BUILD` files report the file path, line, and column.
 

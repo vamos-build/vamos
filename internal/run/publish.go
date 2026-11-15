@@ -37,7 +37,7 @@ func (l *Local) submitPublish(req api.PublishRequest) (api.JobID, error) {
 		}
 	}
 	return l.jobs.Start(false, func(ctx context.Context, ev sched.Events) api.Outcome {
-		return l.traced(ctx, req.Trace, ev, func(ctx context.Context) api.Outcome {
+		return l.traced(ctx, func(ctx context.Context) api.Outcome {
 			ctx, span := tracing.StartTrack(ctx, "publish", "publish")
 			if err := l.open(); err != nil {
 				span.EndWith(err)

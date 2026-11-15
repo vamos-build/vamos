@@ -102,13 +102,22 @@ func unreadableJob(t *testing.T, f Fixture, ex api.Executor, content string) (ap
 		Graph:    cache.Blob{Digest: digest.FromString(content), Size: int64(len(content))},
 		Version:  graph.Version,
 		Platform: f.Platform,
-		Trace:    &tracing.CallContext{Parent: "client-1"}, // so that the job has spans as well as its outcome
 	}
 	id, err := ex.Submit(t.Context(), api.Request{Graph: req})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return id, req
+}
+
+// submitted submits req as a graph job on ex, which runs a target and so reports statuses before its outcome.
+func submitted(t *testing.T, ex api.Executor, req api.GraphRequest) api.JobID {
+	t.Helper()
+	id, err := ex.Submit(t.Context(), api.Request{Graph: &req})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return id
 }
 
 // testValuesOwned checks that values cross the executor boundary by copy, as a transport would carry them:
@@ -132,7 +141,6 @@ func testValuesOwned(t *testing.T, f Fixture) {
 	id, req := unreadableJob(t, f, ex, "owned")
 	submitted := req.Graph
 	req.Graph = cache.Blob{Digest: digest.FromString("changed"), Size: 7}
-	req.Trace.Parent = "changed"
 	events := watchAll(t, ex, id, 0)
 	last := lastEvent(t, events)
 	if last.Outcome == nil || last.Outcome.Failure == nil ||
@@ -285,8 +293,9 @@ func scribbleOutcome(o *api.Outcome) {
 // testWatchCancelled checks that a watch whose context ends stops before the next event,
 // though the job has ended and every event is waiting to be delivered.
 func testWatchCancelled(t *testing.T, f Fixture) {
+	f.requireBuilds(t)
 	ex := f.New(t)
-	id, _ := unreadableJob(t, f, ex, "cancelled watch")
+	id := submitted(t, ex, taskGraph(t, f, ex, "cancelled watch"))
 	if events := watchAll(t, ex, id, 0); len(events) < 2 {
 		t.Fatalf("the job has %d events, want at least 2 for the test to mean anything", len(events))
 	}
@@ -307,8 +316,9 @@ func testWatchCancelled(t *testing.T, f Fixture) {
 // testWatcherFails checks that a watch whose fn fails stops there, with fn's error as it is,
 // even one that wraps an error the executor gives meaning to.
 func testWatcherFails(t *testing.T, f Fixture) {
+	f.requireBuilds(t)
 	ex := f.New(t)
-	id, _ := unreadableJob(t, f, ex, "failing watcher")
+	id := submitted(t, ex, taskGraph(t, f, ex, "failing watcher"))
 	if events := watchAll(t, ex, id, 0); len(events) < 2 {
 		t.Fatalf("the job has %d events, want at least 2 for the test to mean anything", len(events))
 	}

@@ -130,7 +130,7 @@ func (s *Sharing) attempt(ctx context.Context, req Request, ev Output) (*cache.A
 		}
 		spans, lost := recorder.Snapshot()
 		blob, traceErr := s.saveTrace(actx, at.id, spans, lost)
-		at.trace = AttemptTrace{ID: at.id, Trace: blob, Spans: spans, Lost: lost}
+		at.trace = AttemptTrace{ID: at.id, Trace: blob}
 		if err == nil && rep != nil && rep.Result != nil && req.Key != "" {
 			rep.Result.Trace = blob
 			if rep.Result.Provenance == nil {

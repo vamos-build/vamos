@@ -760,7 +760,7 @@ func (s *Scheduler) resolve(ctx context.Context, ref graph.Ref, a *Action, runPl
 			}
 			if problem == nil {
 				tracing.Current(ctx).Set("cached", true)
-				jobTraceOf(ctx).Record(api.TraceEntry{Node: ref, Outcome: api.NodeHit})
+				jobTraceOf(ctx).Record(api.TraceEntry{Node: ref, Desc: s.graph.Node(ref).Desc, Outcome: api.NodeHit})
 				return result, nil
 			}
 			tracing.Current(ctx).Set("unusable", problem.Error())
@@ -884,7 +884,8 @@ func (s *Scheduler) runCached(
 			span.Set(resultArgs(result)...)
 			span.Set(hitArgs(result, span)...)
 			s.recordHit(ctx, span, n, a, key, base.index)
-			jobTraceOf(ctx).Record(api.TraceEntry{Node: ref, Outcome: api.NodeHit, Trace: cloneBlob(result.Trace)})
+			jobTraceOf(ctx).Record(api.TraceEntry{Node: ref, Desc: target, Outcome: api.NodeHit,
+				Trace: cloneBlob(result.Trace)})
 			if flow := flowOf(result); flow != "" {
 				span.Produce(flow) // as the commit or collection that made it would
 			}
@@ -972,13 +973,12 @@ func (o *targetOutput) Traced(t AttemptTrace) {
 	same, _ := starter.(*targetOutput)
 	sameJob := same != nil && same.s == o.s
 	trace := jobTraceOf(o.ctx)
-	e := t.entry(o.ref, starter == nil)
+	e := t.entry(o.ref, o.s.graph.Node(o.ref).Desc, starter == nil)
 	e.Cause = o.cause
 	trace.Record(e)
 	switch {
 	case starter == nil:
 		tracing.Relay(o.ctx, t.Write)
-		trace.stream(t.Spans, t.Lost) // to a client that asked for spans as events, as the starter's
 	case !sameJob:
 		tracing.Relay(o.ctx, onSharedTrack(t.Write, o.s.graph.Node(o.ref).Desc))
 	}
@@ -1026,10 +1026,9 @@ func (o *pullOutput) Traced(t AttemptTrace) {
 	o.mu.Lock()
 	started := !o.joined
 	o.mu.Unlock()
-	jobTraceOf(o.ctx).Record(t.entry(o.ref, started))
+	jobTraceOf(o.ctx).Record(t.entry(o.ref, o.desc, started))
 	if started {
 		tracing.Relay(o.ctx, t.Write)
-		jobTraceOf(o.ctx).stream(t.Spans, t.Lost)
 		return
 	}
 	tracing.Relay(o.ctx, onSharedTrack(t.Write, o.desc))

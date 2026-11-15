@@ -158,7 +158,7 @@
   ends at its bound. A command that ran no job stores nothing. Warn about a clock offset that can't be measured,
   storing a zero offset marked unknown, rather than failing the command, and test it. Warn when a job's outcome names
   no manifest. Verify with `go test ./internal/cli`.
-- [ ] 7.2 Assemble traces in `cli/trace.go`: manifests and the attempt traces they took with `ReadMany`, falling back to
+- [x] 7.2 Assemble traces in `cli/trace.go`: manifests and the attempt traces they took with `ReadMany`, falling back to
   one read per blob when a batch meets a missing or corrupt one, with gaps for those. Place joined attempts on their own
   `(shared)` track with parents cleared, and shift client spans by the stored offset. Place an attempt that several of
   a command's jobs share once, by its ID, under the starter if it took the trace and otherwise on the first such job's
@@ -170,7 +170,7 @@
   cause, read by Perfetto, and that `--trace` writes every span when only storing the command trace fails, for a
   command that succeeds and one that fails, with the command's outcome unchanged. Verify the existing `TestTrace_*`
   scenarios pass unchanged with `go test ./internal/features -run TestTrace_`.
-- [ ] 7.3 Add `vamos trace <digest|job> <file.json>`: take an argument holding a `:` as a digest, failing on one that
+- [x] 7.3 Add `vamos trace <digest|job> <file.json>`: take an argument holding a `:` as a digest, failing on one that
   doesn't parse, and read it through `Stat`, failing as no trace if its size passes `MaxTraceSize`, then by `kind`; read
   a job ID only with `--coordinator`, through `Executor.Trace`, with messages for running, expired and unknown jobs;
   fail, naming the digest and writing nothing, on a blob that isn't a stored trace or whose `kind` or version is
@@ -182,7 +182,7 @@
   results' provenance. Add `trace_test.go` rules and scenarios for every `build-traces` requirement, the secret one
   checking the stored command trace, manifest and attempt trace as well as the file, the coordinator ones in the remote
   steps. Verify with `go test ./internal/features -run TestTrace_`.
-- [ ] 7.5 Update the user docs: `docs/user/reference/cache.md#traces` (always on, what is stored, prune),
+- [x] 7.5 Update the user docs: `docs/user/reference/cache.md#traces` (always on, what is stored, prune),
   `flags.md`'s `--trace`, a new `docs/user/reference/cli/trace.md` with its row in the CLI README table, `output.md`
   (the trace line), and `prune.md` (traces go, history stays until unused). Update `internal/cli/doc.go`. Make the
   feature rules' doc comments quote them. Verify with the documentation checks.

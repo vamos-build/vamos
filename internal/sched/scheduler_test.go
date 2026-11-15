@@ -174,7 +174,6 @@ func (e *recordedEvents) Output(node graph.Ref, stream byte, data []byte) {
 }
 
 // Spans discards spans.
-func (e *recordedEvents) Spans([]tracing.Span) {}
 
 // fakeFixture returns stores in memory and a fake Runner on them, whose registry has index for the tag "base:v1".
 func fakeFixture(t testing.TB) (*cache.Memory, *fakeRunner) {

@@ -40,7 +40,7 @@ func TestSchedulerManifest(t *testing.T) {
 	g := traceGraph(t)
 	run := func() api.JobTrace {
 		t.Helper()
-		ctx, trace := ForJob(t.Context(), nil, &recordedEvents{})
+		ctx, trace := ForJob(t.Context())
 		if _, err := schedule(g, m, m, f, &recordedEvents{}, false, time.Time{}).Run(ctx); err != nil {
 			t.Fatal(err)
 		}

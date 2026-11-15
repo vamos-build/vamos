@@ -36,9 +36,11 @@ type JobTrace struct {
 
 // TraceEntry says what became of one node of a job, and where the trace of the work that served it is.
 type TraceEntry struct {
-	Node    graph.Ref `json:"node"`
-	Outcome string    `json:"outcome"`           // NodeHit, NodeMiss or NodeJoined
-	Started bool      `json:"started,omitempty"` // it started the attempt that served it
+	Node graph.Ref `json:"node"`
+	// Desc describes the node, as its graph does, which names the track its spans lie on.
+	Desc    string `json:"desc,omitempty"`
+	Outcome string `json:"outcome"`           // NodeHit, NodeMiss or NodeJoined
+	Started bool   `json:"started,omitempty"` // it started the attempt that served it
 	// Cause is why a layer or task missed, as attribution found it; a hit, and a pull, have none.
 	Cause   string `json:"cause,omitempty"`
 	Attempt string `json:"attempt,omitempty"` // the ID of the attempt that served it, or made the result it reused

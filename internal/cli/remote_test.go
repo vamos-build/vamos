@@ -17,6 +17,7 @@ import (
 // without capabilities a user namespace: every command but a coordinator, unless it builds locally,
 // and but help and --version.
 func TestUsesContainerStore(t *testing.T) {
+	t.Setenv("VAMOS_COORDINATOR", "") // which --coordinator defaults to
 	for args, want := range map[string]bool{
 		"build app":                     true,
 		"worker --coordinator http://c": true,
@@ -42,6 +43,9 @@ func TestUsesContainerStore(t *testing.T) {
 		"update":                        false,
 		"update base":                   false,
 		"build update":                  true,
+		"trace sha256:abc t.json":       true,
+		"trace 0123abcd t.json --coordinator http://c":   false,
+		"--coordinator http://c trace sha256:abc t.json": false,
 	} {
 		if got := UsesContainerStore(strings.Fields(args)); got != want {
 			t.Errorf("UsesContainerStore(%q) = %v, want %v", args, got, want)

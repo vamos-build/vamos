@@ -132,25 +132,66 @@ Exported task files retain the task's timestamp.
 
 ## Traces
 
-Commands that build or deliver targets accept `--trace <file.json>`:
+Every command that builds is traced, whether or not you ask: `build`, `push`, `publish`, `load`, `save` and
+`export`.
+Once its jobs end, a command prints its trace's digest on standard error, whether it succeeded or failed:
+
+```text
+vamos: trace sha256:4f2a…
+```
+
+`vamos trace` writes a stored trace to a file, by that digest, or by a job's ID on a coordinator,
+and `--trace <file.json>` writes the command's own as it ends:
 
 ```sh
 vamos build lint test app --trace build-trace.json
-vamos load app app:dev --trace load-trace.json
+vamos trace sha256:4f2a… build-trace.json
 ```
 
-The resulting trace file can be opened in [Perfetto](https://ui.perfetto.dev).
-The viewer parses the file locally in your browser without uploading data.
+Either file opens in [Perfetto](https://ui.perfetto.dev), which reads it in your browser without uploading it.
 
-Traces visualize the complete build lifecycle:
+A command's trace holds all of its work: this process's, and each job's on its executor, local or a coordinator and
+its workers.
+It shows:
 - `BUILD` file parsing and package loading.
 - Input glob evaluation and source file hashing.
-- Execution steps for pulls, tasks, and layers.
-- Cache hits, cache misses, and step replay.
+- Execution steps for pulls, tasks, and layers, with their files and bytes.
+- Cache hits, with when the result was made, how long making it took, and the time reusing it saved,
+  and cache misses, with why each target missed (see [why a target missed](#why-a-target-missed)).
 - Delivery operations (pushing to registries, loading into Docker, saving archives).
 
 Arrows in the timeline connect glob and target outputs to the execution steps that consume them.
-Trace spans include performance metrics such as file counts, byte sizes, manifest digests, and image IDs.
-vamos attempts to write the trace file even if a build step or delivery operation fails.
+
+What a trace keeps lives in the executor's build cache:
+the trace of each attempt that ran a target, kept with its result, each job's trace, and each command's.
+A build that waits for another build's run of the same target shows that run's steps,
+on a track named for the target with `(shared)`;
+a build that left such a run while it went on says so on the target's track.
+Each stored trace is kept whole within 16 MiB, as a log is: past that, the latest-started spans are dropped,
+and the trace says it was cut short and how many it dropped.
+A result whose trace is gone is reused all the same; a trace that would show it says the trace is gone.
+`vamos prune` removes every stored trace.
+
+`--trace` writes a file even when the command fails.
 Writing a trace replaces an existing file at the specified path.
 The trace path must not collide with a `save` archive path or reside inside an `export` destination directory.
+
+### Why a target missed
+
+In a [named workspace](configuration.md), the executor keeps each target's history: the last 8 actions its builds
+used, per target, platform and parameters.
+Each layer or task that runs, rather than being reused, gets one cause in its trace:
+
+| Cause | Meaning |
+| --- | --- |
+| `forced` | `--rebuild` named it, whatever else changed. |
+| `lost` | Its action is one it built before, but the result is gone or can't be used, as after a prune. |
+| `new` | It has no earlier build to compare with: a first build, a new configuration, or an unnamed workspace. |
+| `own-inputs` | A step, command, output, source file, or which target supplies its base or files changed; a source's added, removed and changed files are named. |
+| `upstream` | Only the image that its base pull's tag names moved, as after `vamos update`; both manifests are named. |
+| `dependency` | Only what a target it depends on supplies changed, as a base layer's image or an added task's files; each is named. |
+
+A miss is compared with the history entry that differs from it least, so builds of different branches don't
+inflate each other's changes.
+History names no file of the cache, so it survives a prune, and is removed by one only when its target has been
+neither built nor reused for 100 days.

@@ -106,32 +106,35 @@ type world struct {
 
 	stdout       string
 	stderr       string
-	err          error             // the last command's
-	dest         string            // the folder that the last command sent to, its own, if it sends
-	inProject    bool              // whether the last command saved into the project, whose other files it didn't send
-	archive      string            // the archive that the last command saved, if it saved one
-	sent         string            // what the last command reports once it has sent its image or files, if it sends any
-	image        v1.Image          // the image that the last command saved or pushed, if it sent one
-	index        v1.ImageIndex     // the index that the last command pushed, if it pushed one
-	sentAs       string            // the image name that the last command pushed or loaded as, if it pushed or loaded
-	docker       func() [][]byte   // the images that the scenario's own Docker daemon has loaded, if it has one
-	daemon       string            // which Docker daemon a Given step gave: "fake", "none" or "host"
-	dockerHost   string            // the host's Docker daemon, as vamos finds it, if the scenario loads into it
-	loadedBefore int               // how many images the scenario's own daemon had loaded before the last command
-	loadRan      bool              // whether the last command loaded into Docker, or tried to
-	traceTo      string            // where the command running is to write its trace, if traced() asked it to
-	traceAt      string            // where tracedTo asked the command running to write its trace, with placeholders
-	interruptOn  string            // what the command running prints that an option or step interrupts it on
-	interruptIn  time.Duration     // how long interruptedAfter lets the command running run
-	interruptBy  time.Duration     // how long a step lets the command running run, if what it waits for never comes
-	printedCue   bool              // whether the last command printed what it was interrupted on, before any deadline
-	containers   map[string]bool   // the containers in the store when the scenario started, if it builds
-	took         time.Duration     // how long the last command ran
-	endedAt      time.Time         // when the last command returned
-	outputClosed bool              // whether the command running's standard output fails every write
-	outputTTY    bool              // whether the scenario's commands write their standard output to a terminal
-	tried        string            // what the last command tried to print to standard output that was closed
-	tracePath    string            // where the last command wrote its trace, if traced() asked it to
+	err          error           // the last command's
+	dest         string          // the folder that the last command sent to, its own, if it sends
+	inProject    bool            // whether the last command saved into the project, whose other files it didn't send
+	archive      string          // the archive that the last command saved, if it saved one
+	sent         string          // what the last command reports once it has sent its image or files, if it sends any
+	image        v1.Image        // the image that the last command saved or pushed, if it sent one
+	index        v1.ImageIndex   // the index that the last command pushed, if it pushed one
+	sentAs       string          // the image name that the last command pushed or loaded as, if it pushed or loaded
+	docker       func() [][]byte // the images that the scenario's own Docker daemon has loaded, if it has one
+	daemon       string          // which Docker daemon a Given step gave: "fake", "none" or "host"
+	dockerHost   string          // the host's Docker daemon, as vamos finds it, if the scenario loads into it
+	loadedBefore int             // how many images the scenario's own daemon had loaded before the last command
+	loadRan      bool            // whether the last command loaded into Docker, or tried to
+	traceTo      string          // where the command running is to write its trace, if traced() asked it to
+	traceAt      string          // where tracedTo asked the command running to write its trace, with placeholders
+	interruptOn  string          // what the command running prints that an option or step interrupts it on
+	interruptIn  time.Duration   // how long interruptedAfter lets the command running run
+	interruptBy  time.Duration   // how long a step lets the command running run, if what it waits for never comes
+	printedCue   bool            // whether the last command printed what it was interrupted on, before any deadline
+	containers   map[string]bool // the containers in the store when the scenario started, if it builds
+	took         time.Duration   // how long the last command ran
+	endedAt      time.Time       // when the last command returned
+	outputClosed bool            // whether the command running's standard output fails every write
+	outputTTY    bool            // whether the scenario's commands write their standard output to a terminal
+	tried        string          // what the last command tried to print to standard output that was closed
+	tracePath    string          // where the last command wrote its trace, if traced() asked it to
+	printedTrace string          // the digest of the trace that ThenItPrintsItsTrace read
+	jobsMu       sync.Mutex
+	jobIDs       []string          // the jobs the scenario's coordinator accepted, in order
 	trace        *trace            // the trace there, once a step has read it
 	graph        *graph.Graph      // the graph that WhenIShowTheGraph showed last
 	graphErr     error             // what the last WhenIShowTheGraph failed with, if it did

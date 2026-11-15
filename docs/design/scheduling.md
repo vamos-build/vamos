@@ -310,10 +310,9 @@ sequenceDiagram
     J-->>C: the outcome, naming the manifest
 ```
 
-Until the client reads stored traces, a job whose client asked with a `tracing.CallContext`
-also sends it the spans of each attempt it started, as `api.EventSpans` events, as the attempt ends,
-and its own spans when it saves its manifest,
-and the client's `cli.traceSession` aligns them with the clock offset that `api.Capabilities.Clock` gives.
+No span crosses as an event: the client reads the stored traces once its jobs end.
+Its `cli.traceSession` measures the executor's clock against its own through `api.Capabilities.Clock`, bounded,
+and stores the offset in the command trace, by which assembly places the client's spans among the executor's.
 
 Recording costs every build something now, so `tracing.Enabled` guards no longer spare an executor anything:
 arguments prepared only for a trace are prepared whenever a job runs.

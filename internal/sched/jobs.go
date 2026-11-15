@@ -12,7 +12,6 @@ import (
 	"github.com/vamos-build/vamos/internal/api"
 	"github.com/vamos-build/vamos/internal/cache"
 	"github.com/vamos-build/vamos/internal/graph"
-	"github.com/vamos-build/vamos/internal/tracing"
 )
 
 // The bounds on what a Job retains for watchers, by default.
@@ -675,9 +674,4 @@ func (ev jobEvents) Status(node graph.Ref, status string) {
 func (ev jobEvents) Output(node graph.Ref, stream byte, data []byte) {
 	ev.j.add(api.Event{Kind: api.EventOutput, Nodes: []graph.Ref{node}, Stream: stream,
 		Data: append([]byte(nil), data...)})
-}
-
-// Spans reports a batch of spans as an event.
-func (ev jobEvents) Spans(spans []tracing.Span) {
-	ev.j.add(api.Event{Kind: api.EventSpans, Spans: spans})
 }

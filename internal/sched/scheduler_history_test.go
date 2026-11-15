@@ -112,7 +112,7 @@ func sourceTree(t *testing.T, m *cache.Memory, files map[string]string) cache.Bl
 func runNamed(t *testing.T, g *graph.Graph, m *cache.Memory, records cache.RecordStore, r execution,
 	workspace string) (api.TraceEntry, tracing.Span, error) {
 	t.Helper()
-	ctx, trace := ForJob(t.Context(), nil, &recordedEvents{})
+	ctx, trace := ForJob(t.Context())
 	b := Backend{Content: m, Records: records, Checker: r, Runner: NewSharing(r, m, records)}
 	_, err := New(g, b, &recordedEvents{}, Options{Bound: 1, Workspace: workspace}).Run(ctx)
 	saved, serr := trace.Save(ctx, m)
@@ -227,7 +227,7 @@ func TestSchedulerHistoryWorkspaces(t *testing.T) {
 	results := make(chan result, 2)
 	for _, workspace := range []string{"com.acme.first", "com.acme.second"} {
 		go func() {
-			ctx, trace := ForJob(t.Context(), nil, &recordedEvents{})
+			ctx, trace := ForJob(t.Context())
 			backend := Backend{Content: m, Records: m, Checker: b, Runner: s}
 			g := historyGraph(t, two, "gen")
 			_, err := New(g, backend, &recordedEvents{}, Options{Bound: 1, Workspace: workspace}).Run(ctx)
@@ -295,7 +295,7 @@ func TestSchedulerHistoryCancelled(t *testing.T) {
 	s := NewSharing(b, m, records)
 	g := historyGraph(t, sourceTree(t, m, map[string]string{"a.txt": "a"}), "gen")
 	run := func(ctx context.Context) error {
-		ctx, _ = ForJob(ctx, nil, &recordedEvents{})
+		ctx, _ = ForJob(ctx)
 		backend := Backend{Content: m, Records: records, Checker: b, Runner: s}
 		_, err := New(g, backend, &recordedEvents{}, Options{Bound: 1, Workspace: "com.acme"}).Run(ctx)
 		return err
@@ -360,7 +360,7 @@ func TestSchedulerHistoryParallel(t *testing.T) {
 	}
 	testenv.Must(t, g.Validate())
 	for range 2 { // misses, then hits
-		ctx, _ := ForJob(t.Context(), nil, &recordedEvents{})
+		ctx, _ := ForJob(t.Context())
 		b := Backend{Content: m, Records: m, Checker: f, Runner: NewSharing(&lockedRunner{f: f}, m, m)}
 		if _, err := New(g, b, &recordedEvents{}, Options{Bound: 8, Workspace: "com.acme"}).Run(ctx); err != nil {
 			t.Fatal(err)

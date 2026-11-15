@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httptrace"
@@ -22,11 +24,13 @@ import (
 	imgspecv1 "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/spf13/afero"
 	"github.com/vamos-build/vamos/internal/api"
+	"github.com/vamos-build/vamos/internal/cache"
 	"github.com/vamos-build/vamos/internal/cli"
 	"github.com/vamos-build/vamos/internal/graph"
 	"github.com/vamos-build/vamos/internal/remote"
 	"github.com/vamos-build/vamos/internal/run"
 	"github.com/vamos-build/vamos/internal/testenv"
+	"github.com/vamos-build/vamos/internal/tracing"
 	"github.com/vamos-build/vamos/internal/worker"
 	"go.podman.io/storage"
 )
@@ -139,6 +143,21 @@ func (w *world) startCoordinator(handler http.Handler) {
 				http.Error(rw, err.Error(), http.StatusInternalServerError)
 				return
 			}
+			// The job's ID, which only the coordinator's answer says, for steps that read a job's trace by it.
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, r)
+			var accepted struct {
+				ID string `json:"id"`
+			}
+			if json.Unmarshal(rec.Body.Bytes(), &accepted) == nil && accepted.ID != "" {
+				w.jobsMu.Lock()
+				w.jobIDs = append(w.jobIDs, accepted.ID)
+				w.jobsMu.Unlock()
+			}
+			maps.Copy(rw.Header(), rec.Header())
+			rw.WriteHeader(rec.Code)
+			_, _ = rw.Write(rec.Body.Bytes())
+			return
 		}
 		handler.ServeHTTP(rw, r)
 	}))
@@ -300,7 +319,7 @@ func (w *world) atCoordinator(s string) string {
 // onTheCoordinator builds on the coordinator at url, with --coordinator, in which <coordinator> stands for the
 // scenario's. Every command takes it, and graph and update, which ask the coordinator which platform to configure for.
 func onTheCoordinator(url string) option {
-	return option{"onTheCoordinator", everyCommandGraphAndUpdate, func(w *world, c *commandLine) {
+	return option{"onTheCoordinator", everyCommandGraphUpdateAndTrace, func(w *world, c *commandLine) {
 		w.t.Helper()
 		c.flags = append(c.flags, "--coordinator", w.atCoordinator(url))
 	}}
@@ -643,4 +662,34 @@ func (w *world) ThenTheCoordinatorEndsCleanlyWithin(d time.Duration) {
 	if w.localTook > d {
 		w.t.Errorf("the coordinator took %s to end once interrupted, want within %s", w.localTook, d)
 	}
+}
+
+// GivenACoordinatorThatRefusesToStoreCommandTraces starts a coordinator, at <coordinator>, as GivenACoordinator does,
+// whose content store refuses to store a command's trace, as a store that fills up once a build has ended would.
+func (w *world) GivenACoordinatorThatRefusesToStoreCommandTraces() {
+	w.t.Helper()
+	local, err := run.NewLocal(testenv.PrivateStores(w.t).Options)
+	if err != nil {
+		w.t.Fatal(err)
+	}
+	w.t.Cleanup(func() { local.Close() })
+	content, err := local.ContentStore()
+	if err != nil {
+		w.t.Fatal(err)
+	}
+	w.startCoordinator((&remote.Server{Executor: local, Content: refusingCommandTraces{content}}).Handler())
+}
+
+// refusingCommandTraces is a content store that refuses to store a command's trace.
+type refusingCommandTraces struct{ cache.ContentStore }
+
+func (r refusingCommandTraces) Put(ctx context.Context, rd io.Reader, limit int64) (cache.Blob, error) {
+	data, err := io.ReadAll(io.LimitReader(rd, limit+1))
+	if err != nil {
+		return cache.Blob{}, err
+	}
+	if h, err := tracing.ReadHeader(data); err == nil && h.Kind == api.KindCommand {
+		return cache.Blob{}, errors.New("the store is full")
+	}
+	return r.ContentStore.Put(ctx, bytes.NewReader(data), limit)
 }

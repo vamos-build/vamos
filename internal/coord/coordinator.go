@@ -441,7 +441,7 @@ func (c *Coordinator) Submit(ctx context.Context, req api.Request) (api.JobID, e
 func (c *Coordinator) build(g api.GraphRequest, native []string) func(ctx context.Context,
 	ev sched.Events) api.Outcome {
 	return func(ctx context.Context, ev sched.Events) api.Outcome {
-		return c.traced(ctx, g.Trace, ev, func(ctx context.Context) api.Outcome {
+		return c.traced(ctx, func(ctx context.Context) api.Outcome {
 			// The generation is checked once the build is open, since no prune starts then: checked before, a prune
 			// could run between the check and the build's start.
 			if err := c.checkGeneration(ctx, g.Generation); err != nil {
@@ -458,10 +458,9 @@ func (c *Coordinator) build(g api.GraphRequest, native []string) func(ctx contex
 
 // traced runs work, a job's, as sched.RunJob does, storing its manifest in the coordinator's content store, and
 // reporting a manifest that can't be stored to Warn.
-func (c *Coordinator) traced(ctx context.Context, call *tracing.CallContext, ev sched.Events,
-	work func(context.Context) api.Outcome) api.Outcome {
+func (c *Coordinator) traced(ctx context.Context, work func(context.Context) api.Outcome) api.Outcome {
 	id := jobOf(ctx)
-	return sched.RunJob(ctx, call, ev, func() (cache.ContentStore, error) { return c.content, nil },
+	return sched.RunJob(ctx, func() (cache.ContentStore, error) { return c.content, nil },
 		func(err error) { c.cfg.Warn(fmt.Errorf("the job %s: %w", id, err)) }, work)
 }
 
@@ -733,7 +732,7 @@ func (c *Coordinator) submitPush(ctx context.Context, req api.PushRequest) (api.
 		return "", err
 	}
 	return c.begin(ctx, record{Push: &req}, sched.Spec{}, func(ctx context.Context, ev sched.Events) api.Outcome {
-		return c.traced(ctx, req.Trace, ev, func(ctx context.Context) api.Outcome {
+		return c.traced(ctx, func(ctx context.Context) api.Outcome {
 			ctx, span := tracing.StartTrack(ctx, "push", "push to "+req.Destination)
 			ctx = withBuild(ctx, buildInfo{job: jobOf(ctx)})
 			rep, err := c.pool.attempt(ctx, nil, &remote.PushWork{Mode: remote.ModePush, Result: req.Result,
@@ -775,7 +774,7 @@ func (c *Coordinator) submitPublish(ctx context.Context, req api.PublishRequest)
 		}
 	}
 	return c.begin(ctx, record{Publish: &req}, sched.Spec{}, func(ctx context.Context, ev sched.Events) api.Outcome {
-		return c.traced(ctx, req.Trace, ev, func(ctx context.Context) api.Outcome {
+		return c.traced(ctx, func(ctx context.Context) api.Outcome {
 			ctx, span := tracing.StartTrack(ctx, "publish", "publish")
 			ctx = withBuild(ctx, buildInfo{job: jobOf(ctx)})
 			uploads, i, err := c.uploadAll(ctx, req, ev)

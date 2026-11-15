@@ -3,7 +3,6 @@ package sched
 import (
 	"context"
 	"errors"
-	"fmt"
 	"reflect"
 	"strings"
 	"sync"
@@ -12,79 +11,11 @@ import (
 
 	"github.com/vamos-build/vamos/internal/api"
 	"github.com/vamos-build/vamos/internal/cache"
-	"github.com/vamos-build/vamos/internal/graph"
 	"github.com/vamos-build/vamos/internal/testenv"
 	"github.com/vamos-build/vamos/internal/tracing"
 
 	"github.com/opencontainers/go-digest"
 )
-
-// spanEvents collects the batches of spans sent to it.
-type spanEvents struct {
-	mu      sync.Mutex
-	batches [][]tracing.Span
-}
-
-func (e *spanEvents) Status(graph.Ref, string)       {}
-func (e *spanEvents) Output(graph.Ref, byte, []byte) {}
-func (e *spanEvents) Spans(spans []tracing.Span) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	e.batches = append(e.batches, spans)
-}
-
-// TestForJobSendsSpans checks that a job whose client asked for its spans sends each exactly once, in batches no
-// larger than spanBatchSize, when it saves its manifest, and none before; and that one that didn't ask sends none.
-func TestForJobSendsSpans(t *testing.T) {
-	const goroutines, each = 8, 100 // more than spanBatchSize in all, but not a whole number of batches
-	ev := &spanEvents{}
-	ctx, trace := ForJob(context.Background(), &tracing.CallContext{Parent: "client-1"}, ev)
-	var wg sync.WaitGroup
-	for g := range goroutines {
-		wg.Go(func() {
-			for i := range each {
-				_, span := tracing.Start(ctx, fmt.Sprintf("span %d.%d", g, i))
-				span.End()
-			}
-		})
-	}
-	wg.Wait()
-	if len(ev.batches) != 0 {
-		t.Errorf("%d batches sent before the job saved its trace; want none", len(ev.batches))
-	}
-	if _, err := trace.Save(ctx, cache.NewMemory()); err != nil {
-		t.Fatal(err)
-	}
-	seen := map[string]bool{}
-	for i, batch := range ev.batches {
-		if len(batch) > spanBatchSize {
-			t.Errorf("batch %d has %d spans, want at most %d", i, len(batch), spanBatchSize)
-		}
-		for _, s := range batch {
-			if seen[s.Name] {
-				t.Errorf("%s was sent twice", s.Name)
-			}
-			if s.Parent != "client-1" {
-				t.Errorf("%s is part of %q; want the client's span", s.Name, s.Parent)
-			}
-			seen[s.Name] = true
-		}
-	}
-	if len(seen) != goroutines*each {
-		t.Errorf("%d spans sent, want %d", len(seen), goroutines*each)
-	}
-
-	quiet := &spanEvents{}
-	ctx, trace = ForJob(context.Background(), nil, quiet)
-	_, span := tracing.Start(ctx, "untraced")
-	span.End()
-	if _, err := trace.Save(ctx, cache.NewMemory()); err != nil {
-		t.Fatal(err)
-	}
-	if len(quiet.batches) != 0 {
-		t.Errorf("a job whose client didn't ask sent %d batches", len(quiet.batches))
-	}
-}
 
 // refusingCancelled is a content store that refuses a put whose context has ended, as a remote one would.
 type refusingCancelled struct{ cache.ContentStore }
@@ -108,7 +39,7 @@ func (refusingAll) PutBytes(context.Context, []byte) (cache.Blob, error) {
 // stored is reported, naming none.
 func TestForJobSaves(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	ctx, trace := ForJob(ctx, nil, &spanEvents{})
+	ctx, trace := ForJob(ctx)
 	_, span := tracing.Start(ctx, "schedule")
 	span.End()
 	blob := &cache.Blob{Digest: digest.FromString("attempt"), Size: 3}
@@ -457,33 +388,18 @@ func TestJobForgetsDroppedEvents(t *testing.T) {
 	}
 }
 
-// TestRunJobStreams checks that a client that asked for spans is sent an attempt's as soon as the job is told of it,
-// before the job ends, and the job's own once it ends, even when the content store can't be opened, which leaves the
-// outcome naming no manifest and is reported.
-func TestRunJobStreams(t *testing.T) {
-	ev := &spanEvents{}
+// TestRunJobWithoutStore checks that a job whose content store can't be opened returns its outcome all the same,
+// naming no manifest, and reports why.
+func TestRunJobWithoutStore(t *testing.T) {
 	var warned []error
-	outcome := RunJob(context.Background(), &tracing.CallContext{}, ev,
+	outcome := RunJob(context.Background(),
 		func() (cache.ContentStore, error) { return nil, errors.New("the build cache is locked") },
 		func(err error) { warned = append(warned, err) },
-		func(ctx context.Context) api.Outcome {
-			_, span := tracing.Start(ctx, "own")
-			span.End()
-			jobTraceOf(ctx).stream([]tracing.Span{{ID: "a-1", Name: "attempt's"}}, tracing.Lost{})
-			ev.mu.Lock()
-			defer ev.mu.Unlock()
-			if len(ev.batches) != 1 || ev.batches[0][0].Name != "attempt's" {
-				t.Errorf("before the job ended, the client was sent %v; want the attempt's spans", ev.batches)
-			}
-			return api.Outcome{Results: []api.Result{{}}}
-		})
+		func(ctx context.Context) api.Outcome { return api.Outcome{Results: []api.Result{{}}} })
 	if outcome.Trace != nil || len(outcome.Results) != 1 {
 		t.Errorf("outcome = %+v; want its results, naming no manifest", outcome)
 	}
 	if len(warned) != 1 || !strings.Contains(warned[0].Error(), "the build cache is locked") {
 		t.Errorf("warned %v; want why the manifest wasn't stored", warned)
-	}
-	if len(ev.batches) != 2 || ev.batches[1][0].Name != "own" {
-		t.Errorf("the client was sent %v; want the attempt's spans, then the job's own", ev.batches)
 	}
 }
