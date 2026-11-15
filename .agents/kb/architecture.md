@@ -12,7 +12,9 @@ This file says what to check when changing them.
 Keep the boundaries:
 
 - No Starlark values, open project files or in-memory loader state may cross from load to run;
-  the graph and the content store are the whole handoff.
+  the graph and the content store carry the build inputs. The workspace name, declared in `WORKSPACE`
+  and evaluated before any `BUILD` file loads, travels separately as metadata on graph, push, publish and export
+  requests; it is trusted as declared and enters neither the graph nor action keys.
 - A value in [api](../../internal/api/doc.go) must survive JSON and name no host resource;
   `apitest.Contract` checks every `api.Executor`, and `apitest.JSON` proves values cross as JSON.
 - Only [transfer](../../internal/transfer/doc.go) is shared by the client and executor sides.
