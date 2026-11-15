@@ -242,3 +242,55 @@ func TestShortfall(t *testing.T) {
 		t.Errorf("Shortfall of every tag written = %q, want none", got)
 	}
 }
+
+// TestWorkspaceCrosses checks that every request that carries the workspace's name keeps it through JSON and a clone,
+// and that an unnamed workspace's request encodes no name, as an older client's does.
+func TestWorkspaceCrosses(t *testing.T) {
+	const name = "com.acme.storefront"
+	for _, req := range []Request{
+		{Graph: &GraphRequest{Workspace: name}},
+		{Push: &PushRequest{Workspace: name}},
+		{Export: &ExportRequest{Workspace: name}},
+		{Publish: &PublishRequest{Workspace: name}},
+	} {
+		data, err := json.Marshal(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var decoded Request
+		if err := json.Unmarshal(data, &decoded); err != nil {
+			t.Fatal(err)
+		}
+		for how, got := range map[string]Request{"decoded": decoded, "cloned": req.Clone()} {
+			if workspaceOf(got) != name {
+				t.Errorf("%s %s names workspace %q, want %q", how, data, workspaceOf(got), name)
+			}
+		}
+	}
+	for _, req := range []Request{
+		{Graph: &GraphRequest{}}, {Push: &PushRequest{}}, {Export: &ExportRequest{}}, {Publish: &PublishRequest{}},
+	} {
+		data, err := json.Marshal(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(data), "workspace") {
+			t.Errorf("an unnamed workspace's request encodes as %s, which names a workspace", data)
+		}
+	}
+}
+
+// workspaceOf returns the workspace's name that req's job carries.
+func workspaceOf(req Request) string {
+	switch {
+	case req.Graph != nil:
+		return req.Graph.Workspace
+	case req.Push != nil:
+		return req.Push.Workspace
+	case req.Export != nil:
+		return req.Export.Workspace
+	case req.Publish != nil:
+		return req.Publish.Workspace
+	}
+	return ""
+}

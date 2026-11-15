@@ -135,6 +135,10 @@ type PushRequest struct {
 	// Destination is a full registry reference with a tag and no digest, such as ghcr.io/me/app:1.0;
 	// the client resolves short names, so that both sides mean the same registry.
 	Destination string `json:"destination"`
+	// Workspace is the name that the client's workspace declares in its WORKSPACE file, or "" for an unnamed one,
+	// as an older client sends.
+	// It is metadata, trusted as declared, like Emulate: no part of any action's key.
+	Workspace string `json:"workspace,omitempty"`
 	// Trace, if set, asks for the spans of a trace of the push, as events of the job.
 	Trace *tracing.CallContext `json:"trace,omitempty"`
 }
@@ -147,6 +151,10 @@ type PublishRequest struct {
 	Images []PublishImage `json:"images"` // in the order to publish them, and to report them
 	// Tags are the tags to write in every repository, such as 1.4.2 and latest, in order; there is at least one.
 	Tags []string `json:"tags"`
+	// Workspace is the name that the client's workspace declares in its WORKSPACE file, or "" for an unnamed one,
+	// as an older client sends.
+	// It is metadata, trusted as declared, like Emulate: no part of any action's key.
+	Workspace string `json:"workspace,omitempty"`
 	// Trace, if set, asks for the spans of a trace of the publication, as events of the job.
 	Trace *tracing.CallContext `json:"trace,omitempty"`
 }
@@ -163,6 +171,10 @@ type PublishImage struct {
 // an image as its manifest, config and layers, an index as those of each image and the index, a task as its tree.
 type ExportRequest struct {
 	Result Result `json:"result"`
+	// Workspace is the name that the client's workspace declares in its WORKSPACE file, or "" for an unnamed one,
+	// as an older client sends.
+	// It is metadata, trusted as declared, like Emulate: no part of any action's key.
+	Workspace string `json:"workspace,omitempty"`
 	// Trace, if set, asks for the spans of a trace of the export, as events of the job.
 	Trace *tracing.CallContext `json:"trace,omitempty"`
 }
@@ -180,6 +192,10 @@ type GraphRequest struct {
 	// without it, where an executor requires the permission, such a target fails before anything runs.
 	// It is no part of any action's key: emulation is provenance, not identity.
 	Emulate bool `json:"emulate,omitempty"`
+	// Workspace is the name that the client's workspace declares in its WORKSPACE file, or "" for an unnamed one,
+	// as an older client sends.
+	// It is metadata, trusted as declared, like Emulate: no part of any action's key.
+	Workspace string `json:"workspace,omitempty"`
 	// Trace, if set, asks for the spans of a trace of the run, as events of the job.
 	Trace *tracing.CallContext `json:"trace,omitempty"`
 	// Generation is the executor's cache generation that the client read before capturing the build's sources;

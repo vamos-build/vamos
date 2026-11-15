@@ -81,6 +81,7 @@ func Contract(t *testing.T, f Fixture) {
 	t.Run("export", func(t *testing.T) { testExport(t, f) })
 	t.Run("push", func(t *testing.T) { testPush(t, f) })
 	t.Run("publish", func(t *testing.T) { testPublish(t, f) })
+	t.Run("workspace", func(t *testing.T) { testWorkspace(t, f) })
 	t.Run("prune", func(t *testing.T) { testPrune(t, f) })
 	t.Run("values owned", func(t *testing.T) { testValuesOwned(t, f) })
 	t.Run("delivery values owned", func(t *testing.T) { testDeliveryValuesOwned(t, f) })
@@ -1117,5 +1118,57 @@ func testPrune(t *testing.T, f Fixture) {
 	}
 	if p := last.Outcome.Pruned; p.Results == 0 || p.Blobs == 0 {
 		t.Errorf("pruned %+v, want the task's result and blobs", p)
+	}
+}
+
+// testWorkspace checks that an executor ignores the workspace's name that a request carries: graph, push and publish
+// jobs given one behave as they do without one, and a named graph job after an unnamed one of the same graph finds
+// its result cached, since the name is no part of any key.
+// It can't check that the name arrives, since an executor that never received it would behave the same.
+func testWorkspace(t *testing.T, f Fixture) {
+	f.requireBuilds(t)
+	ex := f.New(t)
+	ctx := t.Context()
+	server := httptest.NewServer(f.Registry)
+	t.Cleanup(server.Close)
+	host := strings.TrimPrefix(server.URL, "http://")
+	f.insecure(t, host)
+	const name = "com.acme.storefront"
+
+	unnamed := layerGraph(t, f, ex, "named or not")
+	layer := runGraph(t, ex, unnamed)
+	named := unnamed
+	named.Workspace = name
+	id, err := ex.Submit(ctx, api.Request{Graph: &named})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cached := false
+	for _, e := range watchAll(t, ex, id, 0) {
+		cached = cached || e.Kind == api.EventStatus && e.Status == "cached"
+	}
+	if !cached {
+		t.Error("a named graph job after an unnamed one of the same graph didn't report the layer cached")
+	}
+	if outcome, err := ex.Result(ctx, id); err != nil || !reflect.DeepEqual(outcome.Results, layer) {
+		t.Errorf("a named graph job's results = %+v, %v; want the unnamed one's, %+v", outcome.Results, err, layer)
+	}
+
+	push := api.PushRequest{Result: layer[0], Destination: host + "/app:v1"}
+	pushed := finishJob(t, ex, api.Request{Push: &push})
+	push.Workspace = name
+	if got := finishJob(t, ex, api.Request{Push: &push}); !reflect.DeepEqual(got.Pushed, pushed.Pushed) {
+		t.Errorf("a named push = %+v, want what an unnamed one pushed, %+v", got.Pushed, pushed.Pushed)
+	}
+
+	publish := api.PublishRequest{
+		Images: []api.PublishImage{{Result: layer[0], Repository: host + "/team/app"}},
+		Tags:   []string{"v1"},
+	}
+	published := finishJob(t, ex, api.Request{Publish: &publish})
+	publish.Workspace = name
+	if got := finishJob(t, ex, api.Request{Publish: &publish}); !reflect.DeepEqual(got.Published, published.Published) {
+		t.Errorf("a named publication = %+v, want what an unnamed one published, %+v", got.Published,
+			published.Published)
 	}
 }

@@ -47,13 +47,27 @@ func newInterruptedLoadWorld(t *testing.T) *world {
 }
 
 // TestInterrupt_StopsTheBuildFile specifies that a build interrupted while its BUILD file runs, loading or
-// configuring a target, stops promptly, and reports the interruption rather than a mistake in the file.
+// configuring a target, or while its WORKSPACE file runs, stops promptly, and reports the interruption rather than a
+// mistake in the file.
 func TestInterrupt_StopsTheBuildFile(t *testing.T) {
 	t.Run("A build interrupted while its BUILD file loads stops", func(t *testing.T) {
 		w := newInterruptedLoadWorld(t)
 		w.GivenTheBuildFileDeclares(`
 			spin()
 		`)
+		w.WhenIBuild("busybox", interruptedAfter(200*time.Millisecond))
+		w.ThenItIsInterrupted()
+		w.ThenItStopsWithin(5 * time.Second)
+	})
+
+	t.Run("A build interrupted while its WORKSPACE file runs stops", func(t *testing.T) {
+		w := newInterruptedLoadWorld(t)
+		w.GivenTheProjectHolds(files{"WORKSPACE": dedent(`
+			def spin():
+			    for i in range(1 << 40):
+			        pass
+			spin()
+		`)})
 		w.WhenIBuild("busybox", interruptedAfter(200*time.Millisecond))
 		w.ThenItIsInterrupted()
 		w.ThenItStopsWithin(5 * time.Second)

@@ -31,6 +31,7 @@ type workspace struct {
 	ctx          context.Context // of the load, which ends Starlark evaluation when it ends
 	fs           afero.Fs
 	root         string                // absolute: the directory holding the WORKSPACE file, or else the only package
+	name         string                // that the WORKSPACE file gives with workspace(), or "" for an unnamed workspace
 	current      string                // the package of -C, whose targets are named without a label
 	packages     map[string]*buildFile // those loaded, by package
 	stored       []string              // the keys of packages, in the order loaded
@@ -199,8 +200,8 @@ func (e *loadError) Unwrap() error { return e.err }
 
 // openWorkspace returns the workspace that holds dir, the directory given with -C:
 // the nearest directory at or above dir with a WORKSPACE file, or else dir alone.
-// A WORKSPACE file only marks the workspace's root.
-// It loads no BUILD file yet.
+// It evaluates that WORKSPACE file, if it is a regular file, which may name the workspace, but no other,
+// as evalWorkspaceFile describes, returning the workspace even if that fails, and loads no BUILD file yet.
 // exec is the executor's platform, which targets are built for unless --platform gives another.
 func openWorkspace(ctx context.Context, fsys afero.Fs, dir string, exec imgspecv1.Platform) (*workspace, error) {
 	info, err := fsys.Stat(dir)
@@ -211,11 +212,12 @@ func openWorkspace(ctx context.Context, fsys afero.Fs, dir string, exec imgspecv
 	} else if !info.IsDir() {
 		return nil, fmt.Errorf("%s is not a directory", dir)
 	}
-	root := dir
+	root, evaluate := dir, false
 	for d := dir; ; d = filepath.Dir(d) {
 		// Any error but a missing file stops the search, rather than choosing another root.
-		if _, err := fsys.Stat(filepath.Join(d, "WORKSPACE")); err == nil {
-			root = d
+		if info, err := fsys.Stat(filepath.Join(d, "WORKSPACE")); err == nil {
+			// Only a regular file is evaluated: anything else, such as a directory, only marks the root.
+			root, evaluate = d, info.Mode().IsRegular()
 			break
 		} else if !errors.Is(err, fs.ErrNotExist) {
 			return nil, fmt.Errorf("looking for a WORKSPACE file: %w", err)
@@ -233,7 +235,7 @@ func openWorkspace(ctx context.Context, fsys afero.Fs, dir string, exec imgspecv
 	}
 	// The graph's platforms must be normalized, and an executor's may not be.
 	exec = platforms.Normalize(exec)
-	return &workspace{
+	w := &workspace{
 		fs:           fsys,
 		root:         root,
 		current:      filepath.ToSlash(current),
@@ -243,7 +245,13 @@ func openWorkspace(ctx context.Context, fsys afero.Fs, dir string, exec imgspecv
 		execPlatform: &platformValue{exec},
 		platform:     &platformValue{exec},
 		configs:      map[string]*config{},
-	}, nil
+	}
+	if evaluate {
+		if err := w.evalWorkspaceFile(); err != nil {
+			return w, err
+		}
+	}
+	return w, nil
 }
 
 // label returns the label of the target name in package pkg.

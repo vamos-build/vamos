@@ -48,6 +48,10 @@ type Request struct {
 	Secrets      map[string]bool
 	Platform     string             // --platform, or "" for the executor's
 	ExecPlatform imgspecv1.Platform // the executor's, which EXEC_PLATFORM names
+	// Opened, if set, is given the workspace's name, which its WORKSPACE file declares with workspace(),
+	// or "" for an unnamed workspace, once the workspace has opened and its WORKSPACE file has evaluated,
+	// before any BUILD file loads.
+	Opened func(name string)
 	// DestPlatform, if set, says that the image is sent to a destination that takes one image,
 	// and for which platform, with why, so that an index sends only its manifest for that platform.
 	// Its error is returned as it is.
@@ -164,7 +168,10 @@ func open(ctx context.Context, fsys afero.Fs, req Request) (*workspace, error) {
 	}
 	w, err := openWorkspace(ctx, fsys, dir, req.ExecPlatform)
 	if err != nil {
-		return nil, err
+		return w, err
+	}
+	if req.Opened != nil {
+		req.Opened(w.name)
 	}
 	if w.lock, err = ReadLock(fsys, w.root); err != nil {
 		return w, err

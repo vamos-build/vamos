@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httptrace"
@@ -126,7 +127,7 @@ func (w *world) ThenTheGraphIsConfiguredFor(platform string) {
 }
 
 // startCoordinator serves handler, at <coordinator>, until the scenario ends, counting the requests it is sent and
-// the jobs it is given.
+// the jobs it is given, and noting what each job tells it.
 func (w *world) startCoordinator(handler http.Handler) {
 	w.t.Helper()
 	w.hasNoCoordinator()
@@ -134,11 +135,75 @@ func (w *world) startCoordinator(handler http.Handler) {
 		w.served.Add(1)
 		if r.Method == http.MethodPost && r.URL.Path == "/v1/jobs" { // remote's pathJobs
 			w.jobs.Add(1)
+			if err := w.noteJob(r); err != nil {
+				http.Error(rw, err.Error(), http.StatusInternalServerError)
+				return
+			}
 		}
 		handler.ServeHTTP(rw, r)
 	}))
 	w.t.Cleanup(w.coordinatorServer.Close)
 	w.coordinator = w.coordinatorServer.URL
+}
+
+// toldJob is what a job that the scenario's coordinator was given told it: its kind, "graph", "push", "export" or
+// "publish", and the name of the workspace it came from, "" for none.
+type toldJob struct {
+	kind, workspace string
+}
+
+// noteJob notes what the job that r, a POST of /v1/jobs, gives the scenario's coordinator tells it,
+// leaving r's body to be read again, unless the body can't be read, which it returns, for the coordinator to refuse.
+func (w *world) noteJob(r *http.Request) error {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		return fmt.Errorf("reading the job: %w", err)
+	}
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	var req api.Request
+	err = json.Unmarshal(body, &req)
+	told := toldJob{kind: "a job that isn't JSON: " + fmt.Sprint(err)}
+	switch {
+	case err != nil:
+	case req.Graph != nil:
+		told = toldJob{"graph", req.Graph.Workspace}
+	case req.Push != nil:
+		told = toldJob{"push", req.Push.Workspace}
+	case req.Export != nil:
+		told = toldJob{"export", req.Export.Workspace}
+	case req.Publish != nil:
+		told = toldJob{"publish", req.Publish.Workspace}
+	default:
+		told.kind = "a job of no kind"
+	}
+	w.toldMu.Lock()
+	defer w.toldMu.Unlock()
+	w.told = append(w.told, told)
+	return nil
+}
+
+// toldJobs returns what every job the scenario's coordinator has been given told it, in order.
+func (w *world) toldJobs() []toldJob {
+	w.toldMu.Lock()
+	defer w.toldMu.Unlock()
+	return slices.Clone(w.told)
+}
+
+// ThenTheCoordinatorWasToldTheWorkspaceIs checks that the jobs that the last command gave the scenario's coordinator
+// were exactly those of kinds, in order, "graph", "push", "export" or "publish", and that each told it the workspace
+// is named name, or, if name is "", that it has no name.
+func (w *world) ThenTheCoordinatorWasToldTheWorkspaceIs(name string, kinds ...string) {
+	w.t.Helper()
+	if len(kinds) == 0 {
+		w.t.Fatal("ThenTheCoordinatorWasToldTheWorkspaceIs needs the kinds of job to expect")
+	}
+	var want []toldJob
+	for _, kind := range kinds {
+		want = append(want, toldJob{kind, name})
+	}
+	if !slices.Equal(w.toldDuring, want) {
+		w.t.Errorf("the coordinator was given jobs %+v, want %+v", w.toldDuring, want)
+	}
 }
 
 // ThenTheCoordinatorWasGivenTheBuild checks that the last command gave the scenario's coordinator a job: that it
