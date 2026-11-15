@@ -571,6 +571,16 @@ func TestWorkspaces_WorkspaceIsAStarlarkFileThatVamosEvaluates(t *testing.T) {
 // to give the workspace a symbolic name, which is given by keyword, and is a string,
 // and that WORKSPACE offers no other builtin of BUILD files, and no load(): calling one is a mistake.
 func TestWorkspaces_WorkspaceDeclaresTheNameWithWorkspace(t *testing.T) {
+	t.Run("workspace() names the workspace", func(t *testing.T) {
+		w := newWorkspaceWorld(t)
+		w.GivenACoordinator()
+		w.GivenTheProjectHolds(files{"WORKSPACE": `workspace(name = "com.acme.storefront")`})
+		w.GivenThePackageDeclares(".", anApp)
+		w.WhenIBuild("app", onTheCoordinator("<coordinator>"))
+		w.ThenItSucceeds()
+		w.ThenTheCoordinatorWasToldTheWorkspaceIs("com.acme.storefront", "graph")
+	})
+
 	for _, example := range []struct {
 		name      string
 		workspace string // the WORKSPACE file
@@ -676,4 +686,162 @@ func TestWorkspaces_AWorkspaceNameFollowsTheRulesOfAModuleName(t *testing.T) {
 			w.ThenNothingIsSaved()
 		})
 	}
+}
+
+// anAppOfAFile declares the layer "app" on scratch, which adds the glob "src" of hello.txt, so that it makes an image
+// that a command can send, and a new hello.txt makes it run.
+const anAppOfAFile = `
+	glob(name="src", include=["hello.txt"])
+	layer(name="app", base="scratch", steps=[add("src", "/data")])
+`
+
+// TestWorkspaces_VamosDerivesNoWorkspaceName specifies that vamos derives no name from anything else:
+// not the workspace's directory, its repository or the repository's remotes;
+// and that a workspace that doesn't call workspace() is unnamed.
+func TestWorkspaces_VamosDerivesNoWorkspaceName(t *testing.T) {
+	t.Run("An undeclared name is sent as none", func(t *testing.T) {
+		w := newBuildingWorld(t)
+		w.GivenACoordinator()
+		w.GivenTheProjectHolds(files{"storefront/WORKSPACE": ""})
+		w.GivenThePackageDeclares("storefront", anApp)
+		w.GivenIWorkIn("storefront")
+		w.WhenIBuild("app", onTheCoordinator("<coordinator>"))
+		w.ThenItSucceeds()
+		w.ThenTheCoordinatorWasToldTheWorkspaceIs("", "graph")
+	})
+}
+
+// TestWorkspaces_TheNameTravelsWithEveryRequestToAnExecutor specifies that every request that a command sends to an
+// executor, to build, push, publish or export, carries the name, or none for an unnamed workspace,
+// as metadata that changes nothing the executor does, and that a name is trusted as declared.
+func TestWorkspaces_TheNameTravelsWithEveryRequestToAnExecutor(t *testing.T) {
+	t.Run("A push carries the name", func(t *testing.T) {
+		w := newWorkspaceWorld(t)
+		w.GivenARegistry()
+		w.GivenACoordinator()
+		w.GivenTheProjectHolds(files{"WORKSPACE": `workspace(name = "com.acme.storefront")`, "hello.txt": "hello"})
+		w.GivenThePackageDeclares(".", anAppOfAFile)
+		w.WhenIPush("app", "<registry>/app:v1", onTheCoordinator("<coordinator>"))
+		w.ThenItSucceeds()
+		w.ThenTheCoordinatorWasToldTheWorkspaceIs("com.acme.storefront", "graph", "push")
+	})
+
+	t.Run("A publish carries the name", func(t *testing.T) {
+		w := newWorkspaceWorld(t)
+		w.GivenARegistry()
+		w.GivenACoordinator()
+		w.GivenTheProjectHolds(files{"WORKSPACE": `workspace(name = "com.acme.storefront")`, "hello.txt": "hello"})
+		w.GivenTheBuildFileDeclares(`
+			glob(name="src", include=["hello.txt"])
+			layer(name="app", base="scratch", steps=[add("src", "/data")])
+			publication(name="release", images={"<registry>/team/app": "app"})
+		`)
+		w.WhenIPublish("release", taggedAs("v1"), onTheCoordinator("<coordinator>"))
+		w.ThenItSucceeds()
+		w.ThenTheCoordinatorWasToldTheWorkspaceIs("com.acme.storefront", "graph", "publish")
+	})
+
+	t.Run("An export carries the name", func(t *testing.T) {
+		w := newWorkspaceWorld(t)
+		w.GivenACoordinator()
+		w.GivenTheProjectHolds(files{"WORKSPACE": `workspace(name = "com.acme.storefront")`, "hello.txt": "hello"})
+		w.GivenThePackageDeclares(".", anAppOfAFile)
+		w.WhenISave("app", onTheCoordinator("<coordinator>"))
+		w.ThenItSucceeds()
+		w.ThenTheCoordinatorWasToldTheWorkspaceIs("com.acme.storefront", "graph", "export")
+	})
+
+	t.Run("Two clones send the same name, and share what they build", func(t *testing.T) {
+		w := newBuildingWorld(t)
+		w.GivenACoordinator()
+		hello := testenv.NewNonce()
+		for _, clone := range []string{"first", "second"} {
+			w.GivenTheProjectHolds(files{
+				clone + "/WORKSPACE": `workspace(name = "com.acme.storefront")`,
+				clone + "/hello.txt": hello,
+			})
+			w.GivenThePackageDeclares(clone, anAppOfAFile)
+		}
+		w.GivenIWorkIn("first")
+		w.WhenIBuild("app", onTheCoordinator("<coordinator>"))
+		w.ThenItSucceeds()
+		w.ThenTheTargetsWere(statuses{layer("app"): ran})
+		w.ThenTheCoordinatorWasToldTheWorkspaceIs("com.acme.storefront", "graph")
+		w.GivenIWorkIn("second")
+		w.WhenIBuild("app", onTheCoordinator("<coordinator>"))
+		w.ThenItSucceeds()
+		w.ThenTheTargetsWere(statuses{layer("app"): reused})
+		w.ThenTheCoordinatorWasToldTheWorkspaceIs("com.acme.storefront", "graph")
+	})
+}
+
+// TestWorkspaces_TheNameNeverAffectsWhatIsBuiltOrCached specifies that vamos never adds the name to an action's key,
+// the graph or a step, so identical targets in workspaces named differently, or unnamed, share cached results,
+// and renaming a workspace rebuilds nothing;
+// and that a glob that selects the WORKSPACE file builds on its contents as on any other file's, the name included,
+// so renaming the workspace rebuilds the targets that use that glob.
+func TestWorkspaces_TheNameNeverAffectsWhatIsBuiltOrCached(t *testing.T) {
+	t.Run("Renaming a workspace reuses its cache", func(t *testing.T) {
+		w := newWorkspaceWorld(t)
+		w.GivenTheProjectHolds(files{
+			"WORKSPACE": `workspace(name = "com.acme.first")`,
+			"hello.txt": testenv.NewNonce(),
+		})
+		w.GivenThePackageDeclares(".", anAppOfAFile)
+		w.WhenIBuild("app")
+		w.ThenItSucceeds()
+		w.ThenTheTargetsWere(statuses{layer("app"): ran})
+		w.GivenTheProjectHolds(files{"WORKSPACE": `workspace(name = "com.acme.second")`})
+		w.WhenIBuild("app")
+		w.ThenItSucceeds()
+		w.ThenTheTargetsWere(statuses{layer("app"): reused})
+	})
+
+	t.Run("Renaming a workspace reuses its cache on a coordinator", func(t *testing.T) {
+		w := newWorkspaceWorld(t)
+		w.GivenACoordinator()
+		w.GivenTheProjectHolds(files{
+			"WORKSPACE": `workspace(name = "com.acme.first")`,
+			"hello.txt": testenv.NewNonce(),
+		})
+		w.GivenThePackageDeclares(".", anAppOfAFile)
+		w.WhenIBuild("app", onTheCoordinator("<coordinator>"))
+		w.ThenItSucceeds()
+		w.ThenTheTargetsWere(statuses{layer("app"): ran})
+		w.GivenTheProjectHolds(files{"WORKSPACE": `workspace(name = "com.acme.second")`})
+		w.WhenIBuild("app", onTheCoordinator("<coordinator>"))
+		w.ThenItSucceeds()
+		w.ThenTheTargetsWere(statuses{layer("app"): reused})
+		w.ThenTheCoordinatorWasToldTheWorkspaceIs("com.acme.second", "graph")
+	})
+
+	t.Run("A step does not see the name", func(t *testing.T) {
+		w := newWorkspaceWorld(t)
+		w.GivenTheProjectHolds(files{"WORKSPACE": `workspace(name = "com.acme.storefront")`})
+		w.GivenThePackageDeclares(".", testenv.PullBusybox)
+		w.GivenThePackageDeclares(".", fmt.Sprintf(`
+			task(name="probe", base="busybox", steps=[run(["sh", "-c", %q])])
+		`, "echo "+testenv.NewNonce()+"; echo \"observed variables naming it=$(env | grep -c com.acme.storefront)\""))
+		w.WhenIBuild("probe")
+		w.ThenItSucceeds()
+		w.ThenTheTargetsWere(statuses{task("probe"): ran})
+		w.ThenTheStepsObserved(observations{"variables naming it": "0"})
+	})
+
+	t.Run("A glob that selects WORKSPACE builds on its contents", func(t *testing.T) {
+		w := newWorkspaceWorld(t)
+		nonce := testenv.NewNonce() // in both WORKSPACE files, so that neither was built before
+		w.GivenTheProjectHolds(files{"WORKSPACE": "# " + nonce + "\nworkspace(name = \"com.acme.first\")"})
+		w.GivenThePackageDeclares(".", `
+			glob(name="src", include=["WORKSPACE"])
+			layer(name="app", base="scratch", steps=[add("src", "/data")])
+		`)
+		w.WhenIBuild("app")
+		w.ThenItSucceeds()
+		w.ThenTheTargetsWere(statuses{layer("app"): ran})
+		w.GivenTheProjectHolds(files{"WORKSPACE": "# " + nonce + "\nworkspace(name = \"com.acme.second\")"})
+		w.WhenIBuild("app")
+		w.ThenItSucceeds()
+		w.ThenTheTargetsWere(statuses{layer("app"): ran})
+	})
 }

@@ -25,20 +25,20 @@
 
 ## 2. Carry the name in executor requests (`internal/api`, `internal/remote`, `internal/cli`)
 
-- [ ] 2.1 Add `Workspace string json:"workspace,omitempty"` to `GraphRequest`, `PushRequest`, `PublishRequest` and
+- [x] 2.1 Add `Workspace string json:"workspace,omitempty"` to `GraphRequest`, `PushRequest`, `PublishRequest` and
   `ExportRequest`, documented as metadata like `Emulate` that is no part of any key. Confirm the `Clone` methods and
   `api_test.go` round-trips keep it. Verify with `go test ./internal/api`.
-- [ ] 2.2 Extend `apitest.Contract`: graph, push and publish jobs given a name behave as without one, and a named graph
+- [x] 2.2 Extend `apitest.Contract`: graph, push and publish jobs given a name behave as without one, and a named graph
   job after an unnamed one of the same graph reports `cached`. This shows executors ignore the name, not that it
   arrives: 2.4 checks that. Verify with `go test ./internal/run ./internal/remote ./internal/coord`.
-- [ ] 2.3 In `internal/cli`, set `Opened` in `inv.request` to record the name on the invocation, and set `Workspace`
+- [x] 2.3 In `internal/cli`, set `Opened` in `inv.request` to record the name on the invocation, and set `Workspace`
   in `runLoaded`, `deliver`, `buildImage`'s push and `publishFromExecutor`. Verify with `go test ./internal/cli`.
-- [ ] 2.4 In `steps_remote_test.go`, record the `workspace` field of each `POST /v1/jobs` body that the scenario's
+- [x] 2.4 In `steps_remote_test.go`, record the `workspace` field of each `POST /v1/jobs` body that the scenario's
   coordinator receives, and add `ThenTheCoordinatorWasToldTheWorkspaceIs`. Add scenarios for "vamos derives no
   workspace name" and "The name travels with every request to an executor": build, push, publish, save (which sends
   the export) and two clones, so that each of 2.3's four requests is checked as received. Verify with
   `go test ./internal/features -run 'TestWorkspaces_|TestCoordinator_'`.
-- [ ] 2.5 Add scenarios for "The name never affects what is built or cached": a renamed workspace's `app` is
+- [x] 2.5 Add scenarios for "The name never affects what is built or cached": a renamed workspace's `app` is
   `reused`, a probe step observes no variable holding the name, and a renamed workspace's `app` whose glob selects
   `WORKSPACE` `ran`. Verify with
   `go test ./internal/features -run TestWorkspaces_`.

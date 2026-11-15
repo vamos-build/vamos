@@ -133,6 +133,7 @@ type invocation struct {
 	grace          time.Duration        // the executor's grace period, from its capabilities
 	generation     uint64               // the executor's cache generation, from its capabilities, read before capture
 	registries     []api.RegistryPolicy // how the executor reaches its results' registries, from its capabilities
+	workspace      string               // the workspace's name, as its WORKSPACE file declares it, once loaded
 }
 
 // hold keeps a build open on its executor while the command delivers its result: a watch past the terminal
@@ -531,6 +532,7 @@ func (inv *invocation) request(names []string, want load.Want, execPlatform imgs
 		Sets:         inv.opts.sets,
 		Platform:     inv.opts.platform,
 		ExecPlatform: execPlatform,
+		Opened:       func(name string) { inv.workspace = name },
 	}
 }
 
@@ -1084,6 +1086,7 @@ func (inv *invocation) runLoaded(
 		Rebuild:    rebuild,
 		Timestamp:  time.Time(inv.opts.timestamp),
 		Emulate:    inv.opts.emulate,
+		Workspace:  inv.workspace,
 		Generation: inv.generation, // read before the sources were captured: a prune since refuses the build
 		Secrets:    secrets,
 	}
@@ -1133,7 +1136,9 @@ var closedChan = func() chan struct{} { ch := make(chan struct{}); close(ch); re
 func (inv *invocation) deliver(
 	ctx context.Context, ex api.Executor, res api.Result, events *eventPrinter,
 ) (api.Exported, error) {
-	id, err := ex.Submit(ctx, api.Request{Export: &api.ExportRequest{Result: res, Trace: tracing.Call(ctx)}})
+	id, err := ex.Submit(ctx, api.Request{Export: &api.ExportRequest{
+		Result: res, Workspace: inv.workspace, Trace: tracing.Call(ctx),
+	}})
 	if err != nil {
 		return api.Exported{}, err
 	}
@@ -1200,7 +1205,7 @@ func (inv *invocation) buildImage(target string, dest destination) error {
 			// The executor pushes, with its own credentials and registry settings.
 			var id api.JobID
 			id, err = ex.Submit(ctx, api.Request{Push: &api.PushRequest{
-				Result: res, Destination: dest.push, Trace: tracing.Call(ctx),
+				Result: res, Destination: dest.push, Workspace: inv.workspace, Trace: tracing.Call(ctx),
 			}})
 			var outcome api.Outcome
 			if err == nil {
@@ -1314,7 +1319,7 @@ func (inv *invocation) publish(target string) error {
 // with its own credentials and registry settings, and returns every destination.
 func (inv *invocation) publishFromExecutor(ctx context.Context, ex api.Executor, plan *load.Publication,
 	results []api.Result, events *eventPrinter) ([]api.Destination, error) {
-	req := api.PublishRequest{Tags: inv.opts.tags, Trace: tracing.Call(ctx)}
+	req := api.PublishRequest{Tags: inv.opts.tags, Workspace: inv.workspace, Trace: tracing.Call(ctx)}
 	for _, image := range plan.Images {
 		req.Images = append(req.Images, api.PublishImage{Result: results[image.Root], Repository: image.Repository})
 	}

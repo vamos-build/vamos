@@ -68,6 +68,8 @@ type world struct {
 
 	coordinator       string             // the URL of the scenario's coordinator, <coordinator>, once started
 	jobs              atomic.Int64       // the jobs that the scenario's coordinator was given
+	toldMu            sync.Mutex         // guards told
+	told              []toldJob          // what each job the scenario's coordinator was given told it, in order
 	served            atomic.Int64       // the requests that the scenario's coordinator was sent
 	coordinatorServer *httptest.Server   // that serves <coordinator>, counting what it is sent
 	watching          chan struct{}      // told, if it has room, once front sends on a command's watch of a job
@@ -143,6 +145,7 @@ type world struct {
 	emulating    string            // the platform whose programs the scenario runs under emulation, if any
 	askedDuring  int64             // the requests that the scenario's registry served as the last command ran
 	jobsDuring   int64             // the jobs that the scenario's coordinator was given as the last command ran
+	toldDuring   []toldJob         // what those jobs told it, in order
 	servedDuring int64             // the requests that the scenario's coordinator was sent as the last command ran
 	first        v1.Image          // the first image that the scenario saved
 	saved        []v1.Image        // the images that the scenario saved, in order
@@ -261,7 +264,7 @@ func (w *world) execute(fsys afero.Fs, args []string) {
 	if w.ownStores {
 		w.cachedBefore = w.cached()
 	}
-	asked, jobs, served := w.asked.Load(), w.jobs.Load(), w.served.Load()
+	asked, jobs, served, told := w.asked.Load(), w.jobs.Load(), w.served.Load(), len(w.toldJobs())
 	for _, d := range []time.Duration{interruptIn, interruptBy} {
 		if d > 0 { // as the command starts, after anything slow beforehand
 			timer := time.AfterFunc(d, cancel)
@@ -296,6 +299,7 @@ func (w *world) execute(fsys afero.Fs, args []string) {
 	}
 	w.askedDuring, w.jobsDuring = w.asked.Load()-asked, w.jobs.Load()-jobs
 	w.servedDuring = w.served.Load() - served
+	w.toldDuring = w.toldJobs()[told:]
 	if w.ownStores {
 		w.cachedAfter = w.cached()
 	}
