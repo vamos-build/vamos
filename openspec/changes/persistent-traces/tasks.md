@@ -158,6 +158,8 @@
   ends at its bound. A command that ran no job stores nothing. Warn about a clock offset that can't be measured,
   storing a zero offset marked unknown, rather than failing the command, and test it. Warn when a job's outcome names
   no manifest. Verify with `go test ./internal/cli`.
+  Open: the tests of a prune refused while the command trace is stored, and of each cleanup step against an
+  executor that stops answering, wait on the testing harness, which is addressed in a separate PR.
 - [x] 7.2 Assemble traces in `cli/trace.go`: manifests and the attempt traces they took with `ReadMany`, falling back to
   one read per blob when a batch meets a missing or corrupt one, with gaps for those. Place joined attempts on their own
   `(shared)` track with parents cleared, and shift client spans by the stored offset. Place an attempt that several of
@@ -182,6 +184,8 @@
   results' provenance. Add `trace_test.go` rules and scenarios for every `build-traces` requirement, the secret one
   checking the stored command trace, manifest and attempt trace as well as the file, the coordinator ones in the remote
   steps. Verify with `go test ./internal/features -run TestTrace_`.
+  Open: the scenario of an attempt that traces past the cap waits on the testing harness, which is addressed in a
+  separate PR.
 - [x] 7.5 Update the user docs: `docs/user/reference/cache.md#traces` (always on, what is stored, prune),
   `flags.md`'s `--trace`, a new `docs/user/reference/cli/trace.md` with its row in the CLI README table, `output.md`
   (the trace line), and `prune.md` (traces go, history stays until unused). Update `internal/cli/doc.go`. Make the
@@ -195,6 +199,8 @@
   builds at once on a coordinator, and ageing a target's history by setting its record's `Used` back, for the
   retention scenarios). Document the causes in `docs/user/reference/cache.md` and have the rules quote it. Verify with
   `go test ./internal/features -run TestMisses_`.
+  Open: the scenario of a task whose cached files are corrupt apart from its sources, and proof that concurrent
+  builds write their history at the same moment, wait on the testing harness, which is addressed in a separate PR.
 
 ## 9. Integration
 
@@ -212,6 +218,11 @@
 
 ## Workflow follow-up
 
+- The author elected to address the gaps in the testing harness as a separate PR: a coordinator that holds chosen
+  requests unanswered, for the cleanup bounds and the prune refused while a command trace is stored (7.1); a test-only
+  trace cap (7.4); a runnable image in a scenario's own registry, for a task's cached files corrupt apart from its
+  sources, and a barrier within attempts, for history written by concurrent builds (8.1); and the cause of a rare
+  overlap of a left attempt's steps on its shared track. Tasks 7.1, 7.4 and 8.1 stay open until then.
 - Archive the change with `/opsx:archive` once it is reviewed and merged, creating `openspec/specs/build-traces` and
   `openspec/specs/cache-miss-attribution`.
 - `telemetry-export` builds on the manifests and miss causes added here.

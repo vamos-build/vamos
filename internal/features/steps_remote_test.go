@@ -441,7 +441,7 @@ func (w *world) GivenTwoClientsBuiltAtOnceOnTheCoordinator(target string, first,
 	}
 	// At once: each job's target was building, or queued to, before the other job was done, as their events said
 	// when the coordinator's front read them. That the two history writes ran at the same moment would take a barrier
-	// within both attempts, which testing-gaps.md records.
+	// within both attempts, which the tasks of persistent-traces leave to a separate PR.
 	w.jobsMu.Lock()
 	jobs := slices.Clone(w.jobIDs[before:])
 	w.jobsMu.Unlock()
