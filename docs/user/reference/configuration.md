@@ -11,7 +11,7 @@ and shared Starlark modules.
 ## Workspaces
 
 A **package** is any directory containing a `BUILD` or `BUILD.vms` file.
-A **workspace** groups packages beneath a common root directory containing a `WORKSPACE` file (which can be empty).
+A **workspace** groups packages beneath a common root directory containing a `WORKSPACE` file (which can be empty), which may [name the workspace](#naming-a-workspace).
 
 Name a package file `BUILD.vms` if the directory also contains a `build` output directory.
 On case-insensitive filesystems (such as macOS default filesystems or Git repositories with `core.ignorecase`),
@@ -33,6 +33,44 @@ project/
 
 To locate the workspace root, vamos searches upward from the directory specified by `-C` for a `WORKSPACE` file.
 If no `WORKSPACE` file is found, the directory specified by `-C` is treated as the workspace root.
+
+### Naming a workspace
+
+The `WORKSPACE` file is a Starlark file, which vamos evaluates whenever a command opens the workspace,
+before it loads any `BUILD` file.
+An empty `WORKSPACE` file is valid, as is a workspace without one, and either leaves the workspace unnamed.
+Only the `WORKSPACE` file at the root of the workspace that holds `-C` is evaluated;
+one in a directory beneath it marks another workspace, which vamos doesn't read.
+A `WORKSPACE` that isn't a regular file, such as a directory, marks the root without being evaluated.
+A `WORKSPACE` file written for another tool, such as Bazel, is evaluated too,
+and fails on what vamos doesn't offer, such as `load()`;
+give vamos a root of its own, with an empty `WORKSPACE` file, or run it where no such file is above `-C`.
+
+`WORKSPACE` may call `workspace()` once, to give the workspace a symbolic name:
+
+```python
+workspace(name = "com.acme.storefront")
+```
+
+`name` is given by keyword, and is a string.
+`WORKSPACE` offers no other builtin of `BUILD` files, and no `load()`: calling one is a mistake.
+A workspace name follows the rules of a Bazel module name:
+it consists of lowercase letters, digits, `.`, `-` and `_`,
+starts with a letter, and ends with a letter or digit.
+A mistake in `WORKSPACE`, such as a name that breaks these rules, fails every command that opens the workspace,
+`vamos update` included, naming the file, line and column, as a mistake in a `BUILD` file does.
+
+vamos derives no name from anything else: not the workspace's directory, its repository or the repository's remotes.
+A workspace that doesn't call `workspace()` is unnamed.
+A name is trusted as declared, so choosing one that no other workspace uses is up to the workspace;
+a reverse-DNS name of a domain you control, such as `com.acme.storefront`, is one.
+
+vamos never adds the name to an action's key, the graph or a step,
+so identical targets in workspaces named differently, or unnamed, share cached results,
+and renaming a workspace rebuilds nothing.
+A glob that selects the `WORKSPACE` file, such as `**` in the root package, builds on its contents
+as on any other file's, the name included,
+so renaming the workspace rebuilds the targets that use that glob.
 
 Target labels identify targets across packages:
 

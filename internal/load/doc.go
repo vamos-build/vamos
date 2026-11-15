@@ -8,6 +8,10 @@
 // there is no workspace-wide validation pass.
 // A package still loading, because one it loaded names its targets, gives the targets it has declared so far.
 // BUILD mistakes retain source positions here rather than becoming executor graph-validation errors.
+// The WORKSPACE file at the root of the workspace holding Request.Dir, and no other, is evaluated as the workspace
+// opens, before any BUILD file loads, on a thread of its own whose only builtin is workspace(), which may name the
+// workspace; Request.Opened is then given the name, "" for an unnamed workspace.
+// The name never enters the graph or any key.
 // The workspace root's vamos.lock is read once per load, and a malformed one, or one of a newer version, fails it;
 // each pull's node takes the digest that the lockfile pins its normalized image and tag to, or none,
 // and Request.Pin may pin the others, writing the lockfile, once the targets are configured and before any glob is
@@ -26,6 +30,7 @@
 // # Changes
 //
 // Start with Load and Request.
+// In workspacefile.go, evalWorkspaceFile evaluates WORKSPACE, and checkWorkspaceName owns the rules of a name.
 // LoadPublication loads a publication as the roots it checks and publishes, its checks then its images,
 // and returns the Publication saying where each image goes; its repositories never enter the graph.
 // expandPublication owns that expansion, which a build of a publication shares; resolve refuses a publication

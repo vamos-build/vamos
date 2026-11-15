@@ -2,22 +2,22 @@
 
 ## 1. Evaluate WORKSPACE and declare the name (`internal/load`)
 
-- [ ] 1.1 Add the name rule as the unexported `checkWorkspaceName`, which names the rule a name breaks, with a table
+- [x] 1.1 Add the name rule as the unexported `checkWorkspaceName`, which names the rule a name breaks, with a table
   test of the spec's valid and invalid names; verify with `go test ./internal/load -run CheckWorkspaceName`.
-- [ ] 1.2 Evaluate the root's `WORKSPACE` in `openWorkspace` on its own thread. Predeclare only `workspace`, set no
+- [x] 1.2 Evaluate the root's `WORKSPACE` in `openWorkspace` on its own thread. Predeclare only `workspace`, set no
   `Load`, use `cancelWith`, and report errors through `describeExecError`. Store the name on `workspace.name`. Verify
   with `go test ./internal/load`.
-- [ ] 1.3 Implement `workspace(name=...)`: keyword only, a string, at most once (a second call cites the first name),
+- [x] 1.3 Implement `workspace(name=...)`: keyword only, a string, at most once (a second call cites the first name),
   checked by `checkWorkspaceName`. Verify through 1.5's scenarios.
-- [ ] 1.4 Add `Request.Opened func(name string)`, called after `WORKSPACE` evaluates and before any BUILD file loads,
+- [x] 1.4 Add `Request.Opened func(name string)`, called after `WORKSPACE` evaluates and before any BUILD file loads,
   and document `WORKSPACE` evaluation and `Opened` in `internal/load/doc.go`. Verify with `go test ./internal/load`
   and `go doc ./internal/load`.
-- [ ] 1.5 Add `workspaces_test.go` rules for "WORKSPACE is a Starlark file that vamos evaluates", "WORKSPACE declares
+- [x] 1.5 Add `workspaces_test.go` rules for "WORKSPACE is a Starlark file that vamos evaluates", "WORKSPACE declares
   the name with workspace()" and "A workspace name follows the rules of a module name". Cover the mistakes with
   `ThenItFailsWith` (file, line and column), `ThenNoTargetRan` and `ThenNothingIsSaved`, starting from a background that
   needs no buildah. Add the `vamos update` scenario to `update_test.go`. Verify with
   `go test -short ./internal/features -run 'TestWorkspaces_|TestUpdate_'`.
-- [ ] 1.6 Update the Workspaces section of `docs/user/reference/configuration.md`: `WORKSPACE` is Starlark,
+- [x] 1.6 Update the Workspaces section of `docs/user/reference/configuration.md`: `WORKSPACE` is Starlark,
   `workspace(name=...)`, the name rules, the reverse-DNS recommendation, that vamos never adds the name to a key or a
   step, and that a glob selecting `WORKSPACE` builds on its contents as on any file's. Make
   the feature rules' doc comments quote it. Verify with the documentation link and format checks in

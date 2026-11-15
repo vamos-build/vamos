@@ -535,6 +535,17 @@ func TestUpdate_ReResolvesPinsAndReportsWhatChanged(t *testing.T) {
 		w.ThenTheLockfileIsUnchanged()
 	})
 
+	t.Run("A mistake in WORKSPACE fails, leaving the lockfile as it was", func(t *testing.T) {
+		w := newWorld(t)
+		w.GivenTheRegistryListsTags("<registry>/base", "v1")
+		w.GivenTheProjectHolds(files{"WORKSPACE": "# the workspace\nthis isn't Starlark\n"})
+		w.GivenTheLockfileHolds(lockfilePinning(pin{"<registry>/base:v1", "v1", "<digest of <registry>/base:v1>"}))
+		w.GivenTheBuildFileDeclares(pullOfBase("v1"))
+		w.WhenIUpdate()
+		w.ThenItFailsWith("/project/WORKSPACE:2:9: got identifier, want newline")
+		w.ThenTheLockfileIsUnchanged()
+	})
+
 	t.Run("Naming a target that isn't a pull is refused", func(t *testing.T) {
 		w := newWorld(t)
 		w.GivenTheRegistryListsTags("<registry>/base", "v1")

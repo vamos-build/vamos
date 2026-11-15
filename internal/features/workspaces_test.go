@@ -500,3 +500,180 @@ func TestWorkspaces_MistakesAreReportedWhereTheyAre(t *testing.T) {
 		w.ThenNothingIsSaved()
 	})
 }
+
+// anApp declares the layer "app" on scratch, which builds without pulling anything.
+const anApp = `layer(name="app", base="scratch")`
+
+// TestWorkspaces_WorkspaceIsAStarlarkFileThatVamosEvaluates specifies that the WORKSPACE file is a Starlark file,
+// which vamos evaluates whenever a command opens the workspace, before it loads any BUILD file;
+// that an empty WORKSPACE file is valid, as is a workspace without one, and either leaves the workspace unnamed;
+// that only the WORKSPACE file at the root of the workspace that holds -C is evaluated;
+// and that a WORKSPACE that isn't a regular file, such as a directory, marks the root without being evaluated.
+func TestWorkspaces_WorkspaceIsAStarlarkFileThatVamosEvaluates(t *testing.T) {
+	t.Run("An empty WORKSPACE is valid", func(t *testing.T) {
+		w := newWorkspaceWorld(t)
+		w.GivenThePackageDeclares(".", anApp)
+		w.WhenIBuild("app")
+		w.ThenItSucceeds()
+	})
+
+	t.Run("A workspace without a WORKSPACE file is valid", func(t *testing.T) {
+		w := newBuildingWorld(t)
+		w.GivenThePackageDeclares(".", anApp)
+		w.WhenIBuild("app")
+		w.ThenItSucceeds()
+	})
+
+	t.Run("A nested workspace's WORKSPACE is not evaluated", func(t *testing.T) {
+		w := newWorkspaceWorld(t)
+		w.GivenTheProjectHolds(files{
+			"WORKSPACE":       `workspace(name = "com.acme.outer")`,
+			"inner/WORKSPACE": `this isn't Starlark`,
+		})
+		w.GivenThePackageDeclares(".", anApp)
+		w.WhenIBuild("app")
+		w.ThenItSucceeds()
+	})
+
+	t.Run("A WORKSPACE above the workspace's own is not evaluated", func(t *testing.T) {
+		w := newWorkspaceWorld(t)
+		w.GivenTheProjectHolds(files{
+			"WORKSPACE":       `this isn't Starlark`,
+			"inner/WORKSPACE": `workspace(name = "com.acme.inner")`,
+		})
+		w.GivenThePackageDeclares("inner", anApp)
+		w.GivenIWorkIn("inner")
+		w.WhenIBuild("app")
+		w.ThenItSucceeds()
+	})
+
+	t.Run("A WORKSPACE that isn't a regular file marks the root without being evaluated", func(t *testing.T) {
+		w := newBuildingWorld(t)
+		w.GivenTheProjectHolds(files{"WORKSPACE/notes.txt": "this isn't Starlark"})
+		w.GivenThePackageDeclares(".", anApp)
+		w.GivenThePackageDeclares("lib", `layer(name="app", base="//:app")`)
+		w.GivenIWorkIn("lib")
+		w.WhenIBuild("app")
+		w.ThenItSucceeds()
+	})
+
+	t.Run("A mistake in WORKSPACE fails before any BUILD file loads", func(t *testing.T) {
+		w := newWorkspaceMistakeWorld(t)
+		w.GivenTheProjectHolds(files{"WORKSPACE": "# the workspace\nthis isn't Starlark\n"})
+		w.GivenThePackageDeclares(".", `this isn't Starlark either`)
+		w.WhenIBuild("app")
+		w.ThenItFailsWith("/project/WORKSPACE:2:9: got identifier, want newline")
+		w.ThenNoTargetRan()
+	})
+}
+
+// TestWorkspaces_WorkspaceDeclaresTheNameWithWorkspace specifies that WORKSPACE may call workspace() once,
+// to give the workspace a symbolic name, which is given by keyword, and is a string,
+// and that WORKSPACE offers no other builtin of BUILD files, and no load(): calling one is a mistake.
+func TestWorkspaces_WorkspaceDeclaresTheNameWithWorkspace(t *testing.T) {
+	for _, example := range []struct {
+		name      string
+		workspace string // the WORKSPACE file
+		error     string
+	}{
+		{
+			name:      "Calling workspace() twice is a mistake",
+			workspace: "workspace(name = \"a\")\nworkspace(name = \"b\")\n",
+			error: `/project/WORKSPACE:2:10: workspace: the workspace is already named "a", ` +
+				"at /project/WORKSPACE:1:10",
+		},
+		{
+			name:      "A BUILD file's builtin is a mistake in WORKSPACE",
+			workspace: `pull(name = "busybox", image = "busybox")`,
+			error:     "/project/WORKSPACE:1:1: undefined: pull",
+		},
+		{
+			name:      "load() is a mistake in WORKSPACE",
+			workspace: `load("//:defs.star", "x")`,
+			error:     "/project/WORKSPACE:1:1: load not implemented by this application",
+		},
+		{
+			name:      "A name that isn't a string is a mistake",
+			workspace: `workspace(name = 1)`,
+			error:     "/project/WORKSPACE:1:10: workspace: name must be a string, not int",
+		},
+		{
+			name:      "A name given by position is a mistake",
+			workspace: `workspace("com.acme.storefront")`,
+			error:     `/project/WORKSPACE:1:10: workspace: give the name by keyword, as name = "com.example.app"`,
+		},
+		{
+			name:      "A workspace() without a name is a mistake",
+			workspace: `workspace()`,
+			error:     "/project/WORKSPACE:1:10: workspace: missing argument for name",
+		},
+	} {
+		t.Run(example.name, func(t *testing.T) {
+			w := newWorkspaceMistakeWorld(t)
+			w.GivenTheProjectHolds(files{"WORKSPACE": example.workspace})
+			w.GivenThePackageDeclares(".", anApp)
+			w.WhenISave("app")
+			w.ThenItFailsWith(example.error)
+			w.ThenNoTargetRan()
+			w.ThenNothingIsSaved()
+		})
+	}
+}
+
+// TestWorkspaces_AWorkspaceNameFollowsTheRulesOfAModuleName specifies that a workspace name follows the rules of a
+// Bazel module name: it consists of lowercase letters, digits, ".", "-" and "_",
+// starts with a letter, and ends with a letter or digit;
+// and that a mistake in WORKSPACE, such as a name that breaks these rules, fails every command that opens the
+// workspace, naming the file, line and column, as a mistake in a BUILD file does.
+func TestWorkspaces_AWorkspaceNameFollowsTheRulesOfAModuleName(t *testing.T) {
+	for _, name := range []string{"storefront", "com.acme.storefront", "my-app_2", "a"} {
+		t.Run("A valid name: "+name, func(t *testing.T) {
+			w := newWorkspaceWorld(t)
+			w.GivenTheProjectHolds(files{"WORKSPACE": fmt.Sprintf("workspace(name = %q)", name)})
+			w.GivenThePackageDeclares(".", anApp)
+			w.WhenIBuild("app")
+			w.ThenItSucceeds()
+		})
+	}
+
+	allowed := `; a workspace name holds only lowercase letters, digits, ".", "-" and "_"`
+	for _, example := range []struct {
+		name string
+		rule string // that the name breaks, as the error says it
+	}{
+		{
+			name: "",
+			rule: "name must not be empty",
+		},
+		{
+			name: "Storefront",
+			rule: `name "Storefront" must start with a lowercase letter`,
+		},
+		{
+			name: "2app",
+			rule: `name "2app" must start with a lowercase letter`,
+		},
+		{
+			name: "app-",
+			rule: `name "app-" must end with a lowercase letter or digit`,
+		},
+		{
+			name: "app.",
+			rule: `name "app." must end with a lowercase letter or digit`,
+		},
+		{
+			name: "acme/app",
+			rule: `name "acme/app" must not contain "/"` + allowed,
+		},
+	} {
+		t.Run(fmt.Sprintf("An invalid name is refused where it is declared: %q", example.name), func(t *testing.T) {
+			w := newWorkspaceMistakeWorld(t)
+			w.GivenTheProjectHolds(files{"WORKSPACE": fmt.Sprintf("workspace(name = %q)", example.name)})
+			w.GivenThePackageDeclares(".", anApp)
+			w.WhenISave("app")
+			w.ThenItFailsWith("/project/WORKSPACE:1:10: workspace: " + example.rule)
+			w.ThenNoTargetRan()
+			w.ThenNothingIsSaved()
+		})
+	}
+}
