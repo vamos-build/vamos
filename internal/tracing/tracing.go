@@ -3,6 +3,7 @@ package tracing
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"reflect"
@@ -109,8 +110,9 @@ type CallContext struct {
 // never meets one larger than its transport takes: it is well within an attempt's line and one batch of its events.
 const MaxSpanSize = 1 << 20
 
-// maxStubName bounds the name a span over MaxSpanSize keeps, which may hold all of a run step's argv.
-const maxStubName = 1 << 10
+// maxNameSize bounds the name a span over MaxSpanSize keeps, and every track, either of which may hold all of a run
+// step's argv, so that a stub is small whatever it was a stub of.
+const maxNameSize = 1 << 10
 
 // Recorder collects the spans of one process, or of one call to an executor, as they end.
 // A recorder that keeps spans counts each one's encoded size as it ends,
@@ -185,7 +187,7 @@ func (r *Recorder) add(s Span) {
 }
 
 // bounded returns s if it encodes in at most MaxSpanSize, or else its stub: s without its arguments, which say why,
-// and with its name cut to maxStubName.
+// and with its name cut to maxNameSize. Its track is already bounded, by start.
 func bounded(s Span) Span {
 	size, ok := spanSize(s)
 	if ok && size <= MaxSpanSize {
@@ -196,10 +198,26 @@ func bounded(s Span) Span {
 		why = fmt.Sprintf("the span was %d bytes encoded, over %d", size, MaxSpanSize)
 	}
 	s.Args = map[string]any{"dropped": why} // a new map: s's own is the caller's
-	if len(s.Name) > maxStubName {
-		s.Name = strings.ToValidUTF8(s.Name[:maxStubName], "") + "…" // dropping a rune the cut split
-	}
+	s.Name = cut(s.Name)
 	return s
+}
+
+// cut returns s, or its first maxNameSize bytes and "…" if it is longer.
+func cut(s string) string {
+	if len(s) <= maxNameSize {
+		return s
+	}
+	return strings.ToValidUTF8(s[:maxNameSize], "") + "…" // dropping a rune the cut split
+}
+
+// boundedTrack returns track, or if it is over maxNameSize, its cut and a hash of it whole,
+// so that two long tracks that begin alike stay apart.
+func boundedTrack(track string) string {
+	if len(track) <= maxNameSize {
+		return track
+	}
+	sum := sha256.Sum256([]byte(track))
+	return cut(track) + " " + hex.EncodeToString(sum[:8])
 }
 
 // recording is what a context says about tracing: where spans go, and the span that new ones are part of.
@@ -334,11 +352,13 @@ func start(ctx context.Context, track, name string, async bool, args []any) (con
 	if rec == nil {
 		return ctx, nil
 	}
-	if track == "" {
-		track = rec.track
-	}
-	if track == "" {
-		track = name
+	switch {
+	case track != "":
+		track = boundedTrack(track)
+	case rec.track != "":
+		track = rec.track // bounded when its span started
+	default:
+		track = boundedTrack(name)
 	}
 	a := &Active{
 		recorder: rec.recorder,

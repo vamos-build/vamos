@@ -56,14 +56,47 @@ func TestCallbackBoundsSpans(t *testing.T) {
 		t.Errorf("stub = %+v, want the large span's ID, parent, track and times", stub)
 	}
 	if !utf8.ValidString(stub.Name) || !strings.HasPrefix(name, strings.TrimSuffix(stub.Name, "…")) ||
-		len(stub.Name) > maxStubName+len("…") {
-		t.Errorf("stub name is %d bytes, want the large span's cut to at most %d", len(stub.Name), maxStubName)
+		len(stub.Name) > maxNameSize+len("…") {
+		t.Errorf("stub name is %d bytes, want the large span's cut to at most %d", len(stub.Name), maxNameSize)
 	}
 	if why, _ := stub.Args["dropped"].(string); len(stub.Args) != 1 || !strings.Contains(why, "bytes encoded") {
 		t.Errorf("stub args = %.200v, want only why they were dropped", stub.Args)
 	}
 	if got := streamed[1].Args["values"]; !reflect.DeepEqual(got, []string{"A=b"}) {
 		t.Errorf("small span's values = %v, want them whole", got)
+	}
+}
+
+// TestCallbackBoundsTracks checks that a span with no track of its own, as in an attempt's subprocess, whose name is
+// over maxNameSize, takes a bounded track that its stub and the spans within it share,
+// and that two such names that begin alike take different tracks.
+func TestCallbackBoundsTracks(t *testing.T) {
+	var streamed []Span
+	ctx := WithRecorder(context.Background(), NewRecorder("worker", func(s Span) { streamed = append(streamed, s) }),
+		"client-1")
+	long := `run(["echo", "` + strings.Repeat("x", 5*MaxSpanSize)
+	stepCtx, step := Start(ctx, long+`a"])`, "values", []string{strings.Repeat("y", 2*MaxSpanSize)})
+	_, child := Start(stepCtx, "child")
+	child.End()
+	step.End()
+	_, other := Start(ctx, long+`b"])`)
+	other.End()
+
+	if len(streamed) != 3 {
+		t.Fatalf("streamed %d spans, want 3", len(streamed))
+	}
+	for _, s := range streamed {
+		if size, ok := spanSize(s); !ok || size > MaxSpanSize {
+			t.Errorf("%.40s: encoded in %d bytes, want at most %d", s.Name, size, MaxSpanSize)
+		}
+	}
+	childSpan, stub, otherSpan := streamed[0], streamed[1], streamed[2]
+	if stub.Track != childSpan.Track || len(stub.Track) > 2*maxNameSize {
+		t.Errorf("tracks are %d and %d bytes, want one, of at most %d", len(stub.Track), len(childSpan.Track),
+			2*maxNameSize)
+	}
+	if otherSpan.Track == stub.Track {
+		t.Errorf("two long names that begin alike share the track %.40q…", stub.Track)
 	}
 }
 
