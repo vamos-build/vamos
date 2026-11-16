@@ -37,14 +37,14 @@ So the user invokes this skill the same way both times, and a session that was c
 
 | Version | Must agree across |
 | --- | --- |
-| Go toolchain | Fedora `golang` in the devcontainer ≥ the `go` line of [go.mod](../../../go.mod); [Dockerfile](../../../Dockerfile)'s `golang:1.NN-bookworm` has go.mod's minor |
+| Go toolchain | Fedora `golang` in the devcontainer ≥ the `go` line of [go.mod](../../../go.mod); [Dockerfile](../../../Dockerfile)'s `golang:1.NN-bookworm` and the root [BUILD](../../../BUILD)'s `golang` pull have go.mod's minor |
 | Go in the example | the devcontainer's Go minor; [examples/golang-cli/go.mod](../../../examples/golang-cli/go.mod)'s `go` line, its [BUILD](../../../examples/golang-cli/BUILD) tag `1.NN-alpine`, [vamos.lock](../../../examples/golang-cli/vamos.lock), its README's "`1.NN.x-alpine`", and the comment on line 62 of [smoke-checks.md](../../../.agents/kb/smoke-checks.md) |
 | Node.js major | Fedora `nodejs24`/`nodejs24-npm`; `node:24-alpine` in the BUILD files of typescript-mcp, typescript-ui and strawberry-react/ui; [docs/user/tutorial.md](../../../docs/user/tutorial.md) (its BUILD walkthrough and mermaid diagram); the example READMEs' mermaid diagrams; `engines` and `@types/node` in typescript-mcp's package.json; `engines` in docs/site's package.json |
 | pnpm | Fedora `pnpm`; `packageManager` in [docs/site/package.json](../../../docs/site/package.json) and [examples/typescript-ui/package.json](../../../examples/typescript-ui/package.json); `pnpm@X` in [examples/typescript-ui/BUILD](../../../examples/typescript-ui/BUILD), [examples/strawberry-react/ui/BUILD](../../../examples/strawberry-react/ui/BUILD) and tutorial.md |
 | Python minor | Fedora `python3`; `python:3.NN` / `3.NN-slim` in the fastmcp and strawberry-react/backend BUILD files and vamos.lock files; `--python-version 3.NN` in each lockfile header and README command; `target-version`/`pythonVersion` in [examples/fastmcp/pyproject.toml](../../../examples/fastmcp/pyproject.toml); `uv venv --python 3.NN` in the strawberry-react README |
 | kubectl | Fedora `kubernetes1.NN-client` matches the Kubernetes minor of the default node image of the `kind` that Fedora ships |
 | Registry image | `registry:3` in [remote/compose.yaml](../../../remote/compose.yaml) (twice), [remote/helm/vamos/values.yaml](../../../remote/helm/vamos/values.yaml) (twice) and smoke-checks.md |
-| glibc floor | Dockerfile's build stage stays on Debian **bookworm** (glibc 2.36), since `glibc_minimum=2.34` in [install.sh](../../../install.sh) and the tutorial promise Ubuntu 24.04; moving to trixie raises that floor, so it is a major and needs the user's yes |
+| glibc floor | Dockerfile's build stage and the root BUILD's `golang` pull stay on Debian **bookworm** (glibc 2.36), since `glibc_minimum=2.34` in [install.sh](../../../install.sh) and the tutorial promise Ubuntu 24.04; moving to trixie raises that floor, so it is a major and needs the user's yes |
 | OpenSpec | the CLI version in the devcontainer and `generatedBy` in the generated skills and commands |
 | mermaid-cli | `puppeteer@X` in the devcontainer's `npm install -g` is within the `peerDependencies` range of the `@mermaid-js/mermaid-cli` version beside it |
 | golangci-lint | the Go that built it, which `golangci-lint version` reports, is at least the `go` line of go.mod: a release built with an older Go can't load the packages |
@@ -151,10 +151,11 @@ Ask once about the new majors found in this phase. Leave declined majors alone u
    `go.starlark.net` has no releases, so take its newest pseudo-version that is at least two weeks old.
 3. `go get <mod>@<v> ...`, then `go mod tidy`.
    If this raises go.mod's `go` line, it must stay ≤ the devcontainer's `go version`.
-   The line's minor must also match the Dockerfile's `golang:1.NN-bookworm`.
-4. **[Dockerfile](../../../Dockerfile)**: `golang:1.NN-bookworm` follows go.mod's minor; keep bookworm (see glibc floor).
-   `fedora:NN` in the runtime stage follows the devcontainer's Fedora.
+   The line's minor must also match the Dockerfile's `golang:1.NN-bookworm` and the root BUILD's `golang` pull.
+4. **[Dockerfile](../../../Dockerfile)** and the root **[BUILD](../../../BUILD)**: `golang:1.NN-bookworm` follows go.mod's minor; keep bookworm (see glibc floor).
+   `fedora:NN` in the runtime stage and the root BUILD's `fedora` pull follow the devcontainer's Fedora.
    Fedora's `containers-common` and `netavark` are unpinned.
+5. In the root BUILD's `check-tools`, keep the `go install` versions of golangci-lint and govulncheck at the devcontainer's versions.
 
 ### Go example: [examples/golang-cli](../../../examples/golang-cli)
 
@@ -220,6 +221,7 @@ Find it with `curl -fsSL https://nodejs.org/dist/index.json | jq -r '[.[] | sele
 
 | Project | BUILD tags | Lock |
 | --- | --- | --- |
+| [Repository root](../../../BUILD) | `golang:1.26-bookworm`, `fedora:44` | [vamos.lock](../../../vamos.lock) |
 | [examples/fastmcp](../../../examples/fastmcp/BUILD) | `python:3.14-slim` | `vamos.lock` |
 | [examples/golang-cli](../../../examples/golang-cli/BUILD) | `golang:1.26-alpine` | `vamos.lock` |
 | [examples/typescript-mcp](../../../examples/typescript-mcp/BUILD) | `node:24-alpine` | `vamos.lock` |
@@ -227,7 +229,7 @@ Find it with `curl -fsSL https://nodejs.org/dist/index.json | jq -r '[.[] | sele
 | [examples/strawberry-react](../../../examples/strawberry-react/vamos.lock) | `backend/BUILD`: `python:3.14`; `ui/BUILD`: `node:24-alpine`, `nginx:alpine` | `vamos.lock` (one for the workspace) |
 
 1. Build the CLI: `go build -o vamos .`.
-2. For each project, run `./vamos update --dry-run -C <project>` and then `./vamos update -C <project>`.
+2. For each project, run `./vamos update --dry-run -C <project>` and then `./vamos update -C <project>`; use `-C .` for the repository root.
    The dry run reports newer major and minor tags, which are majors to ask about.
    The update re-pins each tag to its newest release and digest.
    (`vamos update` asks Docker Hub directly. It doesn't apply the two-week rule, and doesn't need to:
