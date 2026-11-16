@@ -1,36 +1,42 @@
 ---
 name: review-cycle
-description: Run the review-fix loop on HEAD with the herdr `claude-reviewer` and `codex-reviewer` agents, amending accepted fixes into the commit until review comes back clean. Use whenever the user asks to run the review cycle, get HEAD reviewed and fixed, or have the claude and codex reviewers look at a commit, even if they don't name this skill. Takes an optional stacked branch to rebase afterwards.
+description: Run the review-fix loop on a commit range (HEAD by default) with the herdr `claude-reviewer` and `codex-reviewer` agents, committing accepted fixes on top until review comes back clean. Nests a fresh-session outer loop around a same-session inner loop. Use whenever the user asks to run the review cycle, get HEAD or a set of commits reviewed and fixed, or have the claude and codex reviewers look at a commit, even if they don't name this skill. Takes an optional base and an optional stacked branch to rebase afterwards.
 ---
 
 # Review cycle
 
-You are the coder. Two reviewers sit in sibling herdr tabs: `claude-reviewer` and `codex-reviewer`. Both share your checkout. Each round you clear both reviewers, have them review `HEAD`, judge their findings yourself, fix the ones you accept and amend `HEAD`. The loop ends when a round brings no findings you accept, or after 3 rounds. The user asked for this so they don't have to babysit the tabs. Treat it as their standing instruction to proceed on your own while each step looks as expected. Stop and ask only when something goes off track (see "Off track" below).
+You are the coder. Two reviewers sit in sibling herdr tabs: `claude-reviewer` and `codex-reviewer`. Both share your checkout. You have them review a range of commits, judge their findings yourself, fix the ones you accept and commit the fixes on top. The user asked for this so they don't have to babysit the tabs. Treat it as their standing instruction to proceed on your own while each step looks as expected. Stop and ask only when something goes off track (see "Off track" below).
+
+The cycle nests two loops:
+
+- **Outer loop, the pass (up to 3).** Each pass starts by `/clear`ing both reviewers, then reviews the whole range from `<BASE>` to the current tip. The cycle ends when a pass's first round brings nothing significant that you accept.
+- **Inner loop, the round (up to 3 per pass).** The reviewers keep their session across rounds. Each later round reviews only the fix commits made since the previous round. The pass ends when a round brings nothing significant that you accept.
 
 Load the herdr skill first (`herdr --skill`) if it is not already in context. It is the authority on `herdr agent` and `herdr pane` syntax. This skill only records the workflow and the traps found while doing it.
 
-## Why amend, and why the reviewers start fresh
+## Why two loops
 
-Every round amends the fixes into the single commit under review, and both reviewers are `/clear`ed before they review it again. Two reasons:
-
-- **The reviewers judge the code, not its history.** A fresh reviewer that sees only `HEAD` has no "fix review findings" commits to tell it what the last round worried about. A fix that is incomplete gets found again on its own merits, and the last round reviews exactly the commit that ships. Both review skills are written for `HEAD`, so this needs no range arguments.
-- **You keep the memory instead.** Your conversation carries across rounds, together with the ledger described below. That way you can drop a re-raised finding you already rejected without arguing it again, and you can still see what each round changed. Never send the ledger or your earlier verdicts to the reviewers, because doing so would anchor them.
+- **Inside a pass, continuity is cheap.** A reviewer that remembers its own findings can check a small fix commit against them, and can either accept your reason for declining a finding or push back with new evidence.
+- **Between passes, fresh eyes.** A session that has seen its findings answered tends to stop looking. Clearing it and reviewing the whole range again judges the code as it now stands, so an incomplete fix gets found again on its own merits. If fixes still draw significant findings after three rounds, a fresh pass is the better next step than a fourth round. Never carry anything from an earlier pass into a fresh session, the ledger and your verdicts included, because doing so would anchor it.
+- **Fixes are new commits, never amends.** The commits under review stay as they are, so each round can name exactly the fix commits it should look at.
+- **You keep the memory across passes.** Your conversation and the ledger carry across both loops, so you can drop a re-raised finding you already rejected without arguing it again.
 
 ## Inputs
 
-- **Branch** (optional): a branch stacked on the commit under review that should pick up the fixes, taken from the user's request (for example "rebase remote-exec"). If no branch was named, skip the rebase rather than asking for one. Say so in your first status line ("no branch given, so no rebase") so the user can correct you early. Do not guess a branch from `git branch`.
+- **Base** (optional): what the range starts after, taken from the user's request (for example "review everything since main"). A branch means its fork point with `HEAD`; a tag or SHA means that commit. Without one, the range is just `HEAD`.
+- **Branch** (optional): a branch stacked on the commits under review that should pick up the fixes (for example "rebase remote-exec"). If none was named, skip the rebase and say so in your first status line ("no branch given, so no rebase") so the user can correct you early. Do not guess one from `git branch`.
 
 ## Preconditions
 
 Run `test "${HERDR_ENV:-}" = 1`. If it fails, say you are not inside herdr and stop.
 
-Keep scratch files in the session scratchpad directory, not the repo. The commands below write it as `$SCRATCH`, but shell variables do not survive between Bash calls. Put the scratchpad's absolute path in each command, or begin the command with `SCRATCH=<scratchpad path>;`. An empty `$SCRATCH` would turn `"$SCRATCH/codex.txt"` into `/codex.txt`.
+Keep scratch files in the session scratchpad directory, not the repo. Start each run in a new folder, `mktemp -d <scratchpad>/review-XXXX`, written `$SCRATCH` below, so an earlier run's files can't leak in. Shell variables do not survive between Bash calls, so put the absolute path in each command or begin it with `SCRATCH=<path>;` (an empty `$SCRATCH` turns `"$SCRATCH/x"` into `/x`). Name the folder in your first status line, so it survives compaction.
 
 ## Confirm the team
 
-Every later step sends prompts by agent name, so a wrong or missing name sends work to the wrong place or fails. Renaming, creating tabs and starting agents change the user's workspace, so offer them and wait for a yes. The standing instruction to proceed on your own starts only after the team is confirmed.
+Renaming, creating tabs and starting agents change the user's workspace, so offer them and wait for a yes. The standing instruction to proceed on your own starts only after the team is confirmed.
 
-Gather the facts with read-only commands. Take your own pane, tab and workspace IDs from the live `pane current` output, not from `$HERDR_PANE_ID` and friends. Those are inherited when the pane starts and go stale if the pane is moved.
+Gather the facts with read-only commands. Take your own IDs from the live `pane current` output, not from `$HERDR_PANE_ID`, which goes stale if the pane is moved.
 
 ```bash
 herdr pane current --current                # you: .agent kind, .pane_id, .tab_id, .workspace_id, cwd
@@ -38,13 +44,13 @@ herdr agent list                            # every live agent: name, agent (kin
 herdr tab list --workspace <workspace_id>   # tab labels
 ```
 
-- **You** must be running `claude`. Your own name and tab label don't matter. If you are `claude-reviewer` or `codex-reviewer`, stop immediately: the user probably typed into the wrong tab, and you would end up reviewing your own fixes.
-- **A reviewer is confirmed** when one live agent has the name (`claude-reviewer` or `codex-reviewer`), runs the expected kind (`claude` or `codex`), sits in a tab with the same label, and has your checkout as its cwd. A tab whose label is just its number has herdr's default label, so treat it as unnamed.
+- **You** must be running `claude`. If you are `claude-reviewer` or `codex-reviewer`, stop: the user probably typed into the wrong tab, and you would end up reviewing your own fixes.
+- **A reviewer is confirmed** when one live agent has the name (`claude-reviewer` or `codex-reviewer`), runs the expected kind (`claude` or `codex`), sits in a tab with the same label, and has your checkout as its cwd. A tab whose label is just its number is unnamed.
 
-For a reviewer that is not confirmed, tell the user exactly what is wrong, then offer the smallest repair:
+For a reviewer that is not confirmed, say exactly what is wrong and offer the smallest repair:
 
 - **Right agent, wrong tab label:** rename the tab (`herdr tab rename <tab_id> <name>`).
-- **A spare tab already runs the right kind** (not you, not the other reviewer): rename that agent and its tab. If there are several, list them with their label, cwd and status and let the user pick. Mention that the first round will `/clear` it.
+- **A spare tab already runs the right kind** (not you, not the other reviewer): rename that agent and its tab. If there are several, list them with label, cwd and status and let the user pick. Mention that the first pass will `/clear` it.
 - **No candidate:** create one in your cwd. A new codex agent needs `--approve-for-me` so its review doesn't stop at a permission prompt for every tool call.
 
   ```bash
@@ -54,140 +60,193 @@ For a reviewer that is not confirmed, tell the user exactly what is wrong, then 
   herdr agent start codex-reviewer --kind codex --pane <.result.root_pane.pane_id> -- --approve-for-me
   ```
 
-- **The name runs the wrong kind, or the reviewer is in another checkout:** don't replace or move it yourself, because it may hold work the user cares about. Ask.
+- **The name runs the wrong kind, or sits in another checkout:** don't replace or move it, because it may hold work the user cares about. Ask.
 
-Check both reviewers before asking, and put every problem and offer into one message. After acting on the answers, rerun `herdr agent list` and `herdr tab list` and confirm from the fresh output. If `agent start` returns `agent_not_ready`, the new agent is blocked at a startup dialog. Read it with `herdr agent read` and ask the user rather than answering it yourself.
+Put every problem and offer into one message. After acting on the answers, rerun `herdr agent list` and confirm from the fresh output. If `agent start` returns `agent_not_ready`, the agent is blocked at a startup dialog: read it with `herdr agent read` and ask the user rather than answering it yourself.
 
-Both reviewers must then be `idle` (or `done`). If one is busy, inspect it with `herdr agent read` and ask. Sending a prompt into a busy agent mixes two jobs.
+Record each reviewer's pane ID as `<CLAUDE_PANE>` and `<CODEX_PANE>`, and from here on address the reviewers by pane, not by name. `/clear` starts a new agent session and herdr then forgets the agent's name (Claude's at once, Codex's when its next prompt starts), so a name-addressed command after a clear fails or finds nothing. `scripts/send-review.sh` puts the names back after each send so the user's tabs stay labeled.
+
+Both reviewers must be `idle` (or `done`). If one is busy, inspect it with `herdr agent read` and ask. Sending a prompt into a busy agent mixes two jobs.
 
 ## Starting state
 
-The reviewers review `HEAD` of the shared checkout, and their sub-reviewers read surrounding files from the working tree. Codex reviews uncommitted changes instead of `HEAD` when there are any. So the tree must be clean and `HEAD` must be the commit the user means:
+The reviewers review committed code in the shared checkout, so the tree must be clean and the range must be the commits the user means:
 
 ```bash
-git rev-parse HEAD                  # call this <REVIEWED>
-git rev-parse HEAD^                 # call this <BASE>; the cycle keeps exactly one commit on top of it
-git branch --show-current           # call this <START>; empty means detached HEAD, which is off track
+git rev-parse HEAD                  # <REVIEWED>, the tip as the user left it
+git merge-base '<base>' HEAD        # with a base: <BASE>. A branch gives its fork point, an ancestor commit gives itself
+git rev-parse --verify 'HEAD^'      # without a base: <BASE>
+git log --oneline <BASE>..HEAD      # the commits under review
+git branch --show-current           # <START>; empty means detached HEAD
 git status --porcelain              # must print nothing
 git for-each-ref --format='%(refname) %(objectname)' refs/heads > "$SCRATCH/refs-before.txt"
 ```
 
-A `HEAD` that isn't the commit the user meant, a detached `HEAD`, or any `status --porcelain` output is off track. Don't stash or clean it yourself, because it may be the user's work. Branch refs are shared by every worktree of the repository, so the snapshot also covers branches checked out elsewhere.
+Check the log against the user's request. It is off track if a command fails, the log is empty or not the commits the user meant (a SHA base that is not an ancestor of `HEAD` shows up here as extra commits), `HEAD` is detached, or the tree is dirty. Don't stash or clean anything, because it may be the user's work. Branch refs are shared by every worktree, so the snapshot also covers branches checked out elsewhere.
 
-Create the ledger at `$SCRATCH/ledger.md`. Each round appends the `HEAD` SHA it reviewed and one line per finding: which reviewer(s) raised it, a short title, and your verdict (accepted, rejected, or already addressed) with a phrase of reasoning. The ledger lets you recognize repeats and recover from a bad fix, and it holds up even if your context is compacted. Old round SHAs also stay reachable through the reflog, so `git diff <round-N sha> HEAD` shows what any round changed.
+Create the ledger at `$SCRATCH/ledger.md`. Each round appends its pass and round number, the range it reviewed, and one line per finding: which reviewer(s) raised it, a short title, your verdict (accepted, insignificant, rejected, or already addressed) with a phrase of reasoning, and the fix commit for accepted ones. The ledger lets you recognize repeats across passes, and it survives compaction.
 
-## The round (repeat up to 3 times)
+## A pass (up to 3)
 
-### 1. Clear both reviewers
-
-```bash
-herdr agent prompt claude-reviewer '/clear'
-herdr agent prompt codex-reviewer '/clear'
-```
-
-`/clear` resets the conversation and returns to the input box immediately, so don't use `--wait`. Codex sometimes leaves `/clear` sitting in the box. Read each screen (`herdr agent read <name> --source visible --lines 40`) and press `herdr agent send-keys <name> enter` if the text is still there. Then check that the earlier conversation is gone and `herdr agent list` shows both `idle`. If `/clear` is rejected ("Unrecognized command" or similar), report it to the user rather than guessing at a substitute. Clear a stale command from the box with `ctrl+u`.
-
-### 2. Both review HEAD, in parallel
-
-Record the round first (`git rev-parse HEAD` into the ledger). Then start both reviews without `--wait`, so they run at the same time:
+### Clear both reviewers
 
 ```bash
-herdr agent prompt claude-reviewer '/code-review HEAD'
-herdr agent prompt codex-reviewer '$code-review'
+herdr agent prompt <CLAUDE_PANE> '/clear'
+herdr agent prompt <CODEX_PANE> '/clear'
 ```
 
-Single quotes keep the shell from expanding `$code-review`. Codex takes the `$` form and rejects `/code-review` with "Unrecognized command".
+`/clear` returns to the input box immediately, so don't use `--wait`. Codex sometimes leaves `/clear` sitting in the box: read each screen (`herdr agent read <pane> --source visible --lines 40`) and press `herdr agent send-keys <pane> enter` if it's still there. Check that the earlier conversation is gone and both are `idle`. If `/clear` is rejected ("Unrecognized command" or similar), report it rather than guessing at a substitute.
 
-Confirm that each prompt was actually submitted. `$code-review` can open Codex's skill picker and leave the text in the box. If the box still holds the text, press Enter (`herdr agent send-keys codex-reviewer enter`). If Codex replies that the `$code-review` skill isn't installed and asks what to review, answer: `Review the most recent commit, HEAD (<sha>), for bugs and regressions.`
+Clear only here, at the start of a pass, never between rounds.
 
-Then wait for both, with a 10-minute timeout each (`herdr agent wait <name> --timeout 600000`). The two finish differently:
+### A round (up to 3 per pass)
 
-- **Claude's `/code-review` runs in the background**, so the agent can look idle long before the review is done. Wait for its "finished" line and the final report, not just for idle.
-- **Codex fans out to five sub-reviewers**, and it can idle briefly between them. After the wait returns, confirm that the consolidated report (a "Reviewed HEAD <sha>" style headline followed by findings) is actually on screen.
+#### 1. Pick the range
 
-**Don't touch the working tree while either review runs.** Even a scratch edit inside the repo would change what Codex reviews. `agent prompt` and `agent wait` can report a stall or timeout while the agent is still working fine. Read the screen before concluding anything, and never resend a review prompt without looking first.
+Name ranges by full SHA, never `HEAD`, because `HEAD` moves as you commit.
 
-### 3. Collect the reports
+- **Round 1 of a pass** reviews `<BASE>..<tip>`, with `<tip>` from `git rev-parse HEAD` now. In later passes this includes earlier fix commits, which is the point: the fresh session judges the whole change as it now stands.
+- **Later rounds** review `<prev>..<tip>`, where `<prev>` is the tip the previous round reviewed: just the fix commits made in response to it.
+
+Record the pass, round and range in the ledger.
+
+#### 2. Write the review prompts
+
+Round 1 of a pass:
+
+```text
+/code-review <from>..<to> Begin the report with the line `Reviewed <from>..<to>`, as plain text.   (Claude)
+$code-review <from>..<to> Begin the report with the line `Reviewed <from>..<to>`, as plain text.   (Codex)
+```
+
+Codex takes the `$` form and rejects `/code-review` with "Unrecognized command".
+
+A later round appends to each prompt a note about that reviewer's own findings from the previous round. It goes in the review request itself, so the sub-reviewers that do the reviewing see it too:
+
+```text
+Context: these commits respond to your review of <prev-from>..<from>. They fix these of your findings: <title> (<short sha>), ... I declined these: <title>: <one-phrase reason>, ... Check the fixes, and say if a decline is wrong.
+```
+
+A reviewer with no findings last round gets `Context: these commits respond to your review of <prev-from>..<from>, which found no defects; they fix findings from the other reviewer. Review them on their own merits.` List only that reviewer's findings, only from this pass, and keep reasons to a phrase. The note lets the reviewer check fixes and rebut declines; it is not there to argue.
+
+Write each prompt, on a single line, to a new file: `$SCRATCH/prompt-claude-p<P>r<R>.txt` and `$SCRATCH/prompt-codex-p<P>r<R>.txt`. Files avoid shell quoting trouble with apostrophes and `$`; a new name per round means a failed write can't resend an old prompt; and a newline would act as Enter and submit the prompt cut short.
+
+#### 3. Both review the range, in parallel
 
 ```bash
-herdr agent read claude-reviewer --source recent-unwrapped --lines 400 > "$SCRATCH/claude-round<N>.txt"
-herdr agent read codex-reviewer  --source recent-unwrapped --lines 400 > "$SCRATCH/codex-round<N>.txt"
+.claude/skills/review-cycle/scripts/send-review.sh "$SCRATCH" <P> <R> <CLAUDE_PANE> <CODEX_PANE>
 ```
 
-`recent-unwrapped` joins wrapped lines. Read the final reports only: the findings with their file and line references, the recommendations, and any design assessment. Skip the tool-call transcript and the process recap ("all five reviewers agreed…"), because a recap borrows authority the findings should earn on their own.
+The script sends nothing if either file is missing or spans several lines (go off track), sends the two prompts independently without waiting, and restores the reviewers' names. A non-zero exit after sending doesn't prove a prompt wasn't delivered, so read both screens before doing anything else.
 
-### 4. Synthesize
+Confirm that each prompt was submitted:
 
-Turn the two reports into one list of distinct findings. The reviewers often report the same issue in different words, so merge those and note that both raised it. Agreement is a reason to look closely, not proof. Then judge each finding against the code yourself:
+- **Codex:** `$code-review` can open the skill picker and leave the text in the box. If it's still there, press Enter (`herdr agent send-keys <CODEX_PANE> enter`). If Codex says the `$code-review` skill isn't installed and asks what to review, answer `Review the commits <from>..<to> as one change, for bugs and regressions. Begin the report with the line Reviewed <from>..<to> as plain text.`, plus the `Context:` note in a later round, sent from its own file `$SCRATCH/prompt-codex-p<P>r<R>-fallback.txt`.
+- **Claude:** text left in Claude's box after a review is usually Claude Code's dimmed prompt suggestion, not a draft, and a new prompt simply replaces it. Check with `herdr agent read <CLAUDE_PANE> --source visible --lines 4 --format ansi | cat -v`: `^[[2m` means dimmed. Never press Enter on it. Undimmed text is the user's own draft: save it to `$SCRATCH`, clear it with `ctrl+e ctrl+u`, and mention it in the report.
 
-- **Accept** it when you can confirm the defect or agree that the change improves the commit. A design suggestion that would be a worthwhile change counts too.
-- **Reject** it when it is wrong, speculative without a concrete failure, out of scope for this commit, or a matter of taste the codebase doesn't share.
-- **Already addressed** applies only when a branch was named and a later commit on it already fixes the problem (check with `git log`/`git show <BRANCH>`). Fixing it here as well would make the rebase conflict.
-- **Repeats** are findings you rejected in an earlier round, per the ledger. Keep the old verdict unless this round gives new reasoning or evidence, and then judge it afresh. Don't reject something just because a reviewer raised it before.
+Then wait for both (`herdr agent wait <pane> --timeout 600000`):
 
-Append every verdict to the ledger. If nothing was accepted, the cycle has converged. Skip to "Finish". Do the same if both reviews came back with no findings at all.
+- **Claude's `/code-review` runs in the background**, so the agent can look idle long before the review is done. Wait for its `Agent "/code-review <from>…" finished` line and the report after it.
+- **Codex fans out to five sub-reviewers** and can idle briefly between them. After the wait returns, confirm the consolidated report is on screen.
 
-### 5. Fix and amend
+**Don't touch the working tree while either review runs.** Even a scratch edit inside the repo changes what the sub-reviewers read. A stall or timeout doesn't mean the agent isn't working: read the screen before concluding anything, and never resend a review prompt without looking first.
 
-Fix the accepted findings, then run the validation the repo requires for those changes (see `.agents/kb/testing.md`). If a fix breaks validation and you can't resolve it, go off track rather than amending a broken commit.
-
-Amend the fixes into the commit. The tree was clean when the cycle started, so every change in it is yours. Still, look at `git status` before staging to make sure nothing stray (a scratch file, a build output) gets swept in. If the fixes change what the commit does, rewrite the message so it describes the commit as it now stands, following the repo's conventions. Don't mention the review rounds, because the message should read as if the commit had been written right the first time.
+#### 4. Collect the reports
 
 ```bash
-git add -A && git commit --amend            # or --amend --no-edit if the message still fits
-git status --porcelain                      # must print nothing
-git rev-parse HEAD^                         # must still equal <BASE>
+herdr agent read <CLAUDE_PANE> --source recent-unwrapped --lines 400 > "$SCRATCH/claude-p<P>r<R>.txt"
+herdr agent read <CODEX_PANE>  --source recent-unwrapped --lines 400 > "$SCRATCH/codex-p<P>r<R>.txt"
 ```
 
-Then go on to the next round. If this was round 3, the fixes you just amended have not been reviewed. Go to "Finish" and say so plainly.
+Within a pass the screen still holds earlier rounds, so read only this round's report: for Codex, from the `Reviewed <from>..<to>` line for this round's range; for Claude, after the `finished` line whose `<from>` matches this round's. Each report must name the range you asked for (SHA prefixes of 7+ characters count). If the report is missing, read once more with a larger `--lines`; a report that is still missing, or that reviewed a different range, is off track.
+
+Read the findings, recommendations and any design assessment. Skip the tool-call transcript and the process recap ("all five reviewers agreed…"): a recap borrows authority the findings should earn on their own.
+
+#### 5. Synthesize
+
+Merge the two reports into one list of distinct findings, noting which reviewer(s) raised each. Agreement is a reason to look closely, not proof. Judge each finding against the code yourself:
+
+- **Accept** it when you can confirm the defect or agree the change improves the code, design suggestions included.
+- **Insignificant** marks an accepted finding whose fix changes no behavior and no meaningful design: wording, naming, comments, formatting, a redundant line. You may fix it, but it doesn't earn another round.
+- **Reject** it when it is wrong, speculative without a concrete failure, out of scope for the range, or a matter of taste the codebase doesn't share.
+- **Already addressed** applies only when a branch was named and a later commit on it already fixes the problem (check with `git log`/`git show <BRANCH>`). Fixing it here too would make the rebase conflict.
+- **Repeats** of findings you rejected earlier keep the old verdict, unless this round brings new reasoning or evidence, such as a rebuttal to your note.
+
+Append every verdict to the ledger.
+
+#### 6. Fix and commit
+
+If nothing was accepted, skip to step 7. Otherwise fix the accepted findings and run the validation the repo requires for those changes (see `.agents/kb/testing.md`). If you can't make validation pass, go off track rather than committing broken code.
+
+Reviewers share the checkout and have been seen to `git checkout <sha>` mid-review, so first check `git branch --show-current` is still `<START>`. If `HEAD` is detached at `<START>`'s tip with a clean tree, `git switch <START>` and note it in the report; anything else is off track.
+
+Make one commit for the round, on top. Never amend. Look at `git status` first so nothing stray gets swept in. Follow the repo's message conventions and describe what the fixes change and why, as a commit someone would write on their own, without mentioning reviewers, passes or rounds. Write the message to a new file so no editor opens and a failed write can't reuse an old one:
+
+```bash
+git add -A && git commit -F "$SCRATCH/commit-p<P>r<R>.txt"
+git status --porcelain                         # must print nothing
+git merge-base --is-ancestor <REVIEWED> HEAD   # must succeed: the reviewed commits are untouched
+```
+
+#### 7. Decide
+
+- **Something significant was accepted:** start the next round, or, after round 3, end the pass. The next pass's fresh review covers the fixes.
+- **Nothing significant was accepted** (all rejected, insignificant or already addressed, or no findings): end the pass.
+
+### After a pass
+
+- If the pass ended in **round 1**, the fresh review found nothing significant and the cycle has converged. Go to "Finish".
+- Otherwise start the next pass. After pass 3, go to "Finish" and say plainly that the pass limit stopped the cycle before a fresh review came back clean.
 
 ## Finish
 
 ### Rebase, if a branch was named
 
-The branch was built on the old `<REVIEWED>` commit, which the amends rewrote. A plain `git rebase` would replay the old commit on top of the new one and conflict. Cut it off with `--onto`:
+The branch was built on `<REVIEWED>`; `<START>` now has fix commits on top of it. Replay the branch's own commits onto the new tip:
 
 ```bash
-git rev-parse <BRANCH>                       # call this <OLD_BRANCH> (also in refs-before.txt)
+git rev-parse <BRANCH>                       # <OLD_BRANCH>
 git rebase --onto <START> <REVIEWED> <BRANCH>
 git switch <START>                           # leave the shared checkout where the cycle began
 ```
 
-If the rebase stops on a conflict, resolve it only if the conflict comes straight from your fixes and the resolution is obvious. Otherwise, or if anything looks unclear, abort (`git rebase --abort`) and go off track.
+Resolve a conflict only if it comes straight from your fixes and the resolution is obvious. Otherwise `git rebase --abort` and go off track.
 
 ### Verify with git
 
 ```bash
-git status                                                   # clean, no rebase in progress
-git rev-list --count <BASE>..<START>                         # 1: still a single, squashed commit
+git status                                                   # clean, no rebase in progress, on <START>
+git merge-base --is-ancestor <REVIEWED> <START>              # the reviewed commits are untouched
+git log --oneline <REVIEWED>..<START>                        # exactly the fix commits in the ledger
 git range-diff <REVIEWED>..<OLD_BRANCH> <START>..<BRANCH>    # with a branch
 git for-each-ref --format='%(refname) %(objectname)' refs/heads > "$SCRATCH/refs-after.txt"
 diff "$SCRATCH/refs-before.txt" "$SCRATCH/refs-after.txt"
 ```
 
-The range-diff must pair every old branch commit with a rebased one (`=`, or `!` where a conflict was resolved, which you should reread). A `<` line means a commit was lost. The ref diff may show only `<START>` changing, plus `<BRANCH>` when one was named. If no round accepted anything, nothing should have changed. Anything else is off track.
+The range-diff must pair every old branch commit with a rebased one (`=`, or `!` where you resolved a conflict, which you should reread); a `<` line means a lost commit. Only `<START>`, and `<BRANCH>` if named, may have moved; if nothing was accepted, nothing should have. Anything else is off track.
 
 ## Report
 
 Give the user a short summary:
 
-- **Rounds:** how many ran, and why the cycle stopped (converged, or round limit).
-- **Per round:** findings raised by each reviewer, which you fixed, and which you rejected or found already addressed, with a phrase of reasoning each.
-- **Commit:** the final hash and message subject.
-- **Rebase:** the state of the rebased branch, or that no rebase was requested.
+- **Passes and rounds:** how many ran, why the cycle stopped (converged or pass limit), and why each pass ended (clean round or round limit).
+- **Per round:** each reviewer's findings, which you fixed (with the commit), judged insignificant, rejected or found already addressed, with a phrase of reasoning each. Note any decline a reviewer rebutted.
+- **Commits:** the fix commits on top of `<REVIEWED>`, by hash and subject.
+- **Rebase:** the rebased branch's state, or that none was requested.
 
-Say plainly if a step was skipped, a check was not run, or the last round's fixes went unreviewed because the round limit was reached. In that case, offer to run another round.
+Say plainly if a step was skipped or a check not run, and which fixes went unreviewed (insignificant fixes in a pass's last round, or anything after the pass limit). If the pass limit was reached, offer another pass. Offer to squash the fix commits into the reviewed ones; don't do it unasked.
 
 ## Off track
 
-Stop and tell the user what you saw when any of these happens:
+Stop and tell the user what you saw when:
 
-- A reviewer is `blocked` on an approval or question dialog. Read it, but never answer it yourself. The one exception is the scripted Codex "skill isn't installed" reply above.
+- A reviewer is `blocked` on an approval or question dialog. Read it, but never answer it yourself, except for the scripted Codex "skill isn't installed" reply above.
 - A wait times out, or a reviewer sits `working` far past the expected time.
-- A review has no recognizable final report.
+- A review has no recognizable report, or reviewed something other than the range you named.
 - Your fixes fail validation and you can't resolve it.
+- `HEAD` has left `<START>` in a way you can't safely restore.
 - The rebase hits a conflict you can't resolve, or leaves a dirty tree.
 - Any branch other than `<START>` and the named branch moves.
-- At the start, `HEAD` is not the commit the user meant, `HEAD` is detached, or the tree is dirty.
+- At the start, the range is not what the user meant, `HEAD` is detached, or the tree is dirty.
 
 Do not retry a mutating step (resending a prompt, re-running the rebase) until you have inspected the agent's screen and the git state. A timeout or stall does not prove the prompt was not delivered.
