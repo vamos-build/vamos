@@ -19,12 +19,12 @@ func TestGraphExamples(t *testing.T) {
 		flags   []string
 	}{
 		{
-			dir:     "../../examples/typescript-mcp",
+			dir:     "../../examples/fastmcp",
 			targets: []string{"server"},
 		},
 		{
-			dir:     "../../examples/fastmcp",
-			targets: []string{"server"},
+			dir:     "../../examples/golang-cli",
+			targets: []string{"echo"},
 		},
 		{
 			dir:     "../../examples/strawberry-react",
@@ -32,8 +32,12 @@ func TestGraphExamples(t *testing.T) {
 			flags:   []string{"--set", "registry=registry.example/strawberry"},
 		},
 		{
-			dir:     "../../examples/golang-cli",
-			targets: []string{"echo"},
+			dir:     "../../examples/typescript-mcp",
+			targets: []string{"server"},
+		},
+		{
+			dir:     "../../examples/typescript-ui",
+			targets: []string{"frontend"},
 		},
 	}
 	for _, tt := range tests {

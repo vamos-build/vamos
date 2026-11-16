@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "pulls": {
+    "docker.io/library/fedora:44": {
+      "tag": "44",
+      "digest": "sha256:15da97ed9aa94dd3d92c3925eb89520f6c80e07ea7ee24cba848d1f8b6912b3e"
+    },
+    "docker.io/library/golang:1.26-bookworm": {
+      "tag": "1.26.11-bookworm",
+      "digest": "sha256:dc40a13b61304647ed7e5d581d246b86413dfc29d63c6d018310feb93cd98fc0"
+    }
+  }
+}

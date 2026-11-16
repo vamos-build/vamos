@@ -218,6 +218,7 @@ The project is complete and ready to build:
 ```text
 typescript-ui/
 ├── BUILD
+├── WORKSPACE
 ├── package.json
 ├── pnpm-lock.yaml
 ├── pnpm-workspace.yaml
