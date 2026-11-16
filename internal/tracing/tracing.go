@@ -6,9 +6,9 @@ import (
 	"encoding/hex"
 	"fmt"
 	"reflect"
+	"strings"
 	"sync"
 	"time"
-	"unicode/utf8"
 )
 
 // Span is one thing that a process did, from its start to its end, or at an instant.
@@ -118,8 +118,6 @@ const maxStubName = 1 << 10
 // it refuses each span that would pass that, and Snapshot counts them.
 // A span that ends later and fits is still kept, so that the target and job spans that hold the others,
 // which end last and are small, survive a large span refused.
-// A recorder that passes spans to a callback passes a span over MaxSpanSize as its stub,
-// which keeps its place in the trace, so that the spans within it still have a parent, but drops its arguments.
 type Recorder struct {
 	process string
 	prefix  string // of its spans' IDs, so that no two recorders' collide
@@ -135,7 +133,8 @@ type Recorder struct {
 
 // NewRecorder returns a recorder of the spans of process.
 // If onEnd isn't nil, it passes each span to onEnd as it ends instead of keeping it, as its stub if it is over
-// MaxSpanSize.
+// MaxSpanSize: the stub keeps its place in the trace, so that the spans within it still have a parent,
+// but drops its arguments.
 // onEnd may be called from several goroutines at once.
 // The callback runs outside recorder and Active locks, and must not mutate the span's Args map.
 func NewRecorder(process string, onEnd func(Span)) *Recorder {
@@ -198,11 +197,7 @@ func bounded(s Span) Span {
 	}
 	s.Args = map[string]any{"dropped": why} // a new map: s's own is the caller's
 	if len(s.Name) > maxStubName {
-		n := maxStubName
-		for n > 0 && !utf8.RuneStart(s.Name[n]) {
-			n--
-		}
-		s.Name = s.Name[:n] + "…"
+		s.Name = strings.ToValidUTF8(s.Name[:maxStubName], "") + "…" // dropping a rune the cut split
 	}
 	return s
 }
