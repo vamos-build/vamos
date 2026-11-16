@@ -47,9 +47,6 @@ A new example needs a `WORKSPACE` file as well.
 - **Cached vulnerability checks.**
   `vulnerabilities` reruns only when its inputs change, but the vulnerability database changes when the code doesn't:
   run it with `--rebuild`.
-- **Pins outside the update process.**
-  The [update-dependencies skill](../../.claude/skills/update-dependencies/SKILL.md) doesn't yet update
-  the root `vamos.lock` or the tool versions in `check-tools`.
 - **Go as cached, not as pinned.**
   `check-tools` installs whatever Go Fedora ships when the layer is built, and keeps it while the layer stays cached,
   so two machines on the same commit can check with different Go versions.
