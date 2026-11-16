@@ -96,7 +96,8 @@ func (at attribution) args() []any {
 		paths []string
 	}{{"added", at.added}, {"removed", at.removed}, {"changed", at.changed}} {
 		if len(files.paths) > 0 {
-			args = append(args, files.name, files.paths[:min(len(files.paths), maxReportedFiles)],
+			// A copy, so that the span doesn't keep every path alive while its recorder holds it.
+			args = append(args, files.name, slices.Clone(files.paths[:min(len(files.paths), maxReportedFiles)]),
 				files.name+" count", len(files.paths))
 		}
 	}

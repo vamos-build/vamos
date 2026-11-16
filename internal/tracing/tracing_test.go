@@ -5,8 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 // TestDisabled checks that spans started without a recorder do nothing, and that their methods are safe to call.
@@ -23,6 +26,44 @@ func TestDisabled(t *testing.T) {
 	Instant(ctx, "skipped")
 	if Call(ctx) != nil || Enabled(ctx) {
 		t.Error("a context without a recorder asks for tracing")
+	}
+}
+
+// TestCallbackBoundsSpans checks that a recorder passes its callback a span over MaxSpanSize as a stub that keeps its
+// place, its name cut, and says why its arguments are gone, and passes smaller spans whole.
+func TestCallbackBoundsSpans(t *testing.T) {
+	var streamed []Span
+	r := NewRecorder("worker", func(s Span) { streamed = append(streamed, s) })
+	ctx := WithRecorder(context.Background(), r, "client-1")
+	ctx, layer := StartTrack(ctx, `layer "app"`, `layer "app"`)
+	name := `build_env(["HUGE=` + strings.Repeat("é", MaxSpanSize) + `"])`
+	_, huge := Start(ctx, name, "values", []string{strings.Repeat("x", 2*MaxSpanSize)})
+	huge.End()
+	_, small := Start(ctx, "small", "values", []string{"A=b"})
+	small.End()
+	layer.End()
+
+	if len(streamed) != 3 {
+		t.Fatalf("streamed %d spans, want 3", len(streamed))
+	}
+	for _, s := range streamed {
+		if size, ok := spanSize(s); !ok || size > MaxSpanSize {
+			t.Errorf("%.40s: encoded in %d bytes, want at most %d", s.Name, size, MaxSpanSize)
+		}
+	}
+	stub := streamed[0]
+	if stub.ID != huge.ID() || stub.Parent != layer.ID() || stub.Track != `layer "app"` || stub.End.IsZero() {
+		t.Errorf("stub = %+v, want the large span's ID, parent, track and times", stub)
+	}
+	if !utf8.ValidString(stub.Name) || !strings.HasPrefix(name, strings.TrimSuffix(stub.Name, "…")) ||
+		len(stub.Name) > maxStubName+len("…") {
+		t.Errorf("stub name is %d bytes, want the large span's cut to at most %d", len(stub.Name), maxStubName)
+	}
+	if why, _ := stub.Args["dropped"].(string); len(stub.Args) != 1 || !strings.Contains(why, "bytes encoded") {
+		t.Errorf("stub args = %.200v, want only why they were dropped", stub.Args)
+	}
+	if got := streamed[1].Args["values"]; !reflect.DeepEqual(got, []string{"A=b"}) {
+		t.Errorf("small span's values = %v, want them whole", got)
 	}
 }
 

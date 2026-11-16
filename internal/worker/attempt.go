@@ -110,6 +110,11 @@ func (w *Worker) execute(ctx context.Context, reg remote.Registration, a *remote
 
 	// What the subprocess prints is sent in batches, and its last line is its report.
 	report, readErr := w.relay(cctx, a.Attempt, stdout)
+	if readErr != nil {
+		// Nothing reads its output any more, such as past a line too long, so it would block writing the rest
+		// while its lease is renewed: it is killed, and the attempt fails.
+		cancel()
+	}
 	waitErr := cmd.Wait()
 	stopBeat()
 	select {

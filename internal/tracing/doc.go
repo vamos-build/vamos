@@ -8,6 +8,8 @@
 // A recorder that keeps spans keeps at most twice MaxTraceSize of them, by their encoded size,
 // refusing each span that would pass that and counting it as Lost, so that its memory is bounded
 // whatever a build records.
+// A recorder that passes spans to a callback passes none over MaxSpanSize, encoded,
+// but a stub of it without its arguments, so that whoever sends spans one at a time can always send each.
 // Every stored trace document begins with a Header, whose Version and Kind say how to read the rest,
 // and fits in MaxTraceSize whole.
 //

@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 // Span is one thing that a process did, from its start to its end, or at an instant.
@@ -103,12 +104,22 @@ type CallContext struct {
 	Parent string `json:"parent"`
 }
 
+// MaxSpanSize bounds each span, encoded, that a recorder passes to its callback,
+// so that a callback that sends spans one at a time, as an attempt's subprocess prints each on a line of its own,
+// never meets one larger than its transport takes: it is well within an attempt's line and one batch of its events.
+const MaxSpanSize = 1 << 20
+
+// maxStubName bounds the name a span over MaxSpanSize keeps, which may hold all of a run step's argv.
+const maxStubName = 1 << 10
+
 // Recorder collects the spans of one process, or of one call to an executor, as they end.
 // A recorder that keeps spans counts each one's encoded size as it ends,
 // and keeps at most twice MaxTraceSize of them, so that its memory is bounded:
 // it refuses each span that would pass that, and Snapshot counts them.
 // A span that ends later and fits is still kept, so that the target and job spans that hold the others,
 // which end last and are small, survive a large span refused.
+// A recorder that passes spans to a callback passes a span over MaxSpanSize as its stub,
+// which keeps its place in the trace, so that the spans within it still have a parent, but drops its arguments.
 type Recorder struct {
 	process string
 	prefix  string // of its spans' IDs, so that no two recorders' collide
@@ -123,7 +134,8 @@ type Recorder struct {
 }
 
 // NewRecorder returns a recorder of the spans of process.
-// If onEnd isn't nil, it passes each span to onEnd as it ends instead of keeping it.
+// If onEnd isn't nil, it passes each span to onEnd as it ends instead of keeping it, as its stub if it is over
+// MaxSpanSize.
 // onEnd may be called from several goroutines at once.
 // The callback runs outside recorder and Active locks, and must not mutate the span's Args map.
 func NewRecorder(process string, onEnd func(Span)) *Recorder {
@@ -159,7 +171,7 @@ func (r *Recorder) newID() string {
 // add records the ended span s, or refuses it if it can't be encoded or would pass the recorder's limit.
 func (r *Recorder) add(s Span) {
 	if r.onEnd != nil {
-		r.onEnd(s) // which keeps it, so that the recorder needn't hold a copy no one reads
+		r.onEnd(bounded(s)) // which keeps it, so that the recorder needn't hold a copy no one reads
 		return
 	}
 	size, ok := spanSize(s) // outside the lock, since encoding takes longer than appending
@@ -171,6 +183,28 @@ func (r *Recorder) add(s Span) {
 	}
 	r.size += size
 	r.spans = append(r.spans, s)
+}
+
+// bounded returns s if it encodes in at most MaxSpanSize, or else its stub: s without its arguments, which say why,
+// and with its name cut to maxStubName.
+func bounded(s Span) Span {
+	size, ok := spanSize(s)
+	if ok && size <= MaxSpanSize {
+		return s
+	}
+	why := "its arguments couldn't be encoded"
+	if ok {
+		why = fmt.Sprintf("the span was %d bytes encoded, over %d", size, MaxSpanSize)
+	}
+	s.Args = map[string]any{"dropped": why} // a new map: s's own is the caller's
+	if len(s.Name) > maxStubName {
+		n := maxStubName
+		for n > 0 && !utf8.RuneStart(s.Name[n]) {
+			n--
+		}
+		s.Name = s.Name[:n] + "…"
+	}
+	return s
 }
 
 // recording is what a context says about tracing: where spans go, and the span that new ones are part of.
