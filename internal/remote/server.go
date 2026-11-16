@@ -106,11 +106,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST "+pathCancel, s.cancel)
 	mux.HandleFunc("POST "+pathRelease, s.release)
 	mux.HandleFunc("GET "+pathResult, s.result)
+	mux.HandleFunc("GET "+pathTrace, s.trace)
 	mux.HandleFunc("POST "+pathPrune, s.prune)
 	mux.HandleFunc("POST "+pathMissing, s.missing)
 	mux.HandleFunc("POST "+pathReadMany, s.readMany)
 	mux.HandleFunc("POST "+pathBlobs, s.put)
 	mux.HandleFunc("HEAD "+pathBlob, s.has)
+	mux.HandleFunc("GET "+pathStat, s.stat)
 	mux.HandleFunc("GET "+pathBlob, s.get)
 	mux.HandleFunc("PUT "+pathBlob, s.importBlob)
 	if s.Workers != nil {
@@ -369,6 +371,16 @@ func (s *Server) result(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, outcome)
 }
 
+// trace answers with the blob of the job's manifest.
+func (s *Server) trace(w http.ResponseWriter, r *http.Request) {
+	b, err := s.Executor.Trace(r.Context(), api.JobID(r.PathValue("id")))
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, b)
+}
+
 // blobOf returns the blob that r names: its digest in the path and its size in the query.
 func blobOf(r *http.Request) (cache.Blob, error) {
 	size, err := strconv.ParseInt(r.URL.Query().Get("size"), 10, 64)
@@ -399,6 +411,16 @@ func (s *Server) has(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusOK)
+}
+
+// stat answers which blob, with its size, the store holds under the digest.
+func (s *Server) stat(w http.ResponseWriter, r *http.Request) {
+	b, err := s.Content.Stat(r.Context(), digest.Digest(r.PathValue("digest")))
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, b)
 }
 
 // rangeStart returns the offset that r's Range header asks to start from, "bytes=N-", or 0 without one.

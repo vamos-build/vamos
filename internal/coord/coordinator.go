@@ -218,7 +218,7 @@ func (c *Coordinator) recover(kept []*record) error {
 		var err error
 		switch {
 		case !r.Evicted.IsZero():
-			c.jobs.RememberEvicted(r.ID)
+			c.jobs.RememberEvicted(r.ID, r.Trace)
 		case r.Outcome != nil:
 			err = c.restore(r)
 		case r.Publish != nil:
@@ -441,17 +441,27 @@ func (c *Coordinator) Submit(ctx context.Context, req api.Request) (api.JobID, e
 func (c *Coordinator) build(g api.GraphRequest, native []string) func(ctx context.Context,
 	ev sched.Events) api.Outcome {
 	return func(ctx context.Context, ev sched.Events) api.Outcome {
-		// The generation is checked once the build is open, since no prune starts then: checked before, a prune
-		// could run between the check and the build's start.
-		if err := c.checkGeneration(ctx, g.Generation); err != nil {
-			return sched.Failed(err)
-		}
-		results, err := c.run(ctx, g, native, ev)
-		if err != nil {
-			return sched.Failed(err)
-		}
-		return api.Outcome{Results: results}
+		return c.traced(ctx, func(ctx context.Context) api.Outcome {
+			// The generation is checked once the build is open, since no prune starts then: checked before, a prune
+			// could run between the check and the build's start.
+			if err := c.checkGeneration(ctx, g.Generation); err != nil {
+				return sched.Failed(err)
+			}
+			results, err := c.run(ctx, g, native, ev)
+			if err != nil {
+				return sched.Failed(err)
+			}
+			return api.Outcome{Results: results}
+		})
 	}
+}
+
+// traced runs work, a job's, as sched.RunJob does, storing its manifest in the coordinator's content store, and
+// reporting a manifest that can't be stored to Warn.
+func (c *Coordinator) traced(ctx context.Context, work func(context.Context) api.Outcome) api.Outcome {
+	id := jobOf(ctx)
+	return sched.RunJob(ctx, func() (cache.ContentStore, error) { return c.content, nil },
+		func(err error) { c.cfg.Warn(fmt.Errorf("the job %s: %w", id, err)) }, work)
 }
 
 // begin starts a job as spec says, which runs work, with r its record, which the journal writes once the job is
@@ -580,8 +590,6 @@ func (c *Coordinator) offer(id api.JobID, native []string) func(platform string)
 // on a worker of its image's platform if native names it or the deployment offers it, as offer says.
 func (c *Coordinator) run(ctx context.Context, req api.GraphRequest, native []string, ev sched.Events) (
 	_ []api.Result, err error) {
-	ctx, flush := sched.ForCall(ctx, req.Trace, ev)
-	defer flush()
 	ctx, span := tracing.StartTrack(ctx, "run", "run", "graph", req.Graph.Digest.String(), "rebuild", req.Rebuild)
 	defer func() { span.EndWith(err) }()
 	data, err := c.content.Read(ctx, req.Graph, maxGraphSize)
@@ -607,7 +615,7 @@ func (c *Coordinator) run(ctx context.Context, req api.GraphRequest, native []st
 	// An action whose image's platform the build runs natively waits for a worker of it rather than being emulated,
 	// even if none is registered now, as after a restart.
 	opts := sched.Options{Rebuild: req.Rebuild, Timestamp: req.Timestamp, Emulate: req.Emulate, OptIn: true,
-		Bound: c.cfg.Bound, Native: native, Offered: c.offer(jobOf(ctx), native)}
+		Bound: c.cfg.Bound, Native: native, Offered: c.offer(jobOf(ctx), native), Workspace: req.Workspace}
 	return sched.New(g, b, ev, opts).Run(ctx)
 }
 
@@ -638,6 +646,13 @@ func (c *Coordinator) Cancel(_ context.Context, id api.JobID) error {
 	}
 	j.Cancel()
 	return nil
+}
+
+// Trace returns the blob of the job id's manifest while the coordinator remembers the job: while it is held, and
+// after it is evicted, from what its jobs table remembers, which a restart with Config.State restores from the
+// journal's tombstones.
+func (c *Coordinator) Trace(_ context.Context, id api.JobID) (cache.Blob, error) {
+	return c.jobs.Trace(id)
 }
 
 // Release lets go of the job id: a finished build is evicted at the next sweep, and a running one's demand is
@@ -696,6 +711,9 @@ func (c *Coordinator) Prune(ctx context.Context) (api.JobID, error) {
 			return sched.Failed(fmt.Errorf("the content is cleared, but the results aren't, so cached layers name "+
 				"logs that are gone: prune again; %w", err))
 		}
+		// Target histories unused for their retention go next, before the tags, whose failure ends the job;
+		// a failure here is a warning, and leaves what it couldn't remove for the next prune.
+		sched.PruneHistory(ctx, c.records, &pruned)
 		// The cache repository's tags go last: a record that named one is gone already, so a failure here leaves
 		// the registry holding images nothing names, which the next prune removes.
 		if c.cfg.CacheRepository != "" && c.cfg.Images != nil {
@@ -714,30 +732,30 @@ func (c *Coordinator) submitPush(ctx context.Context, req api.PushRequest) (api.
 		return "", err
 	}
 	return c.begin(ctx, record{Push: &req}, sched.Spec{}, func(ctx context.Context, ev sched.Events) api.Outcome {
-		ctx, flush := sched.ForCall(ctx, req.Trace, ev)
-		defer flush()
-		ctx, span := tracing.StartTrack(ctx, "push", "push to "+req.Destination)
-		ctx = withBuild(ctx, buildInfo{job: jobOf(ctx)})
-		rep, err := c.pool.attempt(ctx, nil, &remote.PushWork{Mode: remote.ModePush, Result: req.Result,
-			Destination: req.Destination},
-			sched.OutputFunc(func(byte, []byte) {}))
-		span.EndWith(err)
-		switch {
-		case errors.Is(err, context.Canceled):
-			err = fmt.Errorf("%w: the push was cancelled, and the destination %s may or may not have been written; "+
-				"check it, or push again", err, req.Destination)
-		case err != nil:
-		case rep.Failure != nil:
-			err = rep.Failure.Err()
-		case rep.Pushed == nil:
-			err = errors.New("the worker pushed nothing")
-		}
-		if err != nil {
-			outcome := sched.Failed(err)
-			outcome.Failure.Nodes = []graph.Ref{req.Result.Node}
-			return outcome
-		}
-		return api.Outcome{Pushed: rep.Pushed}
+		return c.traced(ctx, func(ctx context.Context) api.Outcome {
+			ctx, span := tracing.StartTrack(ctx, "push", "push to "+req.Destination)
+			ctx = withBuild(ctx, buildInfo{job: jobOf(ctx)})
+			rep, err := c.pool.attempt(ctx, nil, &remote.PushWork{Mode: remote.ModePush, Result: req.Result,
+				Destination: req.Destination},
+				sched.OutputFunc(func(byte, []byte) {}))
+			span.EndWith(err)
+			switch {
+			case errors.Is(err, context.Canceled):
+				err = fmt.Errorf("%w: the push was cancelled, and the destination %s may or may not have been "+
+					"written; check it, or push again", err, req.Destination)
+			case err != nil:
+			case rep.Failure != nil:
+				err = rep.Failure.Err()
+			case rep.Pushed == nil:
+				err = errors.New("the worker pushed nothing")
+			}
+			if err != nil {
+				outcome := sched.Failed(err)
+				outcome.Failure.Nodes = []graph.Ref{req.Result.Node}
+				return outcome
+			}
+			return api.Outcome{Pushed: rep.Pushed}
+		})
 	})
 }
 
@@ -756,49 +774,49 @@ func (c *Coordinator) submitPublish(ctx context.Context, req api.PublishRequest)
 		}
 	}
 	return c.begin(ctx, record{Publish: &req}, sched.Spec{}, func(ctx context.Context, ev sched.Events) api.Outcome {
-		ctx, flush := sched.ForCall(ctx, req.Trace, ev)
-		defer flush()
-		ctx, span := tracing.StartTrack(ctx, "publish", "publish")
-		ctx = withBuild(ctx, buildInfo{job: jobOf(ctx)})
-		uploads, i, err := c.uploadAll(ctx, req, ev)
-		if err != nil {
-			span.EndWith(err)
-			outcome := sched.Failed(err)
-			outcome.Failure.Nodes = []graph.Ref{req.Images[i].Result.Node}
-			return outcome
-		}
-		tagging := &remote.PushWork{Mode: remote.ModeTag, Tag: &remote.TagWork{
-			Images: req.Images, Tags: req.Tags, Uploads: uploads,
-		}}
-		if err := checkAssignmentSize(tagging); err != nil {
-			span.EndWith(err)
-			outcome := sched.Failed(err)
-			outcome.Failure.Nodes = []graph.Ref{req.Images[0].Result.Node}
-			return outcome
-		}
-		rep, err := c.pool.attempt(ctx, nil, tagging, outputOf(ev, req.Images[0].Result.Node))
-		switch {
-		case errors.Is(err, context.Canceled):
-			err = fmt.Errorf("%w: the publication was cancelled while it wrote its tags, which may or may not have "+
-				"been written; publish again", err)
-		case err != nil:
-		case rep.Failure != nil:
-			err = fmt.Errorf("%w; the tags may or may not have been written; publish again", rep.Failure.Err())
-		case rep.Tagged == nil:
-			err = errors.New("the worker reported no tags written")
-		}
-		if err != nil {
-			span.EndWith(err)
-			outcome := sched.Failed(err)
-			outcome.Failure.Nodes = []graph.Ref{req.Images[0].Result.Node}
-			return outcome
-		}
-		if rep.Tagged.Failure != nil {
-			span.EndWith(errors.New(rep.Tagged.Failure.Message))
-		} else {
-			span.End()
-		}
-		return *rep.Tagged
+		return c.traced(ctx, func(ctx context.Context) api.Outcome {
+			ctx, span := tracing.StartTrack(ctx, "publish", "publish")
+			ctx = withBuild(ctx, buildInfo{job: jobOf(ctx)})
+			uploads, i, err := c.uploadAll(ctx, req, ev)
+			if err != nil {
+				span.EndWith(err)
+				outcome := sched.Failed(err)
+				outcome.Failure.Nodes = []graph.Ref{req.Images[i].Result.Node}
+				return outcome
+			}
+			tagging := &remote.PushWork{Mode: remote.ModeTag, Tag: &remote.TagWork{
+				Images: req.Images, Tags: req.Tags, Uploads: uploads,
+			}}
+			if err := checkAssignmentSize(tagging); err != nil {
+				span.EndWith(err)
+				outcome := sched.Failed(err)
+				outcome.Failure.Nodes = []graph.Ref{req.Images[0].Result.Node}
+				return outcome
+			}
+			rep, err := c.pool.attempt(ctx, nil, tagging, outputOf(ev, req.Images[0].Result.Node))
+			switch {
+			case errors.Is(err, context.Canceled):
+				err = fmt.Errorf("%w: the publication was cancelled while it wrote its tags, which may or may not "+
+					"have been written; publish again", err)
+			case err != nil:
+			case rep.Failure != nil:
+				err = fmt.Errorf("%w; the tags may or may not have been written; publish again", rep.Failure.Err())
+			case rep.Tagged == nil:
+				err = errors.New("the worker reported no tags written")
+			}
+			if err != nil {
+				span.EndWith(err)
+				outcome := sched.Failed(err)
+				outcome.Failure.Nodes = []graph.Ref{req.Images[0].Result.Node}
+				return outcome
+			}
+			if rep.Tagged.Failure != nil {
+				span.EndWith(errors.New(rep.Tagged.Failure.Message))
+			} else {
+				span.End()
+			}
+			return *rep.Tagged
+		})
 	})
 }
 

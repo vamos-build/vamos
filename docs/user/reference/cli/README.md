@@ -29,6 +29,7 @@ Delivery commands build the requested target and its dependencies before deliver
 | [`vamos export <task> <folder>`](export.md) | Tasks with output | Write a task fileset into a local directory |
 | [`vamos update [pull...]`](update.md) | Pulls, or all pulls if omitted | Pin pull targets to manifest digests in `vamos.lock` |
 | [`vamos prune`](prune.md) | None | Remove cached build results |
+| [`vamos trace <digest\|job> <file.json>`](trace.md) | None | Write a stored trace to a file that Perfetto opens |
 | [`vamos coordinator`](coordinator.md) | None | Run a coordinator to schedule builds across workers |
 | [`vamos worker`](worker.md) | None | Run a build worker managed by a coordinator |
 

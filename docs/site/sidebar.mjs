@@ -31,6 +31,7 @@ export const sidebar = [
           "reference/cli/export",
           "reference/cli/update",
           "reference/cli/prune",
+          "reference/cli/trace",
           "reference/cli/coordinator",
           "reference/cli/worker",
           "reference/cli/flags",

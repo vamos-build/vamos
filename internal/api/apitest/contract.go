@@ -32,6 +32,8 @@ type Fixture struct {
 	Put func(t *testing.T, ex api.Executor, data []byte) cache.Blob
 	// Missing returns which of blobs the content store that New's executors publish to lacks.
 	Missing func(t *testing.T, ex api.Executor, blobs []cache.Blob) []cache.Blob
+	// Read returns the content of b from the content store that New's executors publish to.
+	Read func(t *testing.T, ex api.Executor, b cache.Blob) []byte
 	// Platform is the execution platform that New's executors report.
 	Platform imgspecv1.Platform
 	// Registry serves a registry that New's executors can push to over plain HTTP.
@@ -83,6 +85,8 @@ func Contract(t *testing.T, f Fixture) {
 	t.Run("publish", func(t *testing.T) { testPublish(t, f) })
 	t.Run("workspace", func(t *testing.T) { testWorkspace(t, f) })
 	t.Run("prune", func(t *testing.T) { testPrune(t, f) })
+	t.Run("traces", func(t *testing.T) { testTraces(t, f) })
+	t.Run("shared attempt trace", func(t *testing.T) { testSharedAttemptTrace(t, f) })
 	t.Run("values owned", func(t *testing.T) { testValuesOwned(t, f) })
 	t.Run("delivery values owned", func(t *testing.T) { testDeliveryValuesOwned(t, f) })
 	t.Run("watch cancelled", func(t *testing.T) { testWatchCancelled(t, f) })
@@ -98,13 +102,22 @@ func unreadableJob(t *testing.T, f Fixture, ex api.Executor, content string) (ap
 		Graph:    cache.Blob{Digest: digest.FromString(content), Size: int64(len(content))},
 		Version:  graph.Version,
 		Platform: f.Platform,
-		Trace:    &tracing.CallContext{Parent: "client-1"}, // so that the job has spans as well as its outcome
 	}
 	id, err := ex.Submit(t.Context(), api.Request{Graph: req})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return id, req
+}
+
+// submitted submits req as a graph job on ex, which runs a target and so reports statuses before its outcome.
+func submitted(t *testing.T, ex api.Executor, req api.GraphRequest) api.JobID {
+	t.Helper()
+	id, err := ex.Submit(t.Context(), api.Request{Graph: &req})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return id
 }
 
 // testValuesOwned checks that values cross the executor boundary by copy, as a transport would carry them:
@@ -128,7 +141,6 @@ func testValuesOwned(t *testing.T, f Fixture) {
 	id, req := unreadableJob(t, f, ex, "owned")
 	submitted := req.Graph
 	req.Graph = cache.Blob{Digest: digest.FromString("changed"), Size: 7}
-	req.Trace.Parent = "changed"
 	events := watchAll(t, ex, id, 0)
 	last := lastEvent(t, events)
 	if last.Outcome == nil || last.Outcome.Failure == nil ||
@@ -281,8 +293,9 @@ func scribbleOutcome(o *api.Outcome) {
 // testWatchCancelled checks that a watch whose context ends stops before the next event,
 // though the job has ended and every event is waiting to be delivered.
 func testWatchCancelled(t *testing.T, f Fixture) {
+	f.requireBuilds(t)
 	ex := f.New(t)
-	id, _ := unreadableJob(t, f, ex, "cancelled watch")
+	id := submitted(t, ex, taskGraph(t, f, ex, "cancelled watch"))
 	if events := watchAll(t, ex, id, 0); len(events) < 2 {
 		t.Fatalf("the job has %d events, want at least 2 for the test to mean anything", len(events))
 	}
@@ -303,8 +316,9 @@ func testWatchCancelled(t *testing.T, f Fixture) {
 // testWatcherFails checks that a watch whose fn fails stops there, with fn's error as it is,
 // even one that wraps an error the executor gives meaning to.
 func testWatcherFails(t *testing.T, f Fixture) {
+	f.requireBuilds(t)
 	ex := f.New(t)
-	id, _ := unreadableJob(t, f, ex, "failing watcher")
+	id := submitted(t, ex, taskGraph(t, f, ex, "failing watcher"))
 	if events := watchAll(t, ex, id, 0); len(events) < 2 {
 		t.Fatalf("the job has %d events, want at least 2 for the test to mean anything", len(events))
 	}
@@ -942,9 +956,11 @@ func testCancel(t *testing.T, f Fixture) {
 	if last.Kind != api.EventDone || last.Outcome == nil || !last.Outcome.Cancelled {
 		t.Errorf("last event = %+v, want the terminal event reporting the cancellation", last)
 	}
-	if outcome, err := ex.Result(ctx, id); err != nil || !outcome.Cancelled {
+	outcome, err := ex.Result(ctx, id)
+	if err != nil || !outcome.Cancelled {
 		t.Errorf("Result = %+v, %v; want the cancellation", outcome, err)
 	}
+	manifestOf(t, f, ex, id, outcome) // a cancelled job stores its manifest too
 	// Cancelling a job that has ended changes nothing.
 	if err := ex.Cancel(ctx, id); err != nil {
 		t.Errorf("Cancel of an ended job = %v", err)
@@ -1118,6 +1134,12 @@ func testPrune(t *testing.T, f Fixture) {
 	}
 	if p := last.Outcome.Pruned; p.Results == 0 || p.Blobs == 0 {
 		t.Errorf("pruned %+v, want the task's result and blobs", p)
+	}
+	if last.Outcome.Trace != nil {
+		t.Errorf("the prune's outcome names the manifest %v; want none", last.Outcome.Trace)
+	}
+	if _, err := ex.Trace(ctx, id); !errors.Is(err, api.ErrNoTrace) {
+		t.Errorf("Trace of a prune = %v, want %v", err, api.ErrNoTrace)
 	}
 }
 

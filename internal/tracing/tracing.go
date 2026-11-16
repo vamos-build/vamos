@@ -3,9 +3,11 @@ package tracing
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"reflect"
+	"strings"
 	"sync"
 	"time"
 )
@@ -103,25 +105,44 @@ type CallContext struct {
 	Parent string `json:"parent"`
 }
 
+// MaxSpanSize bounds each span, encoded, that a recorder passes to its callback,
+// so that a callback that sends spans one at a time, as an attempt's subprocess prints each on a line of its own,
+// never meets one larger than its transport takes: it is well within an attempt's line and one batch of its events.
+const MaxSpanSize = 1 << 20
+
+// maxNameSize bounds the name a span over MaxSpanSize keeps, and every track, either of which may hold all of a run
+// step's argv, so that a stub is small whatever it was a stub of.
+const maxNameSize = 1 << 10
+
 // Recorder collects the spans of one process, or of one call to an executor, as they end.
+// A recorder that keeps spans counts each one's encoded size as it ends,
+// and keeps at most twice MaxTraceSize of them, so that its memory is bounded:
+// it refuses each span that would pass that, and Snapshot counts them.
+// A span that ends later and fits is still kept, so that the target and job spans that hold the others,
+// which end last and are small, survive a large span refused.
 type Recorder struct {
 	process string
 	prefix  string // of its spans' IDs, so that no two recorders' collide
 	onEnd   func(Span)
+	limit   int // of the encoded size of the spans it keeps
 
 	mu    sync.Mutex
 	next  int
 	spans []Span
+	size  int // encoded, of spans
+	lost  Lost
 }
 
 // NewRecorder returns a recorder of the spans of process.
-// If onEnd isn't nil, it passes each span to onEnd as it ends instead of keeping it.
+// If onEnd isn't nil, it passes each span to onEnd as it ends instead of keeping it, as its stub if it is over
+// MaxSpanSize: the stub keeps its place in the trace, so that the spans within it still have a parent,
+// but drops its arguments.
 // onEnd may be called from several goroutines at once.
 // The callback runs outside recorder and Active locks, and must not mutate the span's Args map.
 func NewRecorder(process string, onEnd func(Span)) *Recorder {
 	var b [4]byte
 	rand.Read(b[:])
-	return &Recorder{process: process, prefix: hex.EncodeToString(b[:]), onEnd: onEnd}
+	return &Recorder{process: process, prefix: hex.EncodeToString(b[:]), onEnd: onEnd, limit: 2 * MaxTraceSize}
 }
 
 // Spans returns the spans that have ended, in the order they ended, or none if the recorder passes them to onEnd.
@@ -132,6 +153,14 @@ func (r *Recorder) Spans() []Span {
 	return append([]Span(nil), r.spans...)
 }
 
+// Snapshot returns the spans that have ended, as Spans does,
+// and what spans the recorder refused, past its limit or because they couldn't be encoded, both at one moment.
+func (r *Recorder) Snapshot() ([]Span, Lost) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]Span(nil), r.spans...), r.lost
+}
+
 // newID returns an ID that no other span has.
 func (r *Recorder) newID() string {
 	r.mu.Lock()
@@ -140,15 +169,55 @@ func (r *Recorder) newID() string {
 	return fmt.Sprintf("%s-%d", r.prefix, r.next)
 }
 
-// add records the ended span s.
+// add records the ended span s, or refuses it if it can't be encoded or would pass the recorder's limit.
 func (r *Recorder) add(s Span) {
 	if r.onEnd != nil {
-		r.onEnd(s) // which keeps it, so that the recorder needn't hold a copy no one reads
+		r.onEnd(bounded(s)) // which keeps it, so that the recorder needn't hold a copy no one reads
 		return
 	}
+	size, ok := spanSize(s) // outside the lock, since encoding takes longer than appending
 	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !ok || r.size+size > r.limit {
+		r.lost.add(s)
+		return
+	}
+	r.size += size
 	r.spans = append(r.spans, s)
-	r.mu.Unlock()
+}
+
+// bounded returns s if it encodes in at most MaxSpanSize, or else its stub: s without its arguments, which say why,
+// and with its name cut to maxNameSize. Its track is already bounded, by start.
+func bounded(s Span) Span {
+	size, ok := spanSize(s)
+	if ok && size <= MaxSpanSize {
+		return s
+	}
+	why := "its arguments couldn't be encoded"
+	if ok {
+		why = fmt.Sprintf("the span was %d bytes encoded, over %d", size, MaxSpanSize)
+	}
+	s.Args = map[string]any{"dropped": why} // a new map: s's own is the caller's
+	s.Name = cut(s.Name)
+	return s
+}
+
+// cut returns s, or its first maxNameSize bytes and "…" if it is longer.
+func cut(s string) string {
+	if len(s) <= maxNameSize {
+		return s
+	}
+	return strings.ToValidUTF8(s[:maxNameSize], "") + "…" // dropping a rune the cut split
+}
+
+// boundedTrack returns track, or if it is over maxNameSize, its cut and a hash of it whole,
+// so that two long tracks that begin alike stay apart.
+func boundedTrack(track string) string {
+	if len(track) <= maxNameSize {
+		return track
+	}
+	sum := sha256.Sum256([]byte(track))
+	return cut(track) + " " + hex.EncodeToString(sum[:8])
 }
 
 // recording is what a context says about tracing: where spans go, and the span that new ones are part of.
@@ -167,42 +236,25 @@ func WithRecorder(ctx context.Context, r *Recorder, parent string) context.Conte
 	return context.WithValue(ctx, contextKey{}, &recording{recorder: r, parent: parent})
 }
 
+// WithRecorderAt returns a context whose later spans r records,
+// as part of ctx's span and on its track, as they would lie in ctx's own recording,
+// so that work whose spans are kept apart from its caller's, such as an attempt's, still nests where it ran.
+// If ctx isn't traced, its spans are r's alone and part of no span.
+func WithRecorderAt(ctx context.Context, r *Recorder) context.Context {
+	rec, _ := ctx.Value(contextKey{}).(*recording)
+	if rec == nil {
+		return WithRecorder(ctx, r, "")
+	}
+	at := &recording{recorder: r, parent: rec.parent, span: rec.span, track: rec.track}
+	return context.WithValue(ctx, contextKey{}, at)
+}
+
 // ForCall returns a context whose spans r records, as part of the span call names, or ctx itself if call is nil.
 func ForCall(ctx context.Context, call *CallContext, onEnd func(Span), process string) context.Context {
 	if call == nil {
 		return ctx
 	}
 	return WithRecorder(ctx, NewRecorder(process, onEnd), call.Parent)
-}
-
-// Revocable returns a context whose spans are recorded as ctx's would be, as part of its span and on its track,
-// until the function it returns is called; spans that end afterwards are dropped.
-// It is for work that may outlive the owner of ctx's trace, which revokes it before its last spans are sent:
-// once the function returns, no span of the context is being recorded, and none will be.
-// If ctx isn't traced, it returns ctx and a function that does nothing.
-func Revocable(ctx context.Context) (context.Context, func()) {
-	rec, _ := ctx.Value(contextKey{}).(*recording)
-	if rec == nil {
-		return ctx, func() {}
-	}
-	var (
-		mu      sync.RWMutex // held to read while a span is recorded, so that revoking waits for it
-		revoked bool
-	)
-	owner := rec.recorder
-	r := NewRecorder(owner.process, func(s Span) {
-		mu.RLock()
-		defer mu.RUnlock()
-		if !revoked {
-			owner.add(s)
-		}
-	})
-	revocable := &recording{recorder: r, parent: rec.parent, span: rec.span, track: rec.track}
-	return context.WithValue(ctx, contextKey{}, revocable), func() {
-		mu.Lock()
-		revoked = true
-		mu.Unlock()
-	}
 }
 
 // Call returns what asks an executor to trace a call made within ctx's span, or nil if ctx isn't traced.
@@ -216,7 +268,6 @@ func Call(ctx context.Context) *CallContext {
 
 // Relay records spans, which ended in another process as part of a call made within ctx's span, as ctx's own:
 // a coordinator relays a worker's spans so, having shifted them onto its clock.
-// Spans relayed after ctx's recording is revoked are dropped, as its own would be.
 func Relay(ctx context.Context, spans []Span) {
 	rec, _ := ctx.Value(contextKey{}).(*recording)
 	if rec == nil {
@@ -259,6 +310,14 @@ func (a *Active) ID() string {
 	return a.span.ID
 }
 
+// Elapsed returns how long the span has run so far, or 0 for a nil span.
+func (a *Active) Elapsed() time.Duration {
+	if a == nil {
+		return 0
+	}
+	return time.Since(a.span.Start) // which no one changes once the span has started
+}
+
 // Start starts a span named name, on the track of the span it is part of, with args, a list of keys and values.
 // It returns a context for spans that are part of it.
 // With no recorder in ctx it does nothing, and returns ctx and a nil span, whose methods do nothing.
@@ -293,11 +352,13 @@ func start(ctx context.Context, track, name string, async bool, args []any) (con
 	if rec == nil {
 		return ctx, nil
 	}
-	if track == "" {
-		track = rec.track
-	}
-	if track == "" {
-		track = name
+	switch {
+	case track != "":
+		track = boundedTrack(track)
+	case rec.track != "":
+		track = rec.track // bounded when its span started
+	default:
+		track = boundedTrack(name)
 	}
 	a := &Active{
 		recorder: rec.recorder,

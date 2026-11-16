@@ -3,87 +3,73 @@ package sched
 import (
 	"context"
 	"errors"
-	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/vamos-build/vamos/internal/api"
-	"github.com/vamos-build/vamos/internal/graph"
+	"github.com/vamos-build/vamos/internal/cache"
 	"github.com/vamos-build/vamos/internal/testenv"
 	"github.com/vamos-build/vamos/internal/tracing"
+
+	"github.com/opencontainers/go-digest"
 )
 
-// spanEvents collects the batches of spans sent to it.
-type spanEvents struct {
-	mu      sync.Mutex
-	batches [][]tracing.Span
+// refusingCancelled is a content store that refuses a put whose context has ended, as a remote one would.
+type refusingCancelled struct{ cache.ContentStore }
+
+func (r refusingCancelled) PutBytes(ctx context.Context, data []byte) (cache.Blob, error) {
+	if err := ctx.Err(); err != nil {
+		return cache.Blob{}, err
+	}
+	return r.ContentStore.PutBytes(ctx, data)
 }
 
-func (e *spanEvents) Status(graph.Ref, string)       {}
-func (e *spanEvents) Output(graph.Ref, byte, []byte) {}
-func (e *spanEvents) Spans(spans []tracing.Span) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	e.batches = append(e.batches, spans)
+// refusingAll is a content store that refuses every put.
+type refusingAll struct{ cache.ContentStore }
+
+func (refusingAll) PutBytes(context.Context, []byte) (cache.Blob, error) {
+	return cache.Blob{}, errors.New("the store is full")
 }
 
-// TestSpanBatches checks that the spans of a call, ended from several goroutines at once,
-// each reach its events exactly once, in batches no larger than spanBatchSize, the rest when the call flushes them,
-// and none before it unless a batch is full.
-func TestSpanBatches(t *testing.T) {
-	const goroutines, each = 8, 100 // more than spanBatchSize in all, but not a whole number of batches
-	ev := &spanEvents{}
-	ctx, flush := ForCall(context.Background(), &tracing.CallContext{Parent: "client-1"}, ev)
-	var wg sync.WaitGroup
-	for g := range goroutines {
-		wg.Go(func() {
-			for i := range each {
-				_, span := tracing.Start(ctx, fmt.Sprintf("span %d.%d", g, i))
-				span.End()
-			}
-		})
-	}
-	wg.Wait()
-	ev.mu.Lock()
-	before := len(ev.batches)
-	ev.mu.Unlock()
-	if want := goroutines * each / spanBatchSize; before != want {
-		t.Errorf("%d batches sent before flushing, want %d full ones", before, want)
-	}
-	flush()
-
-	seen := map[string]bool{}
-	for i, batch := range ev.batches {
-		if len(batch) > spanBatchSize || i < before && len(batch) != spanBatchSize {
-			t.Errorf("batch %d has %d spans, want %d", i, len(batch), spanBatchSize)
-		}
-		for _, s := range batch {
-			if seen[s.Name] {
-				t.Errorf("%s was sent twice", s.Name)
-			}
-			seen[s.Name] = true
-		}
-	}
-	if len(seen) != goroutines*each {
-		t.Errorf("%d spans sent, want %d", len(seen), goroutines*each)
-	}
-	flush()
-	if len(ev.batches) != before+1 {
-		t.Errorf("flushing again sent %d more batches, want none", len(ev.batches)-before-1)
-	}
-}
-
-// TestSpanBatchesUntraced checks that a call that isn't traced sends no spans.
-func TestSpanBatchesUntraced(t *testing.T) {
-	ev := &spanEvents{}
-	ctx, flush := ForCall(context.Background(), nil, ev)
-	_, span := tracing.Start(ctx, "untraced")
+// TestForJobSaves checks that a job always records its spans, whether or not its client asked for them, and saves
+// them with its nodes' entries as its manifest, even once the job is cancelled, and that a manifest that can't be
+// stored is reported, naming none.
+func TestForJobSaves(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	ctx, trace := ForJob(ctx)
+	_, span := tracing.Start(ctx, "schedule")
 	span.End()
-	flush()
-	if len(ev.batches) != 0 {
-		t.Errorf("an untraced call sent %d batches", len(ev.batches))
+	blob := &cache.Blob{Digest: digest.FromString("attempt"), Size: 3}
+	trace.Record(api.TraceEntry{Node: 1, Outcome: api.NodeHit})
+	trace.Record(api.TraceEntry{Node: 2, Outcome: api.NodeMiss, Started: true, Attempt: "a1", Trace: blob})
+	trace.Record(api.TraceEntry{Node: 1, Outcome: api.NodeMiss, Cause: "lost", Attempt: "a2"}) // a regeneration
+	cancel()
+
+	store := cache.NewMemory()
+	b, err := trace.Save(ctx, refusingCancelled{store})
+	if err != nil || b == nil {
+		t.Fatalf("saving a cancelled job's manifest = %v, %v; want it stored", b, err)
+	}
+	data, err := store.Read(context.Background(), *b, tracing.MaxTraceSize)
+	testenv.Must(t, err)
+	manifest, err := api.DecodeJobTrace(data)
+	testenv.Must(t, err)
+	if len(manifest.Spans) != 1 || manifest.Spans[0].Name != "schedule" {
+		t.Errorf("the manifest's spans = %+v; want the job's schedule span", manifest.Spans)
+	}
+	want := []api.TraceEntry{
+		{Node: 1, Outcome: api.NodeMiss, Cause: "lost", Attempt: "a2"},
+		{Node: 2, Outcome: api.NodeMiss, Started: true, Attempt: "a1", Trace: blob},
+	}
+	if !reflect.DeepEqual(manifest.Entries, want) {
+		t.Errorf("the manifest's entries = %+v; want %+v, the regeneration in place of the hit", manifest.Entries, want)
+	}
+
+	if b, err := trace.Save(context.Background(), refusingAll{store}); err == nil || b != nil {
+		t.Errorf("saving to a store that refuses = %v, %v; want none, and why", b, err)
 	}
 }
 
@@ -399,5 +385,21 @@ func TestJobForgetsDroppedEvents(t *testing.T) {
 		if e.Data != nil {
 			t.Errorf("the dropped event at %d still holds %d bytes", i, len(e.Data))
 		}
+	}
+}
+
+// TestRunJobWithoutStore checks that a job whose content store can't be opened returns its outcome all the same,
+// naming no manifest, and reports why.
+func TestRunJobWithoutStore(t *testing.T) {
+	var warned []error
+	outcome := RunJob(context.Background(),
+		func() (cache.ContentStore, error) { return nil, errors.New("the build cache is locked") },
+		func(err error) { warned = append(warned, err) },
+		func(ctx context.Context) api.Outcome { return api.Outcome{Results: []api.Result{{}}} })
+	if outcome.Trace != nil || len(outcome.Results) != 1 {
+		t.Errorf("outcome = %+v; want its results, naming no manifest", outcome)
+	}
+	if len(warned) != 1 || !strings.Contains(warned[0].Error(), "the build cache is locked") {
+		t.Errorf("warned %v; want why the manifest wasn't stored", warned)
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"github.com/vamos-build/vamos/internal/cache"
 	"github.com/vamos-build/vamos/internal/remote"
 	"github.com/vamos-build/vamos/internal/testenv"
+	"github.com/vamos-build/vamos/internal/tracing"
 
 	"github.com/google/go-containerregistry/pkg/registry"
 )
@@ -53,6 +54,12 @@ func localFixture(wrap func(*Local) api.Executor) apitest.Fixture {
 			missing, err := contents[ex].Missing(t.Context(), blobs)
 			testenv.Must(t, err)
 			return missing
+		},
+		Read: func(t *testing.T, ex api.Executor, b cache.Blob) []byte {
+			t.Helper()
+			data, err := contents[ex].Read(t.Context(), b, tracing.MaxTraceSize)
+			testenv.Must(t, err)
+			return data
 		},
 		Platform:      HostPlatform,
 		Registry:      registry.New(registry.Logger(log.New(io.Discard, "", 0))),
@@ -107,6 +114,12 @@ func TestContractHTTP(t *testing.T) {
 			missing, err := contents[ex].Missing(t.Context(), blobs)
 			testenv.Must(t, err)
 			return missing
+		},
+		Read: func(t *testing.T, ex api.Executor, b cache.Blob) []byte {
+			t.Helper()
+			data, err := contents[ex].Read(t.Context(), b, tracing.MaxTraceSize)
+			testenv.Must(t, err)
+			return data
 		},
 		Platform:      HostPlatform,
 		Registry:      registry.New(registry.Logger(log.New(io.Discard, "", 0))),

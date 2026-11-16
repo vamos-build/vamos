@@ -60,6 +60,10 @@ type OutputLine struct {
 // and output is written as it comes.
 const MaxLineSize = 16 << 20
 
+// A span the attempt's recorder passes on fits on a line, and in a batch of its events, with room to spare:
+// this fails to compile if either limit falls under twice tracing.MaxSpanSize.
+const _ uint = min(MaxLineSize, remote.MaxJSONBody) - 2*tracing.MaxSpanSize
+
 // lineWriter prints AttemptLines, one at a time, from any goroutine.
 type lineWriter struct {
 	mu  sync.Mutex

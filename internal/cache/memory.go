@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"time"
 
 	"github.com/opencontainers/go-digest"
 )
@@ -18,7 +19,8 @@ type Memory struct {
 	blobs   map[digest.Digest][]byte
 	results map[digest.Digest][]byte // encoded, as a store would hold them
 	tags    map[string][]byte
-	cleared uint64 // how many times the results were cleared
+	history map[digest.Digest][]byte // encoded
+	cleared uint64                   // how many times the results were cleared
 }
 
 var (
@@ -32,6 +34,7 @@ func NewMemory() *Memory {
 		blobs:   map[digest.Digest][]byte{},
 		results: map[digest.Digest][]byte{},
 		tags:    map[string][]byte{},
+		history: map[digest.Digest][]byte{},
 	}
 }
 
@@ -121,6 +124,20 @@ func (m *Memory) Get(_ context.Context, b Blob) (io.ReadCloser, error) {
 			delete(m.blobs, b.Digest)
 		}
 	}), nil
+}
+
+// Stat returns the blob held under d.
+func (m *Memory) Stat(_ context.Context, d digest.Digest) (Blob, error) {
+	if err := (Blob{Digest: d}).Validate(); err != nil {
+		return Blob{}, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	data, ok := m.blobs[d]
+	if !ok {
+		return Blob{}, missing(Blob{Digest: d})
+	}
+	return Blob{Digest: d, Size: int64(len(data))}, nil
 }
 
 // Read returns b's content, verified, if it is at most limit bytes.
@@ -222,4 +239,78 @@ func (m *Memory) Generation(context.Context) (uint64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.cleared, nil
+}
+
+// History returns the history named name, or nil.
+func (m *Memory) History(_ context.Context, name digest.Digest) (*History, error) {
+	if err := validateKey(name); err != nil {
+		return nil, err
+	}
+	m.mu.Lock()
+	data := m.history[name]
+	m.mu.Unlock()
+	h, _ := decodeHistory(data)
+	return h, nil
+}
+
+// Newest returns the leading fields of the history named name.
+func (m *Memory) Newest(_ context.Context, name digest.Digest) (HistoryHead, error) {
+	if err := validateKey(name); err != nil {
+		return HistoryHead{}, err
+	}
+	m.mu.Lock()
+	data := m.history[name]
+	m.mu.Unlock()
+	head, _ := decodeHistoryHead(bytes.NewReader(data))
+	return head, nil
+}
+
+// AddHistory adds entry to the history named name, under the store's mutex.
+func (m *Memory) AddHistory(_ context.Context, name digest.Digest, entry HistoryEntry,
+	trees map[digest.Digest][]HistoryFile, keep int) error {
+	if err := validateAdd(name, entry, trees); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	h, ok := decodeHistory(m.history[name])
+	if !ok {
+		h = &History{}
+	}
+	h.add(entry, trees, keep, MaxHistorySize, time.Now())
+	data, err := encodeHistory(h)
+	if err != nil {
+		return fmt.Errorf("adding to target history: %w", err)
+	}
+	m.history[name] = data
+	return nil
+}
+
+// PruneHistory removes every history whose Used is before before.
+func (m *Memory) PruneHistory(_ context.Context, before time.Time) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	removed := 0
+	for name, data := range m.history {
+		if head, _ := decodeHistoryHead(bytes.NewReader(data)); head.Used.Before(before) {
+			delete(m.history, name)
+			removed++
+		}
+	}
+	return removed, nil
+}
+
+// SetHistoryUsed sets the Used of the history named name to used, as if it were last used then,
+// so that tests can age a history; it does nothing if there is none.
+func (m *Memory) SetHistoryUsed(name digest.Digest, used time.Time) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	h, ok := decodeHistory(m.history[name])
+	if !ok {
+		return
+	}
+	h.Used = used.UTC()
+	if data, err := json.Marshal(h); err == nil {
+		m.history[name] = data
+	}
 }

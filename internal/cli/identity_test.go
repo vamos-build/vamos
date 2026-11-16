@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"runtime/debug"
 	"testing"
+	"time"
 
 	"github.com/vamos-build/vamos/internal/cache"
 	"github.com/vamos-build/vamos/internal/run"
@@ -75,8 +76,17 @@ func TestResultProvenance(t *testing.T) {
 		written[record] = data
 		var result cache.ActionResult
 		must(t, json.Unmarshal(data, &result))
-		if result.Provenance == nil || !reflect.DeepEqual(*result.Provenance, want) {
-			t.Errorf("provenance = %+v, want %+v", result.Provenance, want)
+		if result.Provenance == nil {
+			t.Fatalf("a result has no provenance: %+v", result)
+		}
+		// When the run that made it began, and how long it took, which the trace of a hit says.
+		p := *result.Provenance
+		if p.Started.IsZero() || p.Took <= 0 {
+			t.Errorf("provenance began at %v and took %v; want both set", p.Started, p.Took)
+		}
+		p.Started, p.Took = time.Time{}, 0
+		if !reflect.DeepEqual(p, want) {
+			t.Errorf("provenance = %+v, want %+v", p, want)
 		}
 		if result.Platform == foreign() {
 			foreignResults++

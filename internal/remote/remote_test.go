@@ -124,6 +124,22 @@ func (f *fakeExecutor) Result(_ context.Context, id api.JobID) (api.Outcome, err
 	return api.Outcome{}, api.ErrRunning
 }
 
+func (f *fakeExecutor) Trace(_ context.Context, id api.JobID) (cache.Blob, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, ok := f.jobs[id]; !ok {
+		return cache.Blob{}, api.ErrNoJob
+	}
+	o, ok := f.outcomes[id]
+	switch {
+	case !ok:
+		return cache.Blob{}, api.ErrRunning
+	case o.Trace == nil:
+		return cache.Blob{}, api.ErrNoTrace
+	}
+	return *o.Trace, nil
+}
+
 func (f *fakeExecutor) Release(_ context.Context, id api.JobID) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -1237,5 +1253,28 @@ func TestReleaseCrosses(t *testing.T) {
 	}
 	if err := c.Release(t.Context(), "nope"); !errors.Is(err, api.ErrNoJob) {
 		t.Errorf("Release of an unknown job = %v, want %v", err, api.ErrNoJob)
+	}
+}
+
+// TestTraceCrosses checks that a job's manifest crosses by its ID, and that a job that is running, stored none, or
+// is unknown says so as the executor does.
+func TestTraceCrosses(t *testing.T) {
+	f := newFakeExecutor(1)
+	trace := &cache.Blob{Digest: digest.FromString("manifest"), Size: 7}
+	f.jobs["traced"], f.outcomes["traced"] = scriptedEvents(1), api.Outcome{Trace: trace}
+	f.jobs["untraced"], f.outcomes["untraced"] = scriptedEvents(1), api.Outcome{}
+	f.jobs["running"] = scriptedEvents(1)
+	c, _ := fixture(t, f, nil)
+	if got, err := c.Trace(t.Context(), "traced"); err != nil || got != *trace {
+		t.Errorf("Trace = %v, %v; want %v", got, err, *trace)
+	}
+	for id, want := range map[api.JobID]error{
+		"untraced": api.ErrNoTrace,
+		"running":  api.ErrRunning,
+		"unknown":  api.ErrNoJob,
+	} {
+		if _, err := c.Trace(t.Context(), id); !errors.Is(err, want) {
+			t.Errorf("Trace of %s = %v; want %v", id, err, want)
+		}
 	}
 }

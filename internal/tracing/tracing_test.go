@@ -5,8 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 // TestDisabled checks that spans started without a recorder do nothing, and that their methods are safe to call.
@@ -23,6 +26,77 @@ func TestDisabled(t *testing.T) {
 	Instant(ctx, "skipped")
 	if Call(ctx) != nil || Enabled(ctx) {
 		t.Error("a context without a recorder asks for tracing")
+	}
+}
+
+// TestCallbackBoundsSpans checks that a recorder passes its callback a span over MaxSpanSize as a stub that keeps its
+// place, its name cut, and says why its arguments are gone, and passes smaller spans whole.
+func TestCallbackBoundsSpans(t *testing.T) {
+	var streamed []Span
+	r := NewRecorder("worker", func(s Span) { streamed = append(streamed, s) })
+	ctx := WithRecorder(context.Background(), r, "client-1")
+	ctx, layer := StartTrack(ctx, `layer "app"`, `layer "app"`)
+	name := `build_env(["HUGE=` + strings.Repeat("é", MaxSpanSize) + `"])`
+	_, huge := Start(ctx, name, "values", []string{strings.Repeat("x", 2*MaxSpanSize)})
+	huge.End()
+	_, small := Start(ctx, "small", "values", []string{"A=b"})
+	small.End()
+	layer.End()
+
+	if len(streamed) != 3 {
+		t.Fatalf("streamed %d spans, want 3", len(streamed))
+	}
+	for _, s := range streamed {
+		if size, ok := spanSize(s); !ok || size > MaxSpanSize {
+			t.Errorf("%.40s: encoded in %d bytes, want at most %d", s.Name, size, MaxSpanSize)
+		}
+	}
+	stub := streamed[0]
+	if stub.ID != huge.ID() || stub.Parent != layer.ID() || stub.Track != `layer "app"` || stub.End.IsZero() {
+		t.Errorf("stub = %+v, want the large span's ID, parent, track and times", stub)
+	}
+	if !utf8.ValidString(stub.Name) || !strings.HasPrefix(name, strings.TrimSuffix(stub.Name, "…")) ||
+		len(stub.Name) > maxNameSize+len("…") {
+		t.Errorf("stub name is %d bytes, want the large span's cut to at most %d", len(stub.Name), maxNameSize)
+	}
+	if why, _ := stub.Args["dropped"].(string); len(stub.Args) != 1 || !strings.Contains(why, "bytes encoded") {
+		t.Errorf("stub args = %.200v, want only why they were dropped", stub.Args)
+	}
+	if got := streamed[1].Args["values"]; !reflect.DeepEqual(got, []string{"A=b"}) {
+		t.Errorf("small span's values = %v, want them whole", got)
+	}
+}
+
+// TestCallbackBoundsTracks checks that a span with no track of its own, as in an attempt's subprocess, whose name is
+// over maxNameSize, takes a bounded track that its stub and the spans within it share,
+// and that two such names that begin alike take different tracks.
+func TestCallbackBoundsTracks(t *testing.T) {
+	var streamed []Span
+	ctx := WithRecorder(context.Background(), NewRecorder("worker", func(s Span) { streamed = append(streamed, s) }),
+		"client-1")
+	long := `run(["echo", "` + strings.Repeat("x", 5*MaxSpanSize)
+	stepCtx, step := Start(ctx, long+`a"])`, "values", []string{strings.Repeat("y", 2*MaxSpanSize)})
+	_, child := Start(stepCtx, "child")
+	child.End()
+	step.End()
+	_, other := Start(ctx, long+`b"])`)
+	other.End()
+
+	if len(streamed) != 3 {
+		t.Fatalf("streamed %d spans, want 3", len(streamed))
+	}
+	for _, s := range streamed {
+		if size, ok := spanSize(s); !ok || size > MaxSpanSize {
+			t.Errorf("%.40s: encoded in %d bytes, want at most %d", s.Name, size, MaxSpanSize)
+		}
+	}
+	childSpan, stub, otherSpan := streamed[0], streamed[1], streamed[2]
+	if stub.Track != childSpan.Track || len(stub.Track) > 2*maxNameSize {
+		t.Errorf("tracks are %d and %d bytes, want one, of at most %d", len(stub.Track), len(childSpan.Track),
+			2*maxNameSize)
+	}
+	if otherSpan.Track == stub.Track {
+		t.Errorf("two long names that begin alike share the track %.40q…", stub.Track)
 	}
 }
 
@@ -164,7 +238,7 @@ func TestEstimateOffset(t *testing.T) {
 				clock = clock.Add(delay)
 				return answer, nil
 			}
-			got, err := EstimateOffset(context.Background(), now, remote)
+			got, err := EstimateOffset(context.Background(), 3, now, remote)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -192,11 +266,30 @@ func TestEstimateOffset(t *testing.T) {
 
 // TestEstimateOffsetFails checks that a failing call to the executor is reported.
 func TestEstimateOffsetFails(t *testing.T) {
-	_, err := EstimateOffset(context.Background(), time.Now, func(context.Context) (time.Time, error) {
+	calls := 0
+	_, err := EstimateOffset(context.Background(), 3, time.Now, func(context.Context) (time.Time, error) {
+		calls++
 		return time.Time{}, errors.New("unreachable")
 	})
-	if err == nil || err.Error() != "unreachable" {
-		t.Errorf("err = %v, want unreachable", err)
+	if err == nil || err.Error() != "unreachable" || calls != 1 {
+		t.Errorf("err = %v after %d calls, want unreachable after 1, so that one that stops answering costs one", err,
+			calls)
+	}
+}
+
+// TestEstimateOffsetKeepsGoodSamples checks that a failed sample ends the sampling, but a good one before it stands.
+func TestEstimateOffsetKeepsGoodSamples(t *testing.T) {
+	calls := 0
+	offset, err := EstimateOffset(context.Background(), 3, time.Now, func(context.Context) (time.Time, error) {
+		calls++
+		if calls > 1 {
+			return time.Time{}, errors.New("timed out")
+		}
+		return time.Now().Add(time.Hour), nil
+	})
+	if err != nil || offset.Offset < 59*time.Minute || calls != 2 {
+		t.Errorf("EstimateOffset = %v, %v after %d calls; want the first sample's hour ahead, after 2", offset, err,
+			calls)
 	}
 }
 

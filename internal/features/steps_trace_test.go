@@ -1,23 +1,32 @@
 package features
 
 import (
+	"bytes"
 	"cmp"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/go-containerregistry/pkg/name"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
+	"github.com/opencontainers/go-digest"
+	"github.com/vamos-build/vamos/internal/api"
+	"github.com/vamos-build/vamos/internal/cache"
+	"github.com/vamos-build/vamos/internal/tracing"
 )
 
 // Steps about the trace that --trace writes, which Perfetto shows: its spans, as slices on tracks, nested as they
@@ -174,7 +183,8 @@ func (w *world) ThenTheTraceSpanIsWithin(process, name, outerProcess, outer stri
 }
 
 // ThenEverySpanEndsBeforeAnyStarts checks that every span of process that first names ends before any span of process
-// that then names starts, by the trace's clock, stopping the scenario if either names none.
+// that then names starts, by the trace's clock, within a microsecond, which the trace's floating-point times can't
+// tell apart, stopping the scenario if either names none.
 func (w *world) ThenEverySpanEndsBeforeAnyStarts(process, first, then string) {
 	w.t.Helper()
 	tr := w.theTrace()
@@ -185,7 +195,7 @@ func (w *world) ThenEverySpanEndsBeforeAnyStarts(process, first, then string) {
 	}
 	for _, b := range before {
 		for _, a := range after {
-			if b.end > a.TS {
+			if b.end > a.TS+1 { // in microseconds
 				w.t.Errorf("%q ends after %q starts", b.Name, a.Name)
 			}
 		}
@@ -626,4 +636,189 @@ func (s *traceSlice) childNames() []string {
 // within reports whether s takes place within the time of other, by the trace's clock.
 func (s *traceSlice) within(other *traceSlice) bool {
 	return s.TS >= other.TS && s.end <= other.end
+}
+
+// printedTrace matches the line that a command prints of its trace, on standard error.
+var printedTrace = regexp.MustCompile(`(?m)^vamos: trace (sha256:[0-9a-f]{64})$`)
+
+// ThenItPrintsItsTrace checks that the last command printed exactly one line naming its trace's digest on standard
+// error, `vamos: trace sha256:<hex>`, and none on standard output, which later steps read as <printed trace>.
+func (w *world) ThenItPrintsItsTrace() {
+	w.t.Helper()
+	found := printedTrace.FindAllStringSubmatch(w.stderr, -1)
+	if len(found) != 1 {
+		w.t.Fatalf("standard error names %d traces, want 1:\n%s", len(found), w.stderr)
+	}
+	if printedTrace.MatchString(w.stdout) {
+		w.t.Errorf("standard output names a trace:\n%s", w.stdout)
+	}
+	w.printedTrace = found[0][1]
+}
+
+// ThenItPrintsNoTrace checks that the last command printed no line naming a trace.
+func (w *world) ThenItPrintsNoTrace() {
+	w.t.Helper()
+	if printedTrace.MatchString(w.stderr) || printedTrace.MatchString(w.stdout) {
+		w.t.Errorf("the command printed a trace's digest:\n%s%s", w.stdout, w.stderr)
+	}
+}
+
+// WhenIReadTheTrace runs `vamos trace name <file>` with options, in which name may be <printed trace>, the digest that
+// ThenItPrintsItsTrace read, <job>, the last job the scenario's coordinator accepted, or <attempt trace of NAME> or
+// <log of NAME>, the digest that the executor's span NAME, or that span's cache write, names in the trace read last;
+// steps about the trace then read the file it writes.
+func (w *world) WhenIReadTheTrace(name string, options ...option) {
+	w.t.Helper()
+	name = w.traceName(name)
+	c := w.apply("trace", options)
+	w.traceTo = filepath.Join(w.t.TempDir(), "stored-trace.json")
+	w.trace = nil
+	w.sendsNothing("WhenIReadTheTrace")
+	w.run(append([]string{"trace", name, w.traceTo}, c.flags...)...)
+}
+
+// traceName returns name, as WhenIReadTheTrace takes it, with its placeholder replaced.
+func (w *world) traceName(name string) string {
+	w.t.Helper()
+	switch {
+	case name == "<printed trace>":
+		if w.printedTrace == "" {
+			w.t.Fatal("no step read a printed trace's digest")
+		}
+		return w.printedTrace
+	case name == "<other client's trace>":
+		w.otherClientEnded()
+		found := printedTrace.FindAllStringSubmatch(w.otherBuild.output.String(), -1)
+		if len(found) != 1 {
+			w.t.Fatalf("the other client named %d traces, want 1:\n%s", len(found), w.otherBuild.output.String())
+		}
+		return found[0][1]
+	case name == "<job>":
+		w.jobsMu.Lock()
+		defer w.jobsMu.Unlock()
+		if len(w.jobIDs) == 0 {
+			w.t.Fatal("the scenario's coordinator accepted no job")
+		}
+		return w.jobIDs[len(w.jobIDs)-1]
+	case strings.HasPrefix(name, "<attempt trace of ") && strings.HasSuffix(name, ">"):
+		span := strings.TrimSuffix(strings.TrimPrefix(name, "<attempt trace of "), ">")
+		return w.spanArg(span, "attempt trace")
+	case strings.HasPrefix(name, "<log of ") && strings.HasSuffix(name, ">"):
+		span := strings.TrimSuffix(strings.TrimPrefix(name, "<log of "), ">")
+		return w.spanArg(span, "log")
+	}
+	return name
+}
+
+// spanArg returns the argument key, a digest, of the executor's span named name or of the cache write within it, in
+// the trace read last, failing the scenario if neither says it.
+func (w *world) spanArg(name, key string) string {
+	w.t.Helper()
+	s := w.span("executor", name)
+	if d, ok := s.Args[key].(string); ok {
+		return d
+	}
+	for _, c := range s.children {
+		if d, ok := c.Args[key].(string); ok && c.Name == "cache write" {
+			return d
+		}
+	}
+	w.t.Fatalf("the executor's span %q, and its cache write, say no %q: %v", name, key, s.Args)
+	return ""
+}
+
+// GivenTheAttemptTraceOfIsRemoved removes from the build cache the attempt trace that the executor's span name names,
+// in the trace read last, as a person tidying the disk might, leaving the result that names it.
+func (w *world) GivenTheAttemptTraceOfIsRemoved(name string) {
+	w.t.Helper()
+	d := digest.Digest(w.spanArg(name, "attempt trace"))
+	if err := os.Remove(filepath.Join(w.cacheDir(), "cas", "sha256", d.Encoded())); err != nil {
+		w.t.Fatal(err)
+	}
+}
+
+// ThenItWritesNoTrace checks that the last command, which was to write a trace, wrote no file.
+func (w *world) ThenItWritesNoTrace() {
+	w.t.Helper()
+	if w.tracePath == "" {
+		w.t.Fatal("the last command wasn't to write a trace")
+	}
+	if _, err := os.Stat(w.tracePath); !errors.Is(err, fs.ErrNotExist) {
+		w.t.Errorf("%s is there, or can't be checked (%v); want no file", w.tracePath, err)
+	}
+}
+
+// ThenTheTraceSpanSaysNothingOf checks that the span of process that name names has none of the arguments keys.
+func (w *world) ThenTheTraceSpanSaysNothingOf(process, name string, keys ...string) {
+	w.t.Helper()
+	s := w.span(process, name)
+	for _, k := range keys {
+		if v, ok := s.Args[k]; ok {
+			w.t.Errorf("the span %q says %s: %v; want nothing of it", name, k, v)
+		}
+	}
+}
+
+// ThenTheStoredTracesDoNotContain checks that none of values is in the command trace that the last command printed,
+// in the manifests it names, nor in the attempt traces they name, as the build cache holds them.
+func (w *world) ThenTheStoredTracesDoNotContain(values ...string) {
+	w.t.Helper()
+	store, err := cache.OpenDirectory(w.cacheDir())
+	if err != nil {
+		w.t.Fatal(err)
+	}
+	defer store.Close()
+	ctx := w.t.Context()
+	read := func(d digest.Digest) []byte {
+		w.t.Helper()
+		b, err := store.Stat(ctx, d)
+		if err != nil {
+			w.t.Fatal(err)
+		}
+		data, err := store.Read(ctx, b, tracing.MaxTraceSize)
+		if err != nil {
+			w.t.Fatal(err)
+		}
+		for _, v := range values {
+			if bytes.Contains(data, []byte(v)) {
+				w.t.Errorf("the stored trace %s holds %q", d, v)
+			}
+		}
+		return data
+	}
+	command, err := api.DecodeCommandTrace(read(digest.Digest(w.traceName("<printed trace>"))))
+	if err != nil {
+		w.t.Fatal(err)
+	}
+	for _, j := range command.Jobs {
+		if j.Manifest == nil {
+			continue
+		}
+		manifest, err := api.DecodeJobTrace(read(j.Manifest.Digest))
+		if err != nil {
+			w.t.Fatal(err)
+		}
+		for _, e := range manifest.Entries {
+			if e.Trace != nil {
+				read(e.Trace.Digest)
+			}
+		}
+	}
+}
+
+// ThenTheHitTookAtLeast checks that the executor's span name, a reused target's, says that the run that made its
+// result took at least d, and that reusing it saved that less the time the hit took, never less than nothing.
+func (w *world) ThenTheHitTookAtLeast(name string, d time.Duration) {
+	w.t.Helper()
+	s := w.span("executor", name)
+	took, err := time.ParseDuration(fmt.Sprint(s.Args["took"]))
+	if err != nil || took < d {
+		w.t.Errorf("the hit says its result took %v, %v; want at least %v", s.Args["took"], err, d)
+	}
+	saved, err := time.ParseDuration(fmt.Sprint(s.Args["saved"]))
+	hit := time.Duration(s.Dur * float64(time.Microsecond))
+	if err != nil || saved < 0 || saved < took-hit-time.Millisecond || saved > took {
+		w.t.Errorf("the hit says it saved %v, %v, of %v, taking %v itself; want what it took less the hit's time",
+			s.Args["saved"], err, took, hit)
+	}
 }

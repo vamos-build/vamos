@@ -55,7 +55,8 @@ Secret values stay in the client process; they never enter container images, bui
 
 ## Performance traces
 
-Pass `--trace <file.json>` to write a Perfetto-format trace:
+Every command that builds is traced and prints its trace's digest; pass `--trace <file.json>` to also write the
+trace to a file, in Perfetto's format, once the command's work ends:
 
 ```sh
 vamos build lint test app --trace build-trace.json
@@ -63,6 +64,7 @@ vamos load app app:dev --trace load-trace.json
 ```
 
 Open the resulting file in [Perfetto](https://ui.perfetto.dev).
+[`vamos trace`](trace.md) writes the same file later from the printed digest.
 See [traces](../cache.md#traces).
 
 ## TLS verification

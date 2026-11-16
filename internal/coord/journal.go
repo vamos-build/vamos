@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/vamos-build/vamos/internal/api"
+	"github.com/vamos-build/vamos/internal/cache"
 
 	"golang.org/x/sys/unix"
 )
@@ -69,6 +70,9 @@ type record struct {
 	Done      int64               `json:"done,omitempty"`    // the position of its terminal event, once it ended
 	Ended     time.Time           `json:"ended,omitzero"`
 	Evicted   time.Time           `json:"evicted,omitzero"` // once it was evicted: a tombstone
+	// Trace is a tombstone's: the blob of the job's manifest, which its outcome named, so that the job's trace is
+	// still found by its ID once it is evicted.
+	Trace *cache.Blob `json:"trace,omitempty"`
 }
 
 // tombstones is how many evicted jobs the journal remembers, as sched.Jobs does in memory.
@@ -306,8 +310,8 @@ func (j *journal) remove(id api.JobID) error {
 	return nil
 }
 
-// evict replaces the record of the job id, which the jobs table has evicted, with a tombstone, and removes the
-// oldest tombstones beyond those remembered.
+// evict replaces the record of the job id, which the jobs table has evicted, with a tombstone naming the blob of
+// its manifest, which its outcome named, if any, and removes the oldest tombstones beyond those remembered.
 func (j *journal) evict(id api.JobID) error {
 	if j == nil {
 		return nil
@@ -322,6 +326,9 @@ func (j *journal) evict(id api.JobID) error {
 		return nil
 	}
 	tombstone := &record{ID: id, Evicted: time.Now()}
+	if r.Outcome != nil {
+		tombstone.Trace = r.Outcome.Trace
+	}
 	if err := j.store(tombstone); err != nil {
 		return err
 	}

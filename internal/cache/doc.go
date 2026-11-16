@@ -5,6 +5,8 @@
 // ContentStore holds blobs by digest: graphs, source files, trees and logs.
 // RecordStore holds the latest result of each action and what each tag resolved to; latest means the last write
 // that completed.
+// It also holds each target's history, which is added to rather than replaced, so that concurrent adds all survive,
+// and which names no blob, so that it outlives a prune until it goes unused for HistoryRetention.
 // Directory implements both in a directory on disk, the one beside the executor's container store,
 // and Memory implements both for tests; cachetest.Content and cachetest.Records hold every implementation,
 // a remote one included, to one contract.
@@ -29,11 +31,16 @@
 // Operations on the local filesystem, PutFile and Checkout, are functions over a store, not methods of it,
 // as is LogRecorder, whose file the caller owns until Save or Discard.
 // Checkout and ReplayLog stop between entries when their context ends.
+// History adds and PruneHistory hold the history lock, a handle's channel and then a flock on history/lock,
+// tried without blocking for a bounded time; reads of history take no lock, since a rename publishes a record whole.
 //
 // # Changes
 //
 // Blob, Tree, ActionResult and TagRecord define stored data, each with a Validate;
-// Provenance in a result describes the executor, emulation included, and is no part of a key.
+// Provenance in a result describes the executor, emulation included, and the run that made it;
+// it is no part of a key, nor is the result's Trace, which no checker reads, so that a lost trace costs no reuse.
+// History, HistoryEntry and History.add in history.go define target history and its budget within MaxHistorySize.
+// Stat reads a blob's size from its digest alone, without verifying it.
 // Location says where an image's bytes are, in a result and in a tag record's TagInstance, which a resolve
 // completes with the image's ID, platform and epoch, so that a later build uses it without resolving the tag;
 // an instance written before that is incomplete, and still decodes.

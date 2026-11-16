@@ -3,7 +3,9 @@ package features
 import (
 	"maps"
 	"slices"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/vamos-build/vamos/internal/testenv"
 )
@@ -14,6 +16,17 @@ import (
 func newTraceWorld(t *testing.T) *world {
 	t.Helper()
 	return newBuildingWorld(t)
+}
+
+// slowTaskSteps returns the names of the steps of aSlowTask(nonce)'s task: setting the nonce, then sleeping six
+// seconds, long enough for another build to join it.
+func slowTaskSteps(nonce string) []string {
+	return []string{`env(NONCE="` + nonce + `")`, `run(["sleep", "6"])`}
+}
+
+// aSlowTask declares the task "slow", on busybox, whose steps are slowTaskSteps(nonce).
+func aSlowTask(nonce string) string {
+	return `task(name="slow", base="busybox", steps=[` + strings.Join(slowTaskSteps(nonce), ", ") + `])`
 }
 
 // aTaskAndALayer declares the task "gen", which joins the files of the glob "src", and the layer "app", which adds
@@ -440,4 +453,342 @@ func TestTrace_PathCanBeWrittenAndIsNotTheOutput(t *testing.T) {
 			w.ThenNothingElseIsOutsideTheProject()
 		})
 	}
+}
+
+// aLayerThatRuns declares the layer "app", on busybox, whose step runs, given nonce, and takes two seconds, so that
+// a later build that reuses it has time to save.
+func aLayerThatRuns(nonce string) string {
+	return `
+		layer(name="app", base="busybox", steps=[env(NONCE="` + nonce + `"), run(["sh", "-c", "sleep 2; echo made"])])
+	`
+}
+
+// TestTrace_EveryCommandThatBuildsIsTraced specifies, as the cache reference says, that "every command that builds is
+// traced, whether or not you ask", and that "a command's trace holds all of its work: this process's, and each job's
+// on its executor".
+func TestTrace_EveryCommandThatBuildsIsTraced(t *testing.T) {
+	t.Run("A build without --trace has a trace", func(t *testing.T) {
+		w := newTraceWorld(t)
+		w.GivenAProjectThatPullsBusybox()
+		w.GivenTheBuildFileDeclares(aLayerThatRuns(testenv.NewNonce()))
+		w.WhenIBuild("app")
+		w.ThenItSucceeds()
+		w.ThenItPrintsItsTrace()
+		w.WhenIReadTheTrace("<printed trace>")
+		w.ThenItSucceeds()
+		w.ThenTheTraceSpanIsWithin("executor", `run(["sh", "-c", "sleep 2; echo made"])`, "executor", `layer "app"`)
+		w.ThenTheTraceSpanIsWithin("executor", `layer "app"`, "vamos", "vamos build app")
+	})
+
+	t.Run("A push's trace holds its build and its push", func(t *testing.T) {
+		w := newTraceWorld(t)
+		w.GivenAProjectThatPullsBusybox()
+		w.GivenARegistry()
+		w.GivenTheBuildFileDeclares(aLayerThatRuns(testenv.NewNonce()))
+		w.WhenIPush("app", "<registry>/team/app:v1")
+		w.ThenItSucceeds()
+		w.ThenItPrintsItsTrace()
+		w.WhenIReadTheTrace("<printed trace>")
+		w.ThenItSucceeds()
+		w.ThenTheTraceSpanHolds("vamos", "vamos push app *", "load", "store graph", "run", "pushing to *")
+		w.ThenTheTraceSpanIsWithin("executor", `run(["sh", "-c", "sleep 2; echo made"])`, "executor", `layer "app"`)
+		w.ThenTheTraceSpanIsWithin("executor", "push to *", "vamos", "pushing to <registry>/team/app:v1")
+	})
+}
+
+// TestTrace_ACommandPrintsItsTrace specifies, as the CLI's output reference says, that "a command that builds prints
+// its trace's digest on standard error once its jobs end, whether it succeeded or failed".
+func TestTrace_ACommandPrintsItsTrace(t *testing.T) {
+	t.Run("A failed build prints its trace", func(t *testing.T) {
+		w := newTraceWorld(t)
+		w.GivenAProjectThatPullsBusybox()
+		w.GivenTheBuildFileDeclares(`
+			task(name="check", base="busybox", steps=[run(["sh", "-c", "exit 3"]), env(NONCE="` +
+			testenv.NewNonce() + `")])
+		`)
+		w.WhenIBuild("check")
+		w.ThenItFailsWith(`task "check": run(["sh", "-c", "exit 3"]) failed`)
+		w.ThenItPrintsItsTrace()
+		w.WhenIReadTheTrace("<printed trace>")
+		w.ThenItSucceeds()
+		w.ThenTheTraceSpanSaysAtLeast("executor", `run(["sh", "-c", "exit 3"])`, traceArgs{"error": "*exit status 3*"})
+	})
+
+	t.Run("A command that runs no job prints no trace", func(t *testing.T) {
+		w := newWorld(t)
+		w.GivenTheProjectHolds(files{"BUILD": "layer(name=\"app\", base=\"scratch\")\nnope("})
+		w.WhenIBuild("app")
+		w.ThenItFailsWith("/project/BUILD:2:6: got end of file, want ')'")
+		w.ThenItPrintsNoTrace()
+	})
+
+	t.Run("--trace writes a command that ran no job", func(t *testing.T) {
+		w := newWorld(t)
+		w.GivenTheProjectHolds(files{"BUILD": "layer(name=\"app\", base=\"scratch\")\nnope("})
+		w.WhenIBuild("app", traced())
+		w.ThenItFailsWith("/project/BUILD:2:6: got end of file, want ')'")
+		w.ThenItPrintsNoTrace()
+		w.ThenTheTraceSpanHolds("vamos", "vamos build app", "load")
+		w.ThenTheTraceSpanSaysAtLeast("vamos", "load", traceArgs{"error": "*got end of file*"})
+	})
+
+	t.Run("A trace that can't be stored is warned about", func(t *testing.T) {
+		w := newTraceWorld(t)
+		w.GivenACoordinatorThatRefusesToStoreCommandTraces()
+		w.GivenTheBuildFileDeclares(`layer(name="app", base="scratch", steps=[env(NONCE="` + testenv.NewNonce() +
+			`")])`)
+		w.WhenIBuild("app", onTheCoordinator("<coordinator>"), traced())
+		w.ThenItSucceeds()
+		w.ThenItPrintsNoTrace()
+		w.ThenTheErrorOutputIncludes("vamos: warning: the command's trace couldn't be stored: ")
+		// --trace writes the trace all the same, the executor's spans included.
+		w.ThenTheTraceSpanIsWithin("executor", `env(NONCE="*`, "executor", `layer "app"`)
+	})
+
+	t.Run("An interrupted build prints its trace, which holds what ran", func(t *testing.T) {
+		w := newTraceWorld(t)
+		w.GivenAProjectThatPullsBusybox()
+		w.GivenTheBuildFileDeclares(`
+			layer(name="app", base="busybox", steps=[env(NONCE="` + testenv.NewNonce() + `"),
+			    run(["sh", "-c", "echo started; sleep 30"])])
+		`)
+		w.WhenIBuild("app", interruptedOnceItPrints("started"), traced())
+		w.ThenItIsInterrupted()
+		w.ThenItPrintsItsTrace()
+		w.ThenTheTraceSpanIsWithin("executor", `run(["sh", "-c", "echo started; sleep 30"])`, "executor",
+			`layer "app"`)
+		w.WhenIReadTheTrace("<printed trace>")
+		w.ThenItSucceeds()
+		w.ThenTheTraceSpanIsWithin("executor", `run(["sh", "-c", "echo started; sleep 30"])`, "executor",
+			`layer "app"`)
+	})
+}
+
+// TestTrace_VamosTraceWritesAStoredTrace specifies, as the CLI reference of vamos trace says, that it "writes a stored
+// trace to file.json": "a digest reads the trace from the executor's build cache until a prune removes it", and "a job
+// ID reads that job's trace from the coordinator that ran it", failing, writing nothing, for what it can't read.
+func TestTrace_VamosTraceWritesAStoredTrace(t *testing.T) {
+	t.Run("--trace and vamos trace write the same trace", func(t *testing.T) {
+		w := newTraceWorld(t)
+		w.GivenAProjectThatPullsBusybox()
+		w.GivenTheBuildFileDeclares(aLayerThatRuns(testenv.NewNonce()))
+		w.WhenIBuild("app", traced())
+		w.ThenItSucceeds()
+		written := w.theTrace().String()
+		w.ThenItPrintsItsTrace()
+		w.WhenIReadTheTrace("<printed trace>")
+		w.ThenItSucceeds()
+		if got := w.theTrace().String(); got != written {
+			w.t.Errorf("vamos trace wrote\n%s\nwhere --trace wrote\n%s", got, written)
+		}
+	})
+
+	t.Run("A coordinator's job's trace is read by its job ID", func(t *testing.T) {
+		w := newTraceWorld(t)
+		w.GivenACoordinator()
+		w.GivenTheBuildFileDeclares(`layer(name="app", base="scratch", steps=[env(NONCE="` + testenv.NewNonce() +
+			`")])`)
+		w.WhenIBuild("app", onTheCoordinator("<coordinator>"))
+		w.ThenItSucceeds()
+		w.WhenIReadTheTrace("<job>", onTheCoordinator("<coordinator>"))
+		w.ThenItSucceeds()
+		w.ThenTheTraceSpanHolds("executor", `layer "app"`, "cache lookup", "start", `env(NONCE="*`, "commit",
+			"cache write")
+	})
+
+	t.Run("A job the coordinator no longer remembers", func(t *testing.T) {
+		w := newTraceWorld(t)
+		w.GivenACoordinator()
+		w.GivenTheBuildFileDeclares(`layer(name="app", base="scratch", steps=[env(NONCE="` + testenv.NewNonce() +
+			`")])`)
+		w.WhenIBuild("app", onTheCoordinator("<coordinator>"))
+		w.ThenItSucceeds()
+		w.ThenItPrintsItsTrace()
+		w.GivenTheCoordinatorRestartsWithoutItsState()
+		w.WhenIReadTheTrace("<job>", onTheCoordinator("<coordinator>"))
+		w.ThenItFailsWith("the coordinator doesn't know the job <job> any more; " +
+			"the trace digest that its command printed still reads its trace")
+		w.ThenItWritesNoTrace()
+		w.WhenIReadTheTrace("<printed trace>", onTheCoordinator("<coordinator>"))
+		w.ThenItSucceeds()
+		w.ThenTheTraceSpanHolds("executor", `layer "app"`, "cache lookup", "start", `env(NONCE="*`, "commit",
+			"cache write")
+	})
+
+	for _, example := range []struct {
+		name, trace, error string
+	}{
+		{name: "A job ID without a coordinator is a mistake", trace: "0123456789abcdef",
+			error: `"0123456789abcdef" is a job, which is read from the coordinator that holds it: give ` +
+				`--coordinator, or the trace's digest, which the command printed`},
+		{name: "A digest cut short is a mistake", trace: "sha256:abc123",
+			error: `"sha256:abc123" is not a valid digest: invalid checksum digest length`},
+	} {
+		t.Run(example.name, func(t *testing.T) {
+			w := newWorld(t)
+			w.WhenIReadTheTrace(example.trace)
+			w.ThenItFailsWith(example.error)
+		})
+	}
+
+	t.Run("A digest that names no trace is a mistake", func(t *testing.T) {
+		w := newTraceWorld(t)
+		w.GivenAProjectThatPullsBusybox()
+		w.GivenTheBuildFileDeclares(aLayerThatRuns(testenv.NewNonce()))
+		w.WhenIBuild("app", traced())
+		w.ThenItSucceeds()
+		log := w.traceName(`<log of layer "app">`)
+		w.WhenIReadTheTrace(log)
+		w.ThenItFailsWith(log + " is not a trace this vamos can read: ")
+	})
+
+	t.Run("A pruned trace is gone", func(t *testing.T) {
+		w := newTraceWorld(t)
+		w.GivenStoresOfTheScenariosOwn()
+		w.GivenTheBuildFileDeclares(`layer(name="app", base="scratch", steps=[env(NONCE="` + testenv.NewNonce() +
+			`")])`)
+		w.WhenIBuild("app")
+		w.ThenItSucceeds()
+		w.ThenItPrintsItsTrace()
+		w.WhenIPrune()
+		w.ThenItSucceeds()
+		w.WhenIReadTheTrace("<printed trace>")
+		w.ThenItFailsWith(w.traceName("<printed trace>") + ": the executor no longer holds this trace; a prune of " +
+			"the build cache removes traces")
+	})
+}
+
+// TestTrace_AnAttemptsTraceIsKeptWithItsResult specifies, as the cache reference says, that "a build that waits for
+// another build's run of the same target shows that run's steps, on a track named for the target with (shared)", and
+// that a reused target's span says "when the result was made, how long making it took, and the time reusing it
+// saved".
+func TestTrace_AnAttemptsTraceIsKeptWithItsResult(t *testing.T) {
+	t.Run("A build that joins another's run shows its steps on the target's shared track", func(t *testing.T) {
+		w := newTraceWorld(t)
+		w.GivenARegistry()
+		w.GivenACoordinatorWithAWorker()
+		w.GivenAProjectThatPullsBusybox()
+		w.GivenTheBuildFileDeclares(`task(name="slow", base="busybox", steps=[env(NONCE="` + testenv.NewNonce() +
+			`"), run(["sleep", "6"])])`)
+		w.GivenAnotherClientBuildsOnTheCoordinator("slow", onTheCoordinator("<coordinator>"))
+		w.GivenTheOtherClientIsBuildingIt()
+		w.WhenIBuild("slow", onTheCoordinator("<coordinator>"), traced())
+		w.ThenItSucceeds()
+		w.ThenTheTraceSpanIsOnTrack("worker", `run(["sleep", "6"])`, `task "slow" (shared)`)
+	})
+
+	t.Run("Two builds that share an attempt both show its steps", func(t *testing.T) {
+		w := newTraceWorld(t)
+		w.GivenARegistry()
+		w.GivenACoordinatorWithAWorker()
+		w.GivenAProjectThatPullsBusybox()
+		nonce := testenv.NewNonce()
+		w.GivenTheBuildFileDeclares(aSlowTask(nonce))
+		steps := slowTaskSteps(nonce)
+		w.GivenAnotherClientBuildsOnTheCoordinator("slow", onTheCoordinator("<coordinator>"))
+		w.GivenTheOtherClientIsBuildingIt()
+		w.WhenIBuild("slow", onTheCoordinator("<coordinator>"), traced())
+		w.ThenItSucceeds()
+		for _, step := range steps {
+			w.ThenTheTraceSpanIsOnTrack("worker", step, `task "slow" (shared)`)
+		}
+		w.ThenEverySpanEndsBeforeAnyStarts("worker", steps[0], steps[1])
+		w.ThenTheOtherClientSucceeds()
+		w.WhenIReadTheTrace("<other client's trace>", onTheCoordinator("<coordinator>"))
+		w.ThenItSucceeds()
+		for _, step := range steps { // its own, off the shared track
+			w.ThenTheTraceSpanIsOnTrack("worker", step, step)
+		}
+		w.ThenEverySpanEndsBeforeAnyStarts("worker", steps[0], steps[1])
+		w.ThenTheTraceHasNoSpan("executor", "trace incomplete")
+	})
+
+	t.Run("A build that left a shared attempt says so", func(t *testing.T) {
+		w := newTraceWorld(t)
+		w.GivenARegistry()
+		w.GivenACoordinatorWithAWorker()
+		w.GivenAProjectThatPullsBusybox()
+		nonce := testenv.NewNonce()
+		w.GivenTheBuildFileDeclares(aSlowTask(nonce))
+		steps := slowTaskSteps(nonce)
+		w.GivenAnotherClientBuildsOnTheCoordinator("slow", onTheCoordinator("<coordinator>"))
+		w.GivenTheOtherClientIsBuildingIt()
+		w.GivenTheOtherClientIsInterruptedOnceJoined()
+		w.WhenIBuild("slow", onTheCoordinator("<coordinator>"), traced())
+		w.ThenItSucceeds()
+		w.ThenTheOtherClientIsInterrupted()
+		for _, step := range steps {
+			w.ThenTheTraceSpanIsOnTrack("worker", step, `task "slow" (shared)`)
+		}
+		w.ThenEverySpanEndsBeforeAnyStarts("worker", steps[0], steps[1])
+		w.WhenIReadTheTrace("<other client's trace>", onTheCoordinator("<coordinator>"))
+		w.ThenItSucceeds()
+		w.ThenTheTraceSpanSaysAtLeast("executor", "trace incomplete",
+			traceArgs{"reason": "the job left the attempt running"})
+	})
+
+	t.Run("A reused target shows the time it saved", func(t *testing.T) {
+		w := newTraceWorld(t)
+		w.GivenAProjectThatPullsBusybox()
+		w.GivenTheBuildFileDeclares(aLayerThatRuns(testenv.NewNonce()))
+		w.WhenIBuild("app")
+		w.ThenItSucceeds()
+		w.WhenIBuild("app", traced())
+		w.ThenItSucceeds()
+		w.ThenTheTargetsWere(statuses{layer("app"): reused})
+		w.ThenTheTraceSpanSaysAtLeast("executor", `layer "app"`, traceArgs{"outcome": "cached", "made": "*",
+			"took": "*s", "saved": "*s", "attempt trace": "sha256:*"})
+		w.ThenTheHitTookAtLeast(`layer "app"`, 2*time.Second)
+		w.WhenIReadTheTrace(`<attempt trace of layer "app">`)
+		w.ThenItSucceeds()
+		w.ThenTheTraceSpanIsOnTrack("executor", `run(["sh", "-c", "sleep 2; echo made"])`, `layer "app"`)
+	})
+}
+
+// TestTrace_AMissingTraceNeverCostsAHit specifies, as the cache reference says, that "a result whose trace is gone is
+// reused all the same; a trace that would show it says the trace is gone".
+func TestTrace_AMissingTraceNeverCostsAHit(t *testing.T) {
+	w := newTraceWorld(t)
+	w.GivenStoresOfTheScenariosOwn()
+	w.GivenTheBuildFileDeclares(`layer(name="app", base="scratch", steps=[env(NONCE="` + testenv.NewNonce() +
+		`")])`)
+	w.WhenIBuild("app", traced())
+	w.ThenItSucceeds()
+	w.ThenItPrintsItsTrace()
+	w.GivenTheAttemptTraceOfIsRemoved(`layer "app"`)
+
+	t.Run("A job whose attempt's trace is gone says so", func(t *testing.T) {
+		w.WhenIReadTheTrace("<printed trace>")
+		w.ThenItSucceeds()
+		w.ThenTheTraceSpanSaysAtLeast("executor", "trace incomplete",
+			traceArgs{"reason": "the attempt's trace is gone from the build cache"})
+		w.ThenTheTraceSpanIsOnTrack("executor", "trace incomplete", `layer "app"`)
+	})
+
+	t.Run("A result whose trace was removed is reused", func(t *testing.T) {
+		w.WhenIBuild("app")
+		w.ThenItSucceeds()
+		w.ThenTheTargetsWere(statuses{layer("app"): reused})
+	})
+}
+
+// TestTrace_SecretsNeverReachAStoredTrace specifies that a stored trace, a command's, a job's or an attempt's, holds
+// no secret's value, as --trace's file holds none.
+func TestTrace_SecretsNeverReachAStoredTrace(t *testing.T) {
+	w := newTraceWorld(t)
+	w.GivenStoresOfTheScenariosOwn()
+	w.GivenTheBuildFileDeclares(`
+		glob(name="src", include=["a.txt"])
+		task(name="secret", base="scratch", steps=[env(NONCE="` + testenv.NewNonce() + `"),
+		    add("src", "/src")])
+	`)
+	w.GivenTheProjectHolds(files{"a.txt": "a"})
+	w.GivenTheEnvironmentSets("VAMOS_TEST_TOKEN", "stored-secret-value")
+	w.WhenIBuild("secret", withSecrets("id=token,env=VAMOS_TEST_TOKEN"))
+	w.ThenItSucceeds()
+	w.ThenItPrintsItsTrace()
+	w.ThenTheStoredTracesDoNotContain("stored-secret-value")
+	w.WhenIReadTheTrace("<printed trace>")
+	w.ThenItSucceeds()
+	w.ThenTheTraceDoesNotContain("stored-secret-value")
 }

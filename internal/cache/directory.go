@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/opencontainers/go-digest"
 )
@@ -24,8 +25,14 @@ import (
 // Both take the lock without waiting: a prune that meets an open handle, and an open that meets a prune,
 // each fail with ErrLocked, naming the other.
 type Directory struct {
-	dir  string // holds cas/sha256/<hex>, ac/<hex>, tags/<hex>, tmp/ and the lock file
+	dir  string // holds cas/sha256/<hex>, ac/<hex>, tags/<hex>, history/<hex>, tmp/ and the lock file
 	lock *dirLock
+
+	// history serializes this handle's history adds and prunes, before the history lock file does across handles
+	// and processes; a channel rather than a mutex, so that waiting for it can end.
+	history     chan struct{}
+	historyWait time.Duration      // how long an add or prune waits for the history lock, in all
+	remove      func(string) error // removes a history record; tests replace it
 }
 
 var (
@@ -34,7 +41,7 @@ var (
 )
 
 // subdirectories are the directories a Directory holds.
-var subdirectories = []string{"cas/sha256", "ac", "tags", "tmp"}
+var subdirectories = []string{"cas/sha256", "ac", "tags", "history", "tmp"}
 
 // OpenDirectory opens the stores in dir, creating it if need be, and holds its lock shared until Close.
 // It fails with ErrLocked while a prune holds the directory.
@@ -46,7 +53,13 @@ func OpenDirectory(dir string) (*Directory, error) {
 	if err != nil {
 		return nil, fmt.Errorf("opening build cache: %w", err)
 	}
-	return &Directory{dir: dir, lock: lock}, nil
+	return &Directory{
+		dir:         dir,
+		lock:        lock,
+		history:     make(chan struct{}, 1),
+		historyWait: historyLockWait,
+		remove:      os.Remove,
+	}, nil
 }
 
 // Close releases the directory's lock.
@@ -244,6 +257,22 @@ func (d *Directory) Read(ctx context.Context, b Blob, limit int64) ([]byte, erro
 	return readAll(ctx, d, b, limit)
 }
 
+// Stat returns the blob held under d, by its file's size.
+func (d *Directory) Stat(_ context.Context, dg digest.Digest) (Blob, error) {
+	b := Blob{Digest: dg}
+	if err := b.Validate(); err != nil {
+		return Blob{}, err
+	}
+	info, err := os.Stat(d.blobPath(b))
+	if errors.Is(err, fs.ErrNotExist) {
+		return Blob{}, missing(b)
+	} else if err != nil {
+		return Blob{}, err
+	}
+	b.Size = info.Size()
+	return b, nil
+}
+
 // ReadMany returns the content of each of blobs, verified.
 func (d *Directory) ReadMany(ctx context.Context, blobs []Blob, limit int64) ([][]byte, error) {
 	return readMany(ctx, d, blobs, limit)
@@ -278,6 +307,11 @@ func (d *Directory) tagPath(name string) string {
 // readRecord returns the record at path, decoded into v, which must be at most MaxRecordSize bytes,
 // or false if there is none, or it can't be decoded, which is as good as none.
 func readRecord(path string, v interface{ Validate() error }) (bool, error) {
+	return readRecordWithin(path, MaxRecordSize, v)
+}
+
+// readRecordWithin is readRecord for a record of at most limit bytes.
+func readRecordWithin(path string, limit int64, v interface{ Validate() error }) (bool, error) {
 	f, err := os.Open(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return false, nil
@@ -285,11 +319,11 @@ func readRecord(path string, v interface{ Validate() error }) (bool, error) {
 		return false, err
 	}
 	defer f.Close()
-	data, err := io.ReadAll(limited(f, MaxRecordSize))
+	data, err := io.ReadAll(limited(f, limit))
 	if err != nil {
 		return false, err
 	}
-	if int64(len(data)) > MaxRecordSize || json.Unmarshal(data, v) != nil || v.Validate() != nil {
+	if int64(len(data)) > limit || json.Unmarshal(data, v) != nil || v.Validate() != nil {
 		return false, nil
 	}
 	return true, nil
@@ -301,6 +335,11 @@ func (d *Directory) writeRecord(path string, v any) error {
 	if err != nil {
 		return err
 	}
+	return d.writeRecordBytes(path, data)
+}
+
+// writeRecordBytes writes data, an encoded record, at path, as writeRecord does.
+func (d *Directory) writeRecordBytes(path string, data []byte) error {
 	f, err := d.create()
 	if err != nil {
 		return err

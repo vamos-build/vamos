@@ -100,8 +100,8 @@ A [`sched.Request`](../../internal/sched/doc.go) carries all inputs an action re
 including resolved tag records for pull actions;
 the runner does not read the record store or the target graph directly.
 Requests and reports serialize to JSON for transport between the coordinator and workers over HTTP.
-Only `sched.Sharing` writes to the record store, and only after the runner has published target artifacts
-and returned its report.
+Only `sched.Sharing` writes results and tag records to the record store, and only after the runner has published
+target artifacts and returned its report; the scheduler adds to target history, which names no artifact.
 This sequencing guarantees that the record store never references missing artifacts;
 when concurrent writes occur, the latest write wins.
 
@@ -183,9 +183,9 @@ Sharing operates under specific coordination rules:
 - **Cancellation**: Cancelling a job detaches that job from its shared attempt.
   An attempt continues running as long as at least one job remains attached;
   it is cancelled only when all attached jobs have detached.
-- **Trace spans**: Attempt trace spans route to the trace session of the job that initiated the attempt.
-  If that job detaches while other jobs remain attached, subsequent spans are dropped so the initial job
-  produces no further events after its final flush.
+- **Trace spans**: An attempt records its spans apart from every job's, and stores them as its own trace
+  when its runner returns; each job that waits for the attempt to end is told of that trace,
+  and a job that detaches while others remain learns only the attempt's ID (see [Trace transport](#trace-transport)).
 - **Intra-job deduplication**: Nodes within a single job that share an identical action key
   (such as multiple platform variants of an index running a task on the execution platform)
   share an attempt unless a rebuild is forced.
@@ -263,42 +263,63 @@ and distinct jobs run concurrently within the executor.
 When invoking callbacks, data buffers may be shared, callback functions may execute in parallel,
 and invoking client callbacks while holding internal mutexes can induce latency spikes or deadlocks.
 Synchronization contracts are documented alongside the symbols that enforce them:
-`sched.Events`, `spanBatch`, `blobTracker`, `cache.LogRecorder`, `tracing.Recorder`, `tracing.Active`,
+`sched.Events`, `sched.JobTrace`, `blobTracker`, `cache.LogRecorder`, `tracing.Recorder`, `tracing.Active`,
 `cli.eventPrinter`, and `cli.traceSession`.
 
 ## Trace transport
 
-Trace telemetry spans cross subsystem boundaries before assembling into the client's final trace export.
-Each job must complete span emission before flushing its terminal event.
+Every job records its trace, whether or not the client asked for one, and stores it with its outcome:
+traces are content blobs, not a stream, so that a build's trace can be read after the fact.
+`sched.ForJob` gives a job a recorder and returns a `sched.JobTrace`,
+which gathers the job's own spans and an entry for each node that went through the cache.
+The job saves it as its manifest, an `api.JobTrace`, before it returns its outcome,
+and `api.Outcome.Trace` names it; a manifest that can't be stored leaves the outcome naming none.
 
-The following sequence diagram shows how trace spans are captured during execution,
-transported via events, and aligned to the client clock.
+`sched.Sharing` owns each attempt's spans.
+It gives the attempt a recorder of its own through `tracing.WithRecorderAt`,
+so that the attempt's spans still nest under the starting target's span and lie on its track,
+and an ID of 128 random bits.
+When the runner returns, whatever the outcome, `Sharing` stores the spans, capped, as the attempt's trace,
+under `context.WithoutCancel` and a 10-second bound, before it publishes:
+a layer's or task's result names the trace, with `Provenance.Started` and `Took` from `sched.Report.Ran`,
+the run that made it, so that a later hit says what it saved without reading the trace.
+`publish`'s `cache write` span, which names the trace, is recorded apart.
+Every job that waits for the attempt to end is told of the trace and the write span through `sched.Traced`,
+and records them in its manifest: the starter in the target's span, a joiner on the target's `(shared)` track;
+a job that leaves the attempt running learns its ID alone.
+On a coordinator the runner is the pool, which relays each worker's spans, shifted onto its own clock,
+into the attempt's context, retries included; workers always record, since an assignment always carries a trace.
+
+The following sequence diagram shows where each part of a build's trace is recorded and stored.
 
 ```mermaid
 sequenceDiagram
-    participant TS as cli.traceSession
     participant C as Client
-    participant E as Executor
-    participant J as sched.Job
+    participant J as sched.JobTrace
+    participant S as sched.Sharing
+    participant W as Runner or worker
+    participant CS as Content store
 
-    C->>E: Capabilities
-    E-->>C: Clock
-    C->>E: Submit with tracing.CallContext
-    E->>J: completed spans through sched.Events
-    J-->>C: api.EventSpans events
-    C->>TS: spans
-    TS->>TS: align clocks, write trace
+    C->>J: Submit, ForJob records the job's spans
+    J->>S: Run a target's action
+    S->>W: Run with the attempt's own recorder
+    W-->>S: spans as they end, relayed onto the coordinator's clock
+    S->>CS: the attempt's trace, before its result names it
+    S-->>J: Traced: the attempt's ID, trace and cache write span
+    J->>CS: the job's manifest, before its outcome
+    J-->>C: the outcome, naming the manifest
 ```
 
-Trace collection follows specific protocol stages:
-1. The client attaches a `tracing.CallContext` to executor submission requests.
-2. The executor emits completed spans through `sched.Events`,
-   which the job packages into `api.EventSpans` events in the stream.
-3. The client's `cli.traceSession` receives the spans and adjusts their timestamps
-   using the clock offset reported in `api.Capabilities.Clock` before writing the trace file.
+No span crosses as an event: the client reads the stored traces once its jobs end.
+Its `cli.traceSession` measures the executor's clock against its own through `api.Capabilities.Clock`, bounded,
+and stores the offset in the command trace, by which assembly places the client's spans among the executor's.
 
-When tracing is disabled, no trace structures are allocated and span collection overhead is skipped.
-Span hierarchy, flow endpoints, and encoding formats are managed by [tracing](../../internal/tracing/doc.go).
+Recording costs every build something now, so `tracing.Enabled` guards no longer spare an executor anything:
+arguments prepared only for a trace are prepared whenever a job runs.
+A recorder keeps at most twice `tracing.MaxTraceSize` of spans, and each stored trace is trimmed to the cap.
+The 10-second bounds on storing traces are deadlines the content store must honor:
+one that ignores its context, as a stalled local disk may, delays the job or attempt for as long as it stalls.
+Span hierarchy, flow endpoints, the stored encoding and its cap are managed by [tracing](../../internal/tracing/doc.go).
 Network progress tracking in [transfer.go](../../internal/transfer/transfer.go) wraps containers/image progress
 events through `blobTracker`; because image configurations may report completion without transferring bytes,
 progress events reflect transfer progress rather than an absolute network audit.

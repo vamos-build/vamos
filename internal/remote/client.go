@@ -373,6 +373,18 @@ func (c *Client) Result(ctx context.Context, id api.JobID) (api.Outcome, error) 
 	return outcome, err
 }
 
+// Trace returns the blob of the job id's manifest, as api.Executor.Trace describes.
+func (c *Client) Trace(ctx context.Context, id api.JobID) (cache.Blob, error) {
+	var b cache.Blob
+	if err := c.getJSON(ctx, "asking for the job's trace", jobPath(pathTrace, id), "", &b); err != nil {
+		return cache.Blob{}, err
+	}
+	if err := b.Validate(); err != nil {
+		return cache.Blob{}, fmt.Errorf("the coordinator named the job's trace as %w", err)
+	}
+	return b, nil
+}
+
 // jobPath returns pattern, a path with the job's place in it, for the job id.
 func jobPath(pattern string, id api.JobID) string {
 	return strings.Replace(pattern, "{id}", url.PathEscape(string(id)), 1)
@@ -519,6 +531,25 @@ func (c *Client) Has(ctx context.Context, b cache.Blob) error {
 		}
 		return nil
 	})
+}
+
+// Stat returns the blob, with its size, that the coordinator's store holds under d.
+func (c *Client) Stat(ctx context.Context, d digest.Digest) (cache.Blob, error) {
+	if err := (cache.Blob{Digest: d}).Validate(); err != nil {
+		return cache.Blob{}, err
+	}
+	var b cache.Blob
+	path := strings.Replace(pathStat, "{digest}", string(d), 1)
+	if err := c.getJSON(ctx, "asking for a blob's size", path, "", &b); err != nil {
+		return cache.Blob{}, err
+	}
+	if b.Digest != d {
+		return cache.Blob{}, fmt.Errorf("asked for blob %s, the coordinator answered %s", d, b.Digest)
+	}
+	if err := b.Validate(); err != nil {
+		return cache.Blob{}, err
+	}
+	return b, nil
 }
 
 // postJSON posts v to path and decodes the answer into out, retrying transport failures.

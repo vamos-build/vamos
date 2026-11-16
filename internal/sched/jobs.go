@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/vamos-build/vamos/internal/api"
+	"github.com/vamos-build/vamos/internal/cache"
 	"github.com/vamos-build/vamos/internal/graph"
-	"github.com/vamos-build/vamos/internal/tracing"
 )
 
 // The bounds on what a Job retains for watchers, by default.
@@ -43,16 +43,17 @@ type Jobs struct {
 	limit          int           // how many jobs may be open at once; no bound if 0
 	now            func() time.Time
 
-	mu        sync.Mutex
-	jobs      map[api.JobID]*Job
-	evicted   map[api.JobID]bool // the jobs evicted, the last evictedRemembered of them
-	evictions []api.JobID        // in order, so that the oldest is forgotten first
-	running   sync.WaitGroup     // the jobs that haven't ended
-	active    int                // how many jobs haven't ended, reservations included
-	reserved  int                // how many jobs are reserved and not yet started
-	exclusive *Job               // the Job that must run alone, a prune, while it runs
-	closed    bool               // stop has been called: no Job starts
-	onEvict   func(api.JobID)    // told of each eviction, outside the lock
+	mu   sync.Mutex
+	jobs map[api.JobID]*Job
+	// evicted holds the jobs evicted, the last evictedRemembered of them, each with its manifest's blob, if it had one.
+	evicted   map[api.JobID]*cache.Blob
+	evictions []api.JobID     // in order, so that the oldest is forgotten first
+	running   sync.WaitGroup  // the jobs that haven't ended
+	active    int             // how many jobs haven't ended, reservations included
+	reserved  int             // how many jobs are reserved and not yet started
+	exclusive *Job            // the Job that must run alone, a prune, while it runs
+	closed    bool            // stop has been called: no Job starts
+	onEvict   func(api.JobID) // told of each eviction, outside the lock
 }
 
 // RetainEvents makes the table retain n events of each job for watchers, rather than the default;
@@ -375,11 +376,12 @@ func (t *Jobs) Restore(spec Spec, outcome api.Outcome, ended time.Time) (*Job, e
 }
 
 // RememberEvicted makes the table remember id as a Job evicted, as an earlier run of the executor did, so that a
-// watch of it says it expired; the oldest is given first.
-func (t *Jobs) RememberEvicted(id api.JobID) {
+// watch of it says it expired and Trace gives trace, the blob of its manifest, if it had one;
+// the oldest is given first.
+func (t *Jobs) RememberEvicted(id api.JobID, trace *cache.Blob) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.remember(id)
+	t.remember(id, trace)
 }
 
 // held returns how many jobs are open: running, watched, or finished builds their clients may still hold, within
@@ -424,12 +426,34 @@ func (t *Jobs) Lookup(id api.JobID) (*Job, error) {
 	defer t.mu.Unlock()
 	j, ok := t.jobs[id]
 	if !ok {
-		if t.evicted[id] {
+		if _, ok := t.evicted[id]; ok {
 			return nil, api.ErrExpired
 		}
 		return nil, api.ErrNoJob
 	}
 	return j, nil
+}
+
+// Trace returns the blob of the manifest of the Job id, as api.Executor's Trace does:
+// from its outcome while the table holds it, and from what it remembers of it once evicted.
+func (t *Jobs) Trace(id api.JobID) (cache.Blob, error) {
+	t.mu.Lock()
+	j, held := t.jobs[id]
+	trace, evicted := t.evicted[id]
+	t.mu.Unlock()
+	switch {
+	case held:
+		var err error
+		if trace, err = j.trace(); err != nil {
+			return cache.Blob{}, err
+		}
+	case !evicted:
+		return cache.Blob{}, api.ErrNoJob
+	}
+	if trace == nil {
+		return cache.Blob{}, api.ErrNoTrace
+	}
+	return *trace, nil
 }
 
 // Sweep expires the builds that have gone unwatched for the grace period, and evicts the finished jobs that have
@@ -444,7 +468,8 @@ func (t *Jobs) Sweep() {
 	for id, j := range t.jobs {
 		if evict := j.sweep(now, t.grace, t.window); evict {
 			delete(t.jobs, id)
-			t.remember(id)
+			trace, _ := j.trace() // it has ended, or it wouldn't be evicted
+			t.remember(id, trace)
 			evicted = append(evicted, id)
 		}
 	}
@@ -456,12 +481,13 @@ func (t *Jobs) Sweep() {
 	}
 }
 
-// remember keeps id as evicted, forgetting the oldest beyond evictedRemembered; t.mu must be held.
-func (t *Jobs) remember(id api.JobID) {
+// remember keeps id as evicted, with its manifest, forgetting the oldest beyond evictedRemembered;
+// t.mu must be held.
+func (t *Jobs) remember(id api.JobID, trace *cache.Blob) {
 	if t.evicted == nil {
-		t.evicted = map[api.JobID]bool{}
+		t.evicted = map[api.JobID]*cache.Blob{}
 	}
-	t.evicted[id] = true
+	t.evicted[id] = trace // the caller's own copy
 	t.evictions = append(t.evictions, id)
 	if len(t.evictions) > evictedRemembered {
 		delete(t.evicted, t.evictions[0])
@@ -552,6 +578,21 @@ func (j *Job) Result() (api.Outcome, error) {
 	return j.outcome.Clone(), nil
 }
 
+// trace returns a copy of the blob of the Job's manifest, which its outcome names, without copying the rest,
+// or api.ErrRunning if it hasn't ended.
+func (j *Job) trace() (*cache.Blob, error) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if !j.done {
+		return nil, api.ErrRunning
+	}
+	if j.outcome.Trace == nil {
+		return nil, nil
+	}
+	b := *j.outcome.Trace
+	return &b, nil
+}
+
 // attach counts a watcher, and the function it returns the watcher's leaving, stamping when the Job was last
 // watched, so that the grace period counts from there.
 func (j *Job) attach() func() {
@@ -633,9 +674,4 @@ func (ev jobEvents) Status(node graph.Ref, status string) {
 func (ev jobEvents) Output(node graph.Ref, stream byte, data []byte) {
 	ev.j.add(api.Event{Kind: api.EventOutput, Nodes: []graph.Ref{node}, Stream: stream,
 		Data: append([]byte(nil), data...)})
-}
-
-// Spans reports a batch of spans as an event.
-func (ev jobEvents) Spans(spans []tracing.Span) {
-	ev.j.add(api.Event{Kind: api.EventSpans, Spans: spans})
 }

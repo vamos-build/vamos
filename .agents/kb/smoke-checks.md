@@ -173,11 +173,12 @@ mkdir -p "$TMP/slow" && printf '%s\n' \
 # the client's minute-long wait for a line of the event stream, and expect warnings that the connection dropped and
 # came back, then the build's success: the worker finished the target meanwhile, and the resumed watch finds it.
 # A blip shorter than that wait proves nothing, since the stream's TCP connection survives it.
+# Setup runs first, and only the network's timer in the background, as in R6.
 docker compose -f remote/compose.yaml up -d --wait \
   && docker network connect remote_default "vamos_$(basename "$WORKSPACE_FOLDER")" \
-  && (sleep 10; docker network disconnect remote_default "vamos_$(basename "$WORKSPACE_FOLDER")"; sleep 75; \
-      docker network connect remote_default "vamos_$(basename "$WORKSPACE_FOLDER")") & \
-  ./vamos build slow --rebuild -C "$TMP/slow" --coordinator http://coordinator:8080; wait; \
+  && { (sleep 10; docker network disconnect remote_default "vamos_$(basename "$WORKSPACE_FOLDER")"; sleep 75; \
+        docker network connect remote_default "vamos_$(basename "$WORKSPACE_FOLDER")") & \
+       ./vamos build slow --rebuild -C "$TMP/slow" --coordinator http://coordinator:8080; wait; }; \
   docker network disconnect remote_default "vamos_$(basename "$WORKSPACE_FOLDER")"; \
   docker compose -f remote/compose.yaml down
 
@@ -186,10 +187,12 @@ docker compose -f remote/compose.yaml up -d --wait \
 # the attempt it was running. `docker restart -t 0` kills the process at once and starts the container again;
 # `docker kill` would leave it stopped, since Docker's restart policy ignores a manual kill. Workers take work as
 # they poll, so the attempt may be on worker-2: if the trace names no retry, run the check again restarting that one.
+# Setup runs first, and only the restart's timer in the background, as in R6.
 docker compose -f remote/compose.yaml up -d --wait \
   && docker network connect remote_default "vamos_$(basename "$WORKSPACE_FOLDER")" \
-  && (sleep 15; docker restart -t 0 remote-worker-1) & \
-  ./vamos build slow --rebuild -C "$TMP/slow" --coordinator http://coordinator:8080 --trace "$TMP/r4.json"; wait; \
+  && { (sleep 15; docker restart -t 0 remote-worker-1) & \
+       ./vamos build slow --rebuild -C "$TMP/slow" --coordinator http://coordinator:8080 --trace "$TMP/r4.json"; \
+       wait; }; \
   grep -o '"retry 1"' "$TMP/r4.json"; \
   docker compose -f remote/compose.yaml logs worker | grep -i "registered\|cleaning up"; \
   docker network disconnect remote_default "vamos_$(basename "$WORKSPACE_FOLDER")"; \

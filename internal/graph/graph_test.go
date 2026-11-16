@@ -37,12 +37,12 @@ func testGraph(t *testing.T) *Graph {
 			{Label: "src", Desc: `glob "src"`, Source: &Source{
 				Tree: cache.Blob{Digest: digest.FromString("tree"), Size: 4},
 			}},
-			{Label: "busybox", Desc: `pull "busybox"`, Pull: &Pull{
+			{Label: "busybox", Desc: `pull "busybox"`, Target: "//:busybox platform=linux/amd64", Pull: &Pull{
 				Image:    "docker.io/library/busybox:1.36",
 				Platform: "linux/amd64",
 				Digest:   digest.FromString("index"),
 			}},
-			{Label: "build", Desc: `task "build"`, Task: &Task{
+			{Label: "build", Desc: `task "build"`, Target: `//:build platform=linux/amd64 mode="debug"`, Task: &Task{
 				Base: 1,
 				Steps: []Step{
 					{Op: OpAdd, Display: `add("src", "/src")`, From: from(0), Dest: "/src"},

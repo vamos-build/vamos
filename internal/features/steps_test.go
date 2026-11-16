@@ -22,7 +22,9 @@ import (
 	"github.com/spf13/afero"
 	"github.com/vamos-build/vamos/internal/cli"
 	"github.com/vamos-build/vamos/internal/graph"
+	"github.com/vamos-build/vamos/internal/run"
 	"github.com/vamos-build/vamos/internal/testenv"
+	"go.podman.io/storage"
 )
 
 // The steps are split by subject, in files that sort together:
@@ -66,19 +68,24 @@ type world struct {
 	root    string          // the folder that holds the project, if it is on disk
 	before  map[string]bool // the store's unnamed images when the scenario began, if it builds
 
-	coordinator       string             // the URL of the scenario's coordinator, <coordinator>, once started
-	jobs              atomic.Int64       // the jobs that the scenario's coordinator was given
-	toldMu            sync.Mutex         // guards told
-	told              []toldJob          // what each job the scenario's coordinator was given told it, in order
-	served            atomic.Int64       // the requests that the scenario's coordinator was sent
-	coordinatorServer *httptest.Server   // that serves <coordinator>, counting what it is sent
-	watching          chan struct{}      // told, if it has room, once front sends on a command's watch of a job
-	interruptedAt     time.Time          // when WhenIInterruptTheCoordinatorWhileIBuild interrupted the coordinator
-	buildTook         time.Duration      // how long after that the build ended
-	local             *server            // the coordinator that GivenALocalCoordinator started
-	interruptLocal    context.CancelFunc // interrupts it
-	localErr          error              // what it ended with, once interrupted
-	localTook         time.Duration      // how long it took to end, once interrupted
+	coordinator       string               // the URL of the scenario's coordinator, <coordinator>, once started
+	coordinatorStores storage.StoreOptions // the stores of GivenACoordinator's, which a restart opens again
+	coordinatorLocal  *run.Local           // the executor of GivenACoordinator's
+	timeline          *jobTimeline         // what the events of the coordinator's jobs said, if a step watches them
+	otherJob          string               // the job of GivenAnotherClientBuildsOnTheCoordinator's client
+	otherBuild        *otherClient         // the client of GivenAnotherClientBuildsOnTheCoordinator, if started
+	jobs              atomic.Int64         // the jobs that the scenario's coordinator was given
+	toldMu            sync.Mutex           // guards told
+	told              []toldJob            // what each job the scenario's coordinator was given told it, in order
+	served            atomic.Int64         // the requests that the scenario's coordinator was sent
+	coordinatorServer *httptest.Server     // that serves <coordinator>, counting what it is sent
+	watching          chan struct{}        // told, if it has room, once front sends on a command's watch of a job
+	interruptedAt     time.Time            // when WhenIInterruptTheCoordinatorWhileIBuild interrupted the coordinator
+	buildTook         time.Duration        // how long after that the build ended
+	local             *server              // the coordinator that GivenALocalCoordinator started
+	interruptLocal    context.CancelFunc   // interrupts it
+	localErr          error                // what it ended with, once interrupted
+	localTook         time.Duration        // how long it took to end, once interrupted
 
 	prepared   string                   // the folder the next command sends to, if Given steps have put something there
 	outside    string                   // a folder outside the project, for files that commands read, such as secrets
@@ -106,32 +113,35 @@ type world struct {
 
 	stdout       string
 	stderr       string
-	err          error             // the last command's
-	dest         string            // the folder that the last command sent to, its own, if it sends
-	inProject    bool              // whether the last command saved into the project, whose other files it didn't send
-	archive      string            // the archive that the last command saved, if it saved one
-	sent         string            // what the last command reports once it has sent its image or files, if it sends any
-	image        v1.Image          // the image that the last command saved or pushed, if it sent one
-	index        v1.ImageIndex     // the index that the last command pushed, if it pushed one
-	sentAs       string            // the image name that the last command pushed or loaded as, if it pushed or loaded
-	docker       func() [][]byte   // the images that the scenario's own Docker daemon has loaded, if it has one
-	daemon       string            // which Docker daemon a Given step gave: "fake", "none" or "host"
-	dockerHost   string            // the host's Docker daemon, as vamos finds it, if the scenario loads into it
-	loadedBefore int               // how many images the scenario's own daemon had loaded before the last command
-	loadRan      bool              // whether the last command loaded into Docker, or tried to
-	traceTo      string            // where the command running is to write its trace, if traced() asked it to
-	traceAt      string            // where tracedTo asked the command running to write its trace, with placeholders
-	interruptOn  string            // what the command running prints that an option or step interrupts it on
-	interruptIn  time.Duration     // how long interruptedAfter lets the command running run
-	interruptBy  time.Duration     // how long a step lets the command running run, if what it waits for never comes
-	printedCue   bool              // whether the last command printed what it was interrupted on, before any deadline
-	containers   map[string]bool   // the containers in the store when the scenario started, if it builds
-	took         time.Duration     // how long the last command ran
-	endedAt      time.Time         // when the last command returned
-	outputClosed bool              // whether the command running's standard output fails every write
-	outputTTY    bool              // whether the scenario's commands write their standard output to a terminal
-	tried        string            // what the last command tried to print to standard output that was closed
-	tracePath    string            // where the last command wrote its trace, if traced() asked it to
+	err          error           // the last command's
+	dest         string          // the folder that the last command sent to, its own, if it sends
+	inProject    bool            // whether the last command saved into the project, whose other files it didn't send
+	archive      string          // the archive that the last command saved, if it saved one
+	sent         string          // what the last command reports once it has sent its image or files, if it sends any
+	image        v1.Image        // the image that the last command saved or pushed, if it sent one
+	index        v1.ImageIndex   // the index that the last command pushed, if it pushed one
+	sentAs       string          // the image name that the last command pushed or loaded as, if it pushed or loaded
+	docker       func() [][]byte // the images that the scenario's own Docker daemon has loaded, if it has one
+	daemon       string          // which Docker daemon a Given step gave: "fake", "none" or "host"
+	dockerHost   string          // the host's Docker daemon, as vamos finds it, if the scenario loads into it
+	loadedBefore int             // how many images the scenario's own daemon had loaded before the last command
+	loadRan      bool            // whether the last command loaded into Docker, or tried to
+	traceTo      string          // where the command running is to write its trace, if traced() asked it to
+	traceAt      string          // where tracedTo asked the command running to write its trace, with placeholders
+	interruptOn  string          // what the command running prints that an option or step interrupts it on
+	interruptIn  time.Duration   // how long interruptedAfter lets the command running run
+	interruptBy  time.Duration   // how long a step lets the command running run, if what it waits for never comes
+	printedCue   bool            // whether the last command printed what it was interrupted on, before any deadline
+	containers   map[string]bool // the containers in the store when the scenario started, if it builds
+	took         time.Duration   // how long the last command ran
+	endedAt      time.Time       // when the last command returned
+	outputClosed bool            // whether the command running's standard output fails every write
+	outputTTY    bool            // whether the scenario's commands write their standard output to a terminal
+	tried        string          // what the last command tried to print to standard output that was closed
+	tracePath    string          // where the last command wrote its trace, if traced() asked it to
+	printedTrace string          // the digest of the trace that ThenItPrintsItsTrace read
+	jobsMu       sync.Mutex
+	jobIDs       []string          // the jobs the scenario's coordinator accepted, in order
 	trace        *trace            // the trace there, once a step has read it
 	graph        *graph.Graph      // the graph that WhenIShowTheGraph showed last
 	graphErr     error             // what the last WhenIShowTheGraph failed with, if it did

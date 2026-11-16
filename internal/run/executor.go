@@ -288,12 +288,19 @@ func (l *Local) Submit(ctx context.Context, req api.Request) (api.JobID, error) 
 		return "", err
 	}
 	return l.jobs.Start(false, func(ctx context.Context, ev sched.Events) api.Outcome {
-		results, err := l.run(ctx, *g, ev)
-		if err != nil {
-			return sched.Failed(err)
-		}
-		return api.Outcome{Results: results}
+		return l.traced(ctx, func(ctx context.Context) api.Outcome {
+			results, err := l.run(ctx, *g, ev)
+			if err != nil {
+				return sched.Failed(err)
+			}
+			return api.Outcome{Results: results}
+		})
 	})
+}
+
+// traced runs work, a job's, as sched.RunJob does, storing its manifest in the build cache.
+func (l *Local) traced(ctx context.Context, work func(context.Context) api.Outcome) api.Outcome {
+	return sched.RunJob(ctx, l.ContentStore, nil, work)
 }
 
 // Watch delivers the events of the job id from position from to fn, as api.Executor describes.
@@ -313,6 +320,12 @@ func (l *Local) Cancel(_ context.Context, id api.JobID) error {
 	}
 	j.Cancel()
 	return nil
+}
+
+// Trace returns the blob of the job id's manifest; the local executor's jobs are never evicted, so every job it
+// started is held.
+func (l *Local) Trace(_ context.Context, id api.JobID) (cache.Blob, error) {
+	return l.jobs.Trace(id)
 }
 
 // Release lets go of the job id; the local executor's jobs live as long as the command, so it only checks the job.
@@ -352,8 +365,6 @@ func (l *Local) Prune(context.Context) (api.JobID, error) {
 // and reused instead of running the target again whenever a later build gives it the same inputs,
 // unless it is a root and req.Rebuild is set.
 func (l *Local) run(ctx context.Context, req api.GraphRequest, ev sched.Events) (_ []api.Result, err error) {
-	ctx, flush := sched.ForCall(ctx, req.Trace, ev)
-	defer flush() // after the span ends
 	ctx, span := tracing.StartTrack(ctx, "run", "run", "graph", req.Graph.Digest.String(), "rebuild", req.Rebuild)
 	defer func() { span.EndWith(err) }()
 	content, err := l.ContentStore()
@@ -384,6 +395,7 @@ func (l *Local) run(ctx context.Context, req api.GraphRequest, ev sched.Events) 
 	b := sched.Backend{Content: l.content, Records: l.records, Checker: l.runner, Runner: l.sharing}
 	opts := sched.Options{
 		Rebuild: req.Rebuild, Timestamp: req.Timestamp, Emulate: req.Emulate, Bound: 1, Secrets: req.Secrets,
+		Workspace: req.Workspace,
 	}
 	return sched.New(g, b, ev, opts).Run(ctx)
 }
@@ -422,17 +434,17 @@ func (l *Local) submitPush(req api.PushRequest) (api.JobID, error) {
 		return "", err
 	}
 	return l.jobs.Start(false, func(ctx context.Context, ev sched.Events) api.Outcome {
-		ctx, flush := sched.ForCall(ctx, req.Trace, ev)
-		defer flush() // after the span ends
-		ctx, span := tracing.StartTrack(ctx, "push", "push to "+dest.String())
-		pushed, err := l.push(ctx, req.Result, dest)
-		span.EndWith(err)
-		if err != nil {
-			outcome := sched.Failed(err)
-			outcome.Failure.Nodes = []graph.Ref{req.Result.Node}
-			return outcome
-		}
-		return api.Outcome{Pushed: &pushed}
+		return l.traced(ctx, func(ctx context.Context) api.Outcome {
+			ctx, span := tracing.StartTrack(ctx, "push", "push to "+dest.String())
+			pushed, err := l.push(ctx, req.Result, dest)
+			span.EndWith(err)
+			if err != nil {
+				outcome := sched.Failed(err)
+				outcome.Failure.Nodes = []graph.Ref{req.Result.Node}
+				return outcome
+			}
+			return api.Outcome{Pushed: &pushed}
+		})
 	})
 }
 
@@ -477,17 +489,17 @@ func (l *Local) imageReference(ctx context.Context, id string) (types.ImageRefer
 // submitExport starts a job that publishes req.Result's content to the content store, for a client to deliver.
 func (l *Local) submitExport(req api.ExportRequest) (api.JobID, error) {
 	return l.jobs.Start(false, func(ctx context.Context, ev sched.Events) api.Outcome {
-		ctx, flush := sched.ForCall(ctx, req.Trace, ev)
-		defer flush() // after the span ends
-		ctx, span := tracing.StartTrack(ctx, "export", "export to the content store")
-		exported, err := l.export(ctx, req.Result)
-		span.EndWith(err)
-		if err != nil {
-			outcome := sched.Failed(err)
-			outcome.Failure.Nodes = []graph.Ref{req.Result.Node}
-			return outcome
-		}
-		return api.Outcome{Exported: exported}
+		return l.traced(ctx, func(ctx context.Context) api.Outcome {
+			ctx, span := tracing.StartTrack(ctx, "export", "export to the content store")
+			exported, err := l.export(ctx, req.Result)
+			span.EndWith(err)
+			if err != nil {
+				outcome := sched.Failed(err)
+				outcome.Failure.Nodes = []graph.Ref{req.Result.Node}
+				return outcome
+			}
+			return api.Outcome{Exported: exported}
+		})
 	})
 }
 

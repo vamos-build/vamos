@@ -3,9 +3,12 @@ package sched
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/vamos-build/vamos/internal/cache"
 	"github.com/vamos-build/vamos/internal/tracing"
@@ -27,8 +30,11 @@ import (
 // What the attempt prints reaches the job that started it as it is printed; a job that attaches later gets
 // the result's log replayed once the attempt succeeds, rather than live output from part way through,
 // and a failure's log with the failure.
-// The attempt's trace spans belong to the job that started it, while it is attached: one that detaches
-// while others remain has its spans revoked, so that the attempt sends nothing to it after it ends.
+// Each attempt records its spans apart, nested under the starting target's span and on its track, and stores them,
+// capped, as its own trace when the runner returns, whatever the outcome, before it publishes: a layer's or task's
+// result names that trace. Every job that waits for the attempt to end is told of the trace, through Traced, with the
+// span of its cache write, which the trace can't hold, since it names the trace; a job that leaves the attempt
+// running is told its ID alone.
 // Sharing alone writes the record store: once an attempt has published its artifact and reported its result,
 // the result is recorded under its key, or a resolve's tag record is written, before any job gets the result,
 // and the latest write wins; the Runner writes no record.
@@ -43,12 +49,15 @@ type Sharing struct {
 
 // attempt is one execution of an Action, which jobs attach to.
 type attempt struct {
+	id       string             // 128 random bits in hex, which its trace and its cache write span carry
 	cancel   context.CancelFunc // ends the attempt, once no job is attached
 	done     chan struct{}      // closed when the attempt has its result
 	emulated bool               // its request is Emulated
 	starter  Output             // the Output of the job that started it
 	result   *cache.ActionResult
 	err      error
+	// What every job that waits on done is told of the attempt's trace, set before done is closed.
+	trace AttemptTrace
 
 	mu       sync.Mutex
 	attached []*listener // the jobs waiting for the result, with their events; the attempt is cancelled when none is
@@ -58,7 +67,6 @@ type attempt struct {
 type listener struct {
 	ev        Output
 	late      bool            // it attached to an attempt in flight: the result's log is replayed, not live output
-	revoke    func()          // stops the attempt's spans reaching the job that started it; nil for a late job
 	permitted bool            // the job permits emulated execution
 	withdrawn <-chan struct{} // closed once the job's demand is withdrawn; nil for a job whose demand never lapses
 }
@@ -98,12 +106,12 @@ func (s *Sharing) attempt(ctx context.Context, req Request, ev Output) (*cache.A
 		s.mu.Unlock()
 		return nil, ErrEmulationNeeded
 	}
-	// The attempt keeps the starting job's trace, while it is attached, but not its cancellation:
+	// The attempt records its own spans, where the starting job's would lie, but not the job's cancellation:
 	// only detaching cancels it.
-	actx, revoke := tracing.Revocable(context.WithoutCancel(ctx))
-	actx, cancel := context.WithCancel(actx)
-	l := &listener{ev: ev, revoke: revoke, permitted: req.Permitted, withdrawn: Withdrawn(ctx)}
-	at := &attempt{cancel: cancel, done: make(chan struct{}), emulated: req.Emulated, starter: ev,
+	recorder := tracing.NewRecorder(executorProcess, nil)
+	actx, cancel := context.WithCancel(tracing.WithRecorderAt(context.WithoutCancel(ctx), recorder))
+	l := &listener{ev: ev, permitted: req.Permitted, withdrawn: Withdrawn(ctx)}
+	at := &attempt{id: newAttemptID(), cancel: cancel, done: make(chan struct{}), emulated: req.Emulated, starter: ev,
 		attached: []*listener{l}}
 	actx = withDemand(actx, at.demanded)
 	if req.Emulated {
@@ -114,10 +122,29 @@ func (s *Sharing) attempt(ctx context.Context, req Request, ev Output) (*cache.A
 	join(ev, nil)
 	go func() {
 		defer close(at.done)
+		start := time.Now()
 		rep, err := s.runner.Run(actx, req, at)
+		ran := Interval{Start: start, End: time.Now()}
+		if err == nil && rep != nil && rep.Ran != nil {
+			ran = *rep.Ran
+		}
+		spans, lost := recorder.Snapshot()
+		blob, traceErr := s.saveTrace(actx, at.id, spans, lost)
+		at.trace = AttemptTrace{ID: at.id, Trace: blob}
+		if err == nil && rep != nil && rep.Result != nil && req.Key != "" {
+			rep.Result.Trace = blob
+			if rep.Result.Provenance == nil {
+				rep.Result.Provenance = &cache.Provenance{}
+			}
+			rep.Result.Provenance.Started, rep.Result.Provenance.Took = ran.Start.UTC(), ran.End.Sub(ran.Start)
+		}
 		if err == nil {
 			// What an attempt published is recorded even if every job has detached meanwhile: it is made.
-			err = s.publish(context.WithoutCancel(actx), req, rep)
+			// Its cache write span is recorded apart, since it names the trace stored before it.
+			write := tracing.NewRecorder(executorProcess, nil)
+			wctx := tracing.WithRecorderAt(context.WithoutCancel(actx), write)
+			err = s.publish(wctx, req, rep, at.id, blob, traceErr)
+			at.trace.Write = write.Spans()
 		}
 		if err == nil {
 			at.result = rep.Result
@@ -139,11 +166,39 @@ func join(ev Output, starter Output) {
 	}
 }
 
-// publish writes what the attempt of req reported: a layer's or task's result under its key,
+// saveTrace stores the spans of the attempt id, with what lost says its recorder refused, as its trace, capped,
+// under ctx without its cancellation and within traceSaveTimeout, apart from publish, so that a cancelled attempt's
+// trace is stored too, and a slow store never stops the result being recorded.
+// It returns nil, with why, if the trace couldn't be stored, which fails nothing.
+func (s *Sharing) saveTrace(ctx context.Context, id string, spans []tracing.Span, lost tracing.Lost) (
+	*cache.Blob, error) {
+	data, err := tracing.EncodeAttempt(id, spans, lost)
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), traceSaveTimeout)
+	defer cancel()
+	b, err := s.content.PutBytes(ctx, data)
+	if err != nil {
+		return nil, err
+	}
+	return &b, nil
+}
+
+// newAttemptID returns 128 random bits in hex, an attempt's ID.
+func newAttemptID() string {
+	var b [16]byte
+	rand.Read(b[:])
+	return hex.EncodeToString(b[:])
+}
+
+// publish writes what the attempt id of req reported: a layer's or task's result under its key,
 // or the record of the tag a resolve resolved, or of its pin, as Action.RecordName names it,
 // so that the artifact is published before the result is.
 // A result that can't be recorded fails the attempt, keeping its log, as the artifact can't be reused.
-func (s *Sharing) publish(ctx context.Context, req Request, rep *Report) (err error) {
+// Its cache write span names the attempt, and its trace, or why the trace couldn't be stored.
+func (s *Sharing) publish(ctx context.Context, req Request, rep *Report, id string, trace *cache.Blob,
+	traceErr error) (err error) {
 	switch {
 	case rep == nil || rep.Result == nil:
 		return errors.New("the attempt reported no result")
@@ -153,8 +208,13 @@ func (s *Sharing) publish(ctx context.Context, req Request, rep *Report) (err er
 			return fmt.Errorf("saving to the build cache: %w", err)
 		}
 	case req.Key != "":
-		_, span := tracing.Start(ctx, "cache write", "key", req.Key.String())
+		_, span := tracing.Start(ctx, "cache write", "key", req.Key.String(), "attempt", id)
 		defer func() { span.EndWith(err) }()
+		if trace != nil {
+			span.Set("attempt trace", trace.Digest.String())
+		} else if traceErr != nil {
+			span.Set("trace error", traceErr.Error())
+		}
 		if log := rep.Result.Log; log != nil {
 			span.Set("log", log.Digest.String(), "log bytes", log.Size)
 		}
@@ -166,13 +226,14 @@ func (s *Sharing) publish(ctx context.Context, req Request, rep *Report) (err er
 }
 
 // await waits for the attempt at to end, or for ctx, the job's, to end first, which detaches the job, l;
-// the last job to detach waits for the cancelled attempt to end, so that its cleanup has run,
-// and the starter that detaches before others has the attempt's spans revoked.
+// the last job to detach waits for the cancelled attempt to end, so that its cleanup has run.
+// A job that waits for the end is told of the attempt's trace, and one that leaves it running of its ID alone.
 // A late job that gets a result is replayed its log.
 func (s *Sharing) await(ctx context.Context, at *attempt, l *listener) (*cache.ActionResult, error) {
 	select {
 	case <-at.done:
 		s.detach(at, l)
+		traced(l.ev, at.trace)
 		if l.late && at.err == nil {
 			if err := s.replay(ctx, at.result, l.ev); err != nil {
 				return nil, fmt.Errorf("replaying its output from the build cache: %w", err)
@@ -182,8 +243,9 @@ func (s *Sharing) await(ctx context.Context, at *attempt, l *listener) (*cache.A
 	case <-ctx.Done():
 		if s.detach(at, l) {
 			<-at.done
-		} else if l.revoke != nil {
-			l.revoke()
+			traced(l.ev, at.trace)
+		} else {
+			traced(l.ev, AttemptTrace{ID: at.id, Left: true})
 		}
 		return nil, ctx.Err()
 	}

@@ -26,10 +26,13 @@
 //
 // Run registers, then asks for assignments until the context ends; a coordinator that can't be reached for a lease,
 // or that has restarted and knows nothing of the registration, makes the worker kill what it runs and register again.
-// Each attempt is run.Attempt in a subprocess of this binary, given its assignment on standard input; its output and
-// spans come back as lines, which the worker sends to the coordinator in batches the transport takes, reading no more
-// while a bounded amount waits, so that a slow coordinator slows the attempt's output, and its last line is the report,
+// Each attempt is run.Attempt in a subprocess of this binary, given its assignment on standard input, which always
+// carries a trace context, so that the attempt always records; its output and spans come back as lines,
+// which the worker sends to the coordinator in batches the transport takes, reading no more while a bounded amount
+// waits, so that a slow coordinator slows the attempt's output, and its last line is the report,
 // which the worker sends once the subprocess has ended and its container is gone.
+// Each span fits on a line, since the attempt's recorder bounds it; a line that can't be read all the same
+// kills the subprocess, which would otherwise block writing the rest, and fails the attempt.
 // A killed attempt reports nothing: the coordinator has stopped counting it.
 //
 // # Changes

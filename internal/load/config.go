@@ -858,7 +858,7 @@ func (l *lowering) image(cl confLabel) (graph.Ref, error) {
 	}
 	n := graph.Node{Label: l.w.display(cl.label), Pos: l.w.declaration(cl.label).pos.String()}
 	if p, ok := l.cr.pulls[cl]; ok {
-		n.Desc = l.w.describe("pull", cl)
+		n.Desc, n.Target = l.w.describe("pull", cl), l.w.targetIdentity(cl)
 		image := p.image.String()
 		n.Pull = &graph.Pull{Image: image, Platform: cl.cfg.platform.String(), Digest: l.w.lock.Pulls[image].Digest}
 	} else if manifests, ok := l.cr.indexes[cl]; ok {
@@ -888,6 +888,7 @@ func (l *lowering) image(cl confLabel) (graph.Ref, error) {
 				steps[i].From = &from
 			}
 		}
+		n.Target = l.w.targetIdentity(cl)
 		if s.task {
 			n.Desc = l.w.describe("task", cl)
 			n.Task = &graph.Task{Base: base, Steps: steps}
@@ -944,6 +945,25 @@ func (w *workspace) describe(kind string, cl confLabel) string {
 		name += " (" + diffs + ")"
 	}
 	return name
+}
+
+// targetIdentity returns the identity of the target cl in its configuration, as graph.Node.Target gives it:
+// its canonical label, its platform and every parameter's value, sorted by name,
+// so that neither the command's platform, nor which values are defaults, nor the order of declaration changes it.
+func (w *workspace) targetIdentity(cl confLabel) string {
+	var b strings.Builder
+	b.WriteString(cl.label)
+	b.WriteString(" platform=" + cl.cfg.platform.String())
+	params := w.declaration(cl.label).params
+	order := make([]int, len(params))
+	for i := range order {
+		order[i] = i
+	}
+	slices.SortFunc(order, func(i, j int) int { return strings.Compare(params[i].name, params[j].name) })
+	for _, i := range order {
+		fmt.Fprintf(&b, " %s=%s", params[i].name, cl.cfg.values[i])
+	}
+	return b.String()
 }
 
 // indexManifests returns the manifests of the index cl, each a pull or layer in its configuration, in order.

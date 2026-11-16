@@ -49,6 +49,8 @@
 // platform contexts.
 // step.go applies action steps; a run() step's secrets become buildah secret mounts, their values written to files
 // that only this process reads and removed after the step, which buildah copies outside the image's root filesystem.
+// Local.traced runs each job but a prune under sched.ForJob and stores its manifest before the outcome is returned;
+// localRunner.Run reports the run that made a result as sched.Report.Ran.
 // Copies go through transfer.Image, which traces them; inspect export, sendResult and layoutIndexFrom
 // before changing transports or signature policy.
 package run

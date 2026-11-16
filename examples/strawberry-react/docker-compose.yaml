@@ -7,6 +7,11 @@ services:
 
   backend:
     image: strawberry-backend
+    # Healthy once the server accepts connections, so that the ingress, and `up --wait`, wait for it.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('localhost', 8000), 1)"]
+      interval: 1s
+      retries: 30
 
   # This functions like an HTTP load balancer would in a production environment.
   ingress:
@@ -14,8 +19,10 @@ services:
     ports:
       - "8080:80"
     depends_on:
-      - ui
-      - backend
+      ui:
+        condition: service_started
+      backend:
+        condition: service_healthy
     configs:
       - source: ingress-config
         target: /etc/nginx/conf.d/default.conf

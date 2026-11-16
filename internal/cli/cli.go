@@ -175,7 +175,7 @@ func (inv *invocation) hold(ex api.Executor, id api.JobID, end int64) {
 // release lets go of every build held on ex, so that a prune may run and the coordinator may free its state;
 // a failure to release is a warning, since the hold lapses on its own.
 func (inv *invocation) release(ex api.Executor) {
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(inv.ctx), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(inv.ctx), releaseTimeout)
 	defer cancel()
 	for _, h := range inv.holds {
 		h.stop()
@@ -474,7 +474,7 @@ func NewRootCommand(cfg Config) *cobra.Command {
 	attemptCmd.Flags().MarkHidden("run-root")
 
 	root.AddCommand(buildCmd, pushCmd, publishCmd, loadCmd, saveCmd, writeCmd, exportCmd, updateCmd, pruneCmd,
-		graphCmd, coordinatorCmd, workerCmd, attemptCmd)
+		traceCommand(handle), graphCmd, coordinatorCmd, workerCmd, attemptCmd)
 	return root
 }
 
@@ -485,6 +485,7 @@ func NewRootCommand(cfg Config) *cobra.Command {
 // which fails where user namespaces are refused, as in a Dockerfile's RUN step that runs `vamos --version`.
 // The command is found as cobra finds it, so that a target or directory named "coordinator" isn't mistaken for it;
 // a command line that doesn't parse is left to Execute to refuse, after the re-exec, which is harmless.
+// Of the commands that might, update never needs container storage, and trace none when it reads a coordinator.
 func UsesContainerStore(args []string) bool {
 	root := NewRootCommand(Config{Fs: afero.NewMemMapFs()})
 	cmd, rest, err := root.Traverse(args)
@@ -503,6 +504,9 @@ func UsesContainerStore(args []string) bool {
 	switch cmd.Name() {
 	case "update": // which asks registries alone
 		return false
+	case "trace": // which reads a coordinator alone, if it names one, and otherwise the local build cache
+		f := cmd.Flag("coordinator")
+		return f == nil || f.Value.String() == ""
 	case "coordinator":
 	default:
 		return true
@@ -654,7 +658,13 @@ func (r *remoteExecutor) ContentStore() (cache.ContentStore, error) {
 }
 
 // closeExecutor shuts ex down, warning about what failed: the command's own outcome stands.
+// While a command is traced, its trace holds ex instead, releasing and closing it once the trace is stored and
+// written, so that no prune takes what the trace names first.
 func (inv *invocation) closeExecutor(ex executor) {
+	if inv.session != nil {
+		inv.session.hold(ex)
+		return
+	}
 	inv.release(ex)
 	if err := ex.Close(); err != nil {
 		inv.warn(fmt.Errorf("shutting the executor down: %w", err))
@@ -988,14 +998,12 @@ func (inv *invocation) events() *eventPrinter {
 	}
 }
 
-// traced runs the command with run, tracing it to the file that --trace names, if given,
-// as well as the executor's part, which comes as events.
+// traced runs the command with run, recording its trace, always: the client's spans, and the jobs it runs, each by
+// the manifest its executor stores, which finishTrace stores as the command's trace, writing it to the file that
+// --trace names, if given.
 // output is the command's own output, a folder if outputDir,
 // which the trace mustn't overwrite, or "" if it writes no file.
 func (inv *invocation) traced(output string, outputDir bool, run func() error) error {
-	if inv.opts.trace == "" {
-		return run()
-	}
 	session, err := newTraceSession(inv.opts.trace, output, outputDir)
 	if err != nil {
 		return err
@@ -1010,7 +1018,7 @@ func (inv *invocation) traced(output string, outputDir bool, run func() error) e
 	inv.ctx = ctx
 	err = run()
 	span.EndWith(err)
-	return session.finishTrace(err, inv.opts.trace, inv.stderr)
+	return inv.finishTrace(err)
 }
 
 // runGraph loads the graph that req asks for, stores it, and the files of its globs, in the content store
@@ -1091,21 +1099,7 @@ func (inv *invocation) runLoaded(
 		Secrets:    secrets,
 	}
 	events.graph = g
-	var runSpan *tracing.Active
-	if inv.session != nil {
-		// Place the executor's spans by this clock, which the executor's may not agree with.
-		offset, clockErr := tracing.EstimateOffset(ctx, time.Now, func(ctx context.Context) (time.Time, error) {
-			caps, err := ex.Capabilities(ctx)
-			return caps.Clock, err
-		})
-		if clockErr != nil {
-			return nil, nil, clockErr
-		}
-		inv.session.setOffset(offset)
-		ctx, runSpan = tracing.Start(ctx, "run",
-			"clock offset", offset.Offset.String(), "clock uncertainty", offset.Uncertainty.String())
-		runReq.Trace = tracing.Call(ctx)
-	}
+	ctx, runSpan := tracing.Start(ctx, "run")
 	id, err := ex.Submit(ctx, api.Request{Graph: &runReq})
 	if err != nil {
 		runSpan.EndWith(err)
@@ -1137,7 +1131,7 @@ func (inv *invocation) deliver(
 	ctx context.Context, ex api.Executor, res api.Result, events *eventPrinter,
 ) (api.Exported, error) {
 	id, err := ex.Submit(ctx, api.Request{Export: &api.ExportRequest{
-		Result: res, Workspace: inv.workspace, Trace: tracing.Call(ctx),
+		Result: res, Workspace: inv.workspace,
 	}})
 	if err != nil {
 		return api.Exported{}, err
@@ -1205,7 +1199,7 @@ func (inv *invocation) buildImage(target string, dest destination) error {
 			// The executor pushes, with its own credentials and registry settings.
 			var id api.JobID
 			id, err = ex.Submit(ctx, api.Request{Push: &api.PushRequest{
-				Result: res, Destination: dest.push, Workspace: inv.workspace, Trace: tracing.Call(ctx),
+				Result: res, Destination: dest.push, Workspace: inv.workspace,
 			}})
 			var outcome api.Outcome
 			if err == nil {
@@ -1319,7 +1313,7 @@ func (inv *invocation) publish(target string) error {
 // with its own credentials and registry settings, and returns every destination.
 func (inv *invocation) publishFromExecutor(ctx context.Context, ex api.Executor, plan *load.Publication,
 	results []api.Result, events *eventPrinter) ([]api.Destination, error) {
-	req := api.PublishRequest{Tags: inv.opts.tags, Workspace: inv.workspace, Trace: tracing.Call(ctx)}
+	req := api.PublishRequest{Tags: inv.opts.tags, Workspace: inv.workspace}
 	for _, image := range plan.Images {
 		req.Images = append(req.Images, api.PublishImage{Result: results[image.Root], Repository: image.Repository})
 	}
@@ -1524,12 +1518,15 @@ func (inv *invocation) prune() error {
 		return err
 	}
 	p := outcome.Pruned
-	if inv.opts.coordinator != "" {
-		return inv.printf("Removed %d results and %d files from the build cache, and %d image tags from the cache "+
-			"repository\n", p.Results, p.Blobs, p.Tags)
+	for _, w := range p.Warnings {
+		inv.warn(errors.New(w))
 	}
-	return inv.printf("Removed %d images from the container store, and %d results and %d files "+
-		"from the build cache\n", p.Images, p.Results, p.Blobs)
+	if inv.opts.coordinator != "" {
+		return inv.printf("Removed %d results, %d files and %d target histories from the build cache, and %d image "+
+			"tags from the cache repository\n", p.Results, p.Blobs, p.Histories, p.Tags)
+	}
+	return inv.printf("Removed %d images from the container store, and %d results, %d files and %d target "+
+		"histories from the build cache\n", p.Images, p.Results, p.Blobs, p.Histories)
 }
 
 // graph prints the graph of the targets named, as JSON, without building or storing anything.
@@ -1575,12 +1572,12 @@ func watchJob(ctx context.Context, ex api.Executor, id api.JobID, events *eventP
 		if e.Kind == api.EventDone && e.Outcome != nil {
 			ended = e.Outcome
 		}
-		if unwritten != nil {
-			// Output is no longer written, but the trace still takes the job's spans and gaps.
-			events.record(e)
-		} else if err := events.handle(e); err != nil {
-			unwritten = fmt.Errorf("writing the build's progress: %w", err)
-			return unwritten
+		// Once output can't be written, the job is only drained.
+		if unwritten == nil {
+			if err := events.handle(e); err != nil {
+				unwritten = fmt.Errorf("writing the build's progress: %w", err)
+				return unwritten
+			}
 		}
 		if e.Kind != api.EventGap {
 			next = e.Position + 1
@@ -1615,6 +1612,9 @@ func watchJob(ctx context.Context, ex api.Executor, id api.JobID, events *eventP
 	} else {
 		outcome, err = ex.Result(ctx, id)
 	}
+	if err == nil && events.trace != nil {
+		events.trace.addJob(id, outcome, events.warn)
+	}
 	switch {
 	case err != nil:
 		return api.Outcome{}, 0, errors.Join(unwritten, err)
@@ -1645,16 +1645,11 @@ type eventPrinter struct {
 	color          bool // whether statuses are colored, as --color says
 }
 
-// record passes the event e of a job to the command's trace, if it has one, without writing anything.
-func (p *eventPrinter) record(e api.Event) {
-	switch e.Kind {
-	case api.EventSpans:
-		p.spans(e.Spans)
-	case api.EventGap:
-		if p.trace != nil {
-			p.trace.addGap(e.Position, e.First, e.Restarted)
-		}
-	}
+// warn writes a warning, dropping it if it can't be written, as every warning is.
+func (p *eventPrinter) warn(err error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	fmt.Fprintf(p.stderr, "vamos: warning: %v\n", err)
 }
 
 // handle prints the event e of a job, returning a failure to write it.
@@ -1672,10 +1667,7 @@ func (p *eventPrinter) handle(e api.Event) error {
 				return err
 			}
 		}
-	case api.EventSpans:
-		p.record(e)
 	case api.EventGap:
-		p.record(e)
 		p.mu.Lock()
 		defer p.mu.Unlock()
 		// A warning that can't be written is dropped, as every warning is: the command's outcome matters more.
@@ -1688,13 +1680,6 @@ func (p *eventPrinter) handle(e api.Event) error {
 			"so some progress wasn't shown; the targets' logs are whole\n", e.Position, e.First-1)
 	}
 	return nil
-}
-
-// spans forwards executor spans without taking the output lock; traceSession synchronizes its own state.
-func (p *eventPrinter) spans(spans []tracing.Span) {
-	if p.trace != nil {
-		p.trace.addRemote(spans)
-	}
 }
 
 // status serializes progress with step output, even when the configured writers are not concurrency-safe.

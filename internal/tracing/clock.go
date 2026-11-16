@@ -13,30 +13,35 @@ type Offset struct {
 	Uncertainty time.Duration
 }
 
-// clockSamples is how many times EstimateOffset asks for the time.
-// The shortest round trip of them gives the estimate,
+// EstimateOffset estimates how far the clock that remote reads is ahead of the clock now reads, as NTP does,
+// asking it the time samples times, at least once: the shortest round trip gives the estimate,
 // since the others' delays are less likely to be even both ways.
-const clockSamples = 3
-
-// EstimateOffset estimates how far the clock that remote reads is ahead of the clock now reads, as NTP does.
+// A sample that fails ends the sampling, so that a remote that stops answering costs one failure, but keeps the
+// samples before it: the estimate fails only if the first does.
 // A call sent at t0, answered with t1, and whose answer came at t3,
 // puts the offset at t1 − (t0 + t3)/2, give or take half the round trip.
-func EstimateOffset(ctx context.Context, now func() time.Time, remote func(context.Context) (time.Time, error)) (
-	Offset, error) {
+func EstimateOffset(ctx context.Context, samples int, now func() time.Time,
+	remote func(context.Context) (time.Time, error)) (Offset, error) {
 	var best Offset
-	for i := range clockSamples {
+	var measured bool
+	var last error
+	for range max(samples, 1) {
 		t0 := now()
 		t1, err := remote(ctx)
 		if err != nil {
-			return Offset{}, err
+			last = err
+			break
 		}
 		t3 := now()
 		roundTrip := t3.Sub(t0)
-		if i > 0 && roundTrip/2 >= best.Uncertainty {
+		if measured && roundTrip/2 >= best.Uncertainty {
 			continue
 		}
 		mid := t0.Add(roundTrip / 2)
-		best = Offset{Offset: t1.Sub(mid), Uncertainty: roundTrip / 2}
+		best, measured = Offset{Offset: t1.Sub(mid), Uncertainty: roundTrip / 2}, true
+	}
+	if !measured {
+		return Offset{}, last
 	}
 	return best, nil
 }

@@ -30,6 +30,7 @@ import (
 	"github.com/vamos-build/vamos/internal/remote"
 	"github.com/vamos-build/vamos/internal/run"
 	"github.com/vamos-build/vamos/internal/testenv"
+	"github.com/vamos-build/vamos/internal/tracing"
 	"github.com/vamos-build/vamos/internal/transfer"
 
 	"github.com/containerd/platforms"
@@ -393,6 +394,15 @@ func TestContract(t *testing.T) {
 			testenv.Must(t, err)
 			return missing
 		},
+		Read: func(t *testing.T, ex api.Executor, b cache.Blob) []byte {
+			t.Helper()
+			mu.Lock()
+			m := contents[ex]
+			mu.Unlock()
+			data, err := m.Read(t.Context(), b, tracing.MaxTraceSize)
+			testenv.Must(t, err)
+			return data
+		},
 		Platform:      run.HostPlatform,
 		Registry:      registry.New(registry.Logger(log.New(io.Discard, "", 0))),
 		Insecure:      testenv.InsecureRegistry,
@@ -526,6 +536,32 @@ func TestWorkerRenewsBeforeStarting(t *testing.T) {
 	}
 	if got := started.Load(); got != 1 {
 		t.Errorf("the worker started %d attempts' processes, want only the retry's", got)
+	}
+}
+
+// TestWorkerFailsUnreadableOutput checks that an attempt whose subprocess prints a line too long to read fails, its
+// process killed, rather than leaving it blocked writing the rest while the worker renews its lease.
+func TestWorkerFailsUnreadableOutput(t *testing.T) {
+	f := newFixture(t)
+	startWorker(t, f, func(cfg *Config) {
+		cfg.Child = func(ctx context.Context) *exec.Cmd {
+			script := fmt.Sprintf(`head -c %d /dev/zero | tr '\0' a; echo; sleep 300`, run.MaxLineSize+(1<<20))
+			return exec.CommandContext(ctx, "sh", "-c", script)
+		}
+	})
+	req := layerGraph(t, f, "too long a line")
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	id, err := f.c.Submit(ctx, api.Request{Graph: &req})
+	testenv.Must(t, err)
+	if err := f.c.Watch(ctx, id, 0, func(api.Event) error { return nil }); err != nil {
+		t.Fatalf("the build never ended: %v", err)
+	}
+	outcome, err := f.c.Result(ctx, id)
+	testenv.Must(t, err)
+	testenv.Must(t, f.c.Release(t.Context(), id))
+	if outcome.Failure == nil || !strings.Contains(outcome.Failure.Message, "reading the attempt's output") {
+		t.Fatalf("outcome = %+v, want a failure to read the attempt's output", outcome.Failure)
 	}
 }
 
