@@ -2,6 +2,7 @@ package testenv
 
 import (
 	"cmp"
+	"errors"
 	"fmt"
 	"io/fs"
 	"maps"
@@ -258,4 +259,19 @@ func (f *DeniedFs) denied(op, path string) error {
 		return &fs.PathError{Op: op, Path: path, Err: fs.ErrPermission}
 	}
 	return nil
+}
+
+// CgroupRoot returns a cgroup root for the workers of this test binary, apart from every other's, which is removed
+// when the test ends if no attempt's cgroup is left in it: a worker kills the attempts whose cgroups it finds in its
+// root as it starts, as leftovers of one that crashed, so test binaries that `go test` runs at once mustn't share one.
+// Each call in a binary returns the same root, so tests that start workers mustn't run in parallel.
+func CgroupRoot(t *testing.T) string {
+	t.Helper()
+	root := fmt.Sprintf("/sys/fs/cgroup/vamos-test-%d", os.Getpid())
+	t.Cleanup(func() {
+		if err := os.Remove(root); err != nil && !errors.Is(err, os.ErrNotExist) {
+			t.Logf("removing the test's cgroup root: %v", err)
+		}
+	})
+	return root
 }

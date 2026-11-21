@@ -52,6 +52,10 @@ type Config struct {
 	// Registry, if set, is what pinning a pull asks about tags; otherwise the client asks each image's own registry.
 	// Scenarios set it, so that they need no registry.
 	Registry Registry
+	// CgroupRoot, if set, is where a worker makes its attempts' cgroups; otherwise the worker's own default.
+	// Tests set it, so that a worker starting in one test binary doesn't kill, as leftovers, the attempts of a
+	// worker in another.
+	CgroupRoot string
 }
 
 // app is the vamos command line: what every invocation shares.
@@ -61,6 +65,7 @@ type app struct {
 	fs       afero.Fs
 	store    *storage.StoreOptions
 	registry Registry // Config's, or nil for the upstream registry
+	cgroups  string   // Config's CgroupRoot
 }
 
 // options are the flags of one invocation; each command reads the ones it takes.
@@ -189,7 +194,7 @@ func (inv *invocation) release(ex api.Executor) {
 
 // NewRootCommand returns the vamos command line, with its subcommands, as cfg says.
 func NewRootCommand(cfg Config) *cobra.Command {
-	a := &app{fs: cfg.Fs, store: cfg.Store, registry: cfg.Registry}
+	a := &app{fs: cfg.Fs, store: cfg.Store, registry: cfg.Registry, cgroups: cfg.CgroupRoot}
 	defaults := defaultOptions()
 	opts := &defaults
 
@@ -929,6 +934,7 @@ func (inv *invocation) worker() error {
 		Store:       options,
 		Capacity:    inv.opts.capacity,
 		Log:         inv.stderr,
+		CgroupRoot:  inv.app.cgroups,
 	})
 	if err != nil {
 		return err

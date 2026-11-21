@@ -20,6 +20,8 @@
 // they do not configure privileges, isolation or networking.
 // Tests in several packages use EditedFs to edit sources during a read, and DeniedFs to refuse to check a file.
 // Give each test its own EditedFs, since it keeps a count of opens to decide when to edit.
+// A test that starts a worker gives it CgroupRoot, as worker.Config's or cli.Config's CgroupRoot,
+// or its start may kill the attempts of a worker in another package's tests that `go test` runs at once.
 // InsecureRegistry in registry.go lets an executor reach a test's registry over plain HTTP,
 // and FakeDocker in docker.go serves what loading an image into Docker uses.
 // Unsetenv unsets an environment variable for the rest of a test.

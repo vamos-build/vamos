@@ -51,6 +51,8 @@ type Local struct {
 	records   cache.RecordStore  // the directory
 	runner    *localRunner       // executes actions on the container store, and checks cached results against it
 	sharing   *sched.Sharing     // runs actions through the runner, once for every job that needs the same one
+	// traceLimit bounds each attempt's stored trace, if positive; see LimitAttemptTraces.
+	traceLimit int
 }
 
 // NewLocal returns a local executor on the container store that options describe, such as DefaultStoreOptions
@@ -94,6 +96,15 @@ func Version() string {
 // It is for tests, before any job is submitted.
 func (l *Local) RetainEvents(n int) {
 	l.jobs.RetainEvents(n)
+}
+
+// LimitAttemptTraces makes each attempt's stored trace fit in limit bytes, rather than tracing.MaxTraceSize,
+// so that tests can see a trace cut short without recording megabytes of spans.
+// It is for tests, before any job is submitted.
+func (l *Local) LimitAttemptTraces(limit int) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.traceLimit = limit
 }
 
 // DefaultStoreOptions returns the container store that buildah and podman use here, as containers/storage finds it.
@@ -156,6 +167,7 @@ func (l *Local) open() error {
 		isolation:     isolation,
 	}
 	l.sharing = sched.NewSharing(l.runner, l.directory, l.directory)
+	l.sharing.LimitTraces(l.traceLimit)
 	l.store = store
 	return nil
 }

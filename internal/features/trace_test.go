@@ -1,6 +1,7 @@
 package features
 
 import (
+	"fmt"
 	"maps"
 	"slices"
 	"strings"
@@ -769,6 +770,38 @@ func TestTrace_AMissingTraceNeverCostsAHit(t *testing.T) {
 		w.WhenIBuild("app")
 		w.ThenItSucceeds()
 		w.ThenTheTargetsWere(statuses{layer("app"): reused})
+	})
+}
+
+// aTaskOfManySteps declares the task "steps", on scratch, which sets NONCE to nonce, then STEP to each of 1 to 40 in
+// turn: an attempt whose trace holds a span for each, which an attempt's trace of a few kilobytes can't keep.
+func aTaskOfManySteps(nonce string) string {
+	steps := []string{`env(NONCE="` + nonce + `")`}
+	for i := 1; i <= 40; i++ {
+		steps = append(steps, fmt.Sprintf(`env(STEP="%d")`, i))
+	}
+	return `task(name="steps", base="scratch", steps=[` + strings.Join(steps, ", ") + `])`
+}
+
+// TestTrace_ATraceIsCappedInSize specifies, as the cache reference says, that "each stored trace is kept whole within
+// 16 MiB, as a log is: past that, the latest-started spans are dropped, and the trace says it was cut short and how
+// many it dropped".
+func TestTrace_ATraceIsCappedInSize(t *testing.T) {
+	t.Run("An attempt that traces past the cap is cut short", func(t *testing.T) {
+		w := newTraceWorld(t)
+		w.GivenACoordinatorWhoseAttemptTracesKeep(4 << 10)
+		w.GivenTheBuildFileDeclares(aTaskOfManySteps(testenv.NewNonce()))
+		w.WhenIBuild("steps", onTheCoordinator("<coordinator>"))
+		w.ThenItSucceeds()
+		w.ThenItPrintsItsTrace()
+		w.ThenItWarnsNothing()
+		w.WhenIReadTheTrace("<printed trace>", onTheCoordinator("<coordinator>"))
+		w.ThenItSucceeds()
+		w.ThenTheTraceSpanSaysAtLeast("executor", `task "steps"`, traceArgs{"outcome": "building"})
+		w.ThenTheTraceSpanIsWithin("executor", `env(STEP="1")`, "executor", `task "steps"`)
+		w.ThenTheTraceHasNoSpan("executor", `env(STEP="40")`)
+		w.ThenTheTraceSpanSaysAtLeast("executor", "trace truncated", traceArgs{"dropped": aCount})
+		w.ThenTheTraceSpanIsOnTrack("executor", "trace truncated", `task "steps"`)
 	})
 }
 

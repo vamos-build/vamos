@@ -48,6 +48,22 @@ func anAppOnThePull(nonce, tag string) string {
 	`
 }
 
+// anAppOfATasksFiles declares the pull "base" of busybox from the scenario's registry, the task "gen" on it, which
+// writes nonce to n.txt, and the layer "app" on scratch, which adds gen's files, so that their first build runs.
+func anAppOfATasksFiles(nonce string) string {
+	return `
+		pull(name="base", image="<registry>/busybox", tag="1.36")
+		task(
+		    name="gen",
+		    base="base",
+		    steps=[run(["sh", "-c", "mkdir /out && echo ` + nonce + ` > /out/n.txt"])],
+		    source="/out",
+		    include=["n.txt"],
+		)
+		layer(name="app", base="scratch", steps=[add("gen", "/data")])
+	`
+}
+
 // TestMisses_EveryMissHasOneCause specifies, as the cache reference says, that "each layer or task that runs, rather
 // than being reused, gets one cause in its trace".
 func TestMisses_EveryMissHasOneCause(t *testing.T) {
@@ -110,13 +126,17 @@ func TestMisses_ConcurrentBuildsEachAddTheirAction(t *testing.T) {
 		w.GivenARegistry()
 		w.GivenACoordinatorWithAWorker()
 		w.GivenAProjectThatPullsBusybox()
+		// Each build's attempt waits at the barrier until the other's reaches it, so that both are running at once.
+		w.GivenABarrierThatOpensOnceReachedBy(2)
 		w.GivenTheBuildFileDeclares(`
 			glob(name="src", include=["a.txt"])
 			task(name="app", base="busybox", steps=[env(NONCE="` + testenv.NewNonce() + `"), add("src", "/src"),
-			    run(["sleep", "2"])])
+			    run(["wget", "-q", "-O", "/dev/null", "<barrier>"])])
 		`)
 		w.GivenTwoClientsBuiltAtOnceOnTheCoordinator("app", files{"a.txt": "one"}, files{"a.txt": "two"},
 			onTheCoordinator("<coordinator>"))
+		w.ThenTheBarrierOpened()
+		w.GivenTheCoordinatorHasSettled()
 		w.WhenIPrune(onTheCoordinator("<coordinator>"))
 		w.ThenItSucceeds()
 		for _, source := range []string{"one", "two"} {
@@ -215,6 +235,23 @@ func TestMisses_ATargetWithoutComparableHistoryIsNew(t *testing.T) {
 // TestMisses_AResultThatIsGoneIsLost specifies, as the cache reference says, that a target is "lost" when "its action
 // is one it built before, but the result is gone or can't be used, as after a prune".
 func TestMisses_AResultThatIsGoneIsLost(t *testing.T) {
+	t.Run("A task whose cached files are corrupt is lost", func(t *testing.T) {
+		w := newMissWorld(t)
+		w.GivenARegistry()
+		w.GivenTheRegistryHoldsBusybox("<registry>/busybox:1.36")
+		nonce := testenv.NewNonce()
+		w.GivenTheBuildFileDeclares(anAppOfATasksFiles(nonce))
+		w.WhenIBuild("app")
+		w.ThenItSucceeds()
+		w.GivenTheCachedBlobOfIsCorrupt(nonce + "\n") // gen's n.txt, which app adds
+		w.WhenIBuild("app", rebuilding(), traced())
+		w.ThenItSucceeds()
+		w.ThenTheTargetWasShownAs(task("gen"), "cached", "building again, since its cached files are corrupt: ")
+		// Looked up, its files found corrupt by app, then built again.
+		w.ThenTheTraceSpansSayAtLeast("executor", `task "gen"`, traceArgs{"outcome": "cached"},
+			traceArgs{"outcome": "building again, since its cached files are corrupt: *", "miss": "lost"})
+	})
+
 	t.Run("A target built again after a prune is lost", func(t *testing.T) {
 		w := newMissWorld(t)
 		w.GivenTheBuildFileDeclares(anAppOfAGlob(testenv.NewNonce(), `"a.txt"`))

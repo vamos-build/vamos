@@ -259,3 +259,75 @@ func TestJobManifests(t *testing.T) {
 		}
 	})
 }
+
+// TestAttemptSpansKeepTheirOrder checks that a worker's spans, sent in batches that each carry the clock's offset it
+// estimated before the attempt started, keep the order they ran in on the coordinator's clock, though its heartbeats
+// refine the estimate between the batches by more than the gap between two steps.
+func TestAttemptSpansKeepTheirOrder(t *testing.T) {
+	f := newFixture(t, Config{})
+	req := testGraph(t, f, "order")
+	isOne := func(a *remote.Assignment) bool {
+		return a.Request != nil && a.Request.Action.Kind == sched.KindTask && len(a.Request.Action.Steps) > 0 &&
+			a.Request.Action.Steps[0].Argv[0] == "one"
+	}
+	var w *fakeWorker
+	w = newWorker(t, f, amd64, 4, func(a *remote.Assignment, killed func() bool) remote.AttemptReport {
+		if !isOne(a) {
+			return fakeRun(f, nil)(a, killed)
+		}
+		ctx := context.Background()
+		before := &tracing.Offset{Offset: time.Hour, Uncertainty: 10 * time.Millisecond} // the worker an hour ahead
+		start := time.Now().Add(time.Hour)
+		first := tracing.Span{ID: "w-1", Process: "worker", Track: "t", Name: "first step", Start: start,
+			End: start.Add(time.Millisecond)}
+		if err := w.client.Events(ctx, a.Attempt, remote.AttemptEvents{Spans: []tracing.Span{first},
+			Clock: before}); err != nil {
+			t.Errorf("sending the first step: %v", err)
+		}
+		// A better estimate, 50ms off the first, far more than the 10µs between the steps.
+		better := &tracing.Offset{Offset: time.Hour + 50*time.Millisecond, Uncertainty: time.Millisecond}
+		if _, err := w.client.Heartbeat(ctx, a.Attempt, remote.Heartbeat{Clock: better}); err != nil {
+			t.Errorf("heartbeating: %v", err)
+		}
+		then := first.End.Add(10 * time.Microsecond)
+		second := tracing.Span{ID: "w-2", Process: "worker", Track: "t", Name: "second step", Start: then,
+			End: then.Add(time.Millisecond)}
+		if err := w.client.Events(ctx, a.Attempt, remote.AttemptEvents{Spans: []tracing.Span{second},
+			Clock: before}); err != nil {
+			t.Errorf("sending the second step: %v", err)
+		}
+		return fakeRun(f, nil)(a, killed)
+	})
+	w.start()
+	id, err := f.c.Submit(t.Context(), api.Request{Graph: &req})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var outcome api.Outcome
+	if err := f.c.Watch(t.Context(), id, 0, func(e api.Event) error {
+		if e.Kind == api.EventDone {
+			outcome = *e.Outcome
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if outcome.Failure != nil {
+		t.Fatalf("the build failed: %+v", outcome.Failure)
+	}
+	found := map[string]tracing.Span{}
+	for _, s := range readAttempt(t, f, readManifest(t, f, outcome), 1).Spans {
+		found[s.Name] = s
+	}
+	first, second := found["first step"], found["second step"]
+	if first.ID == "" || second.ID == "" {
+		t.Fatalf("the attempt's trace holds %v; want both steps", found)
+	}
+	if !first.End.Before(second.Start) {
+		t.Errorf("the first step ends at %v, after the second starts at %v; want them in the order they ran",
+			first.End, second.Start)
+	}
+	if d := time.Until(first.Start); d > time.Minute || d < -time.Minute {
+		t.Errorf("the first step starts %v from now; want it on the coordinator's clock", d)
+	}
+}

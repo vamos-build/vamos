@@ -207,6 +207,10 @@ Execution timing enforces strict ordering:
   the worker logs the error and discards the batch rather than requeuing it.
 - The worker estimates clock skew against the coordinator across heartbeat responses,
   and the coordinator adjusts span timestamps by this offset to align traces accurately.
+  Each event batch carries the estimate the worker made before the attempt started, the same for the whole attempt,
+  and the coordinator shifts the batch's spans by it rather than by the heartbeats' latest:
+  an estimate refined between two batches would move later steps by more than the gap between steps,
+  and could place a step before the one it followed.
 
 ### Leases and monotonic fencing
 

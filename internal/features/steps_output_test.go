@@ -327,6 +327,16 @@ func (w *world) ThenTheCommandSays(want string) {
 	}
 }
 
+// ThenItWarnsNothing checks that the command's standard error holds no warning, `vamos: warning: ...`.
+func (w *world) ThenItWarnsNothing() {
+	w.t.Helper()
+	for line := range strings.Lines(w.stderr) {
+		if strings.HasPrefix(line, "vamos: warning: ") {
+			w.t.Errorf("the command warned %q, want no warning\n%s", strings.TrimSpace(line), w.outputs())
+		}
+	}
+}
+
 // ThenTheErrorOutputIncludes checks the command's standard error, where steps' errors go.
 func (w *world) ThenTheErrorOutputIncludes(want string) {
 	w.t.Helper()

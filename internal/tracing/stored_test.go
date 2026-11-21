@@ -407,6 +407,43 @@ func TestEncodeAttemptFits(t *testing.T) {
 	}
 }
 
+// TestEncodeAttemptWithin checks that an attempt's stored trace fits in a limit below MaxTraceSize, keeping its first
+// spans and saying it was cut short, and that a trace within a limit above MaxTraceSize is stored as EncodeAttempt
+// stores it.
+func TestEncodeAttemptWithin(t *testing.T) {
+	var spans []Span
+	for i := range 100 {
+		spans = append(spans, at(fmt.Sprintf("s%d", i), "layer", i, 1))
+	}
+	const limit = 2 << 10
+	data, err := EncodeAttemptWithin("a1", spans, Lost{}, limit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data) > limit {
+		t.Fatalf("the stored trace takes %d bytes; want at most %d", len(data), limit)
+	}
+	a, err := DecodeAttempt(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(a.Spans) < 2 {
+		t.Fatalf("kept %d spans; want the first, and the instant saying the trace was cut short", len(a.Spans))
+	}
+	if last := a.Spans[len(a.Spans)-1]; last.Name != Truncated || a.Spans[0].ID != "s0" {
+		t.Errorf("kept %d spans from %q, ending with %q; want the first, ending with %q",
+			len(a.Spans), a.Spans[0].ID, last.Name, Truncated)
+	}
+	whole, err := EncodeAttemptWithin("a1", spans, Lost{}, 2*MaxTraceSize)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want, err := EncodeAttempt("a1", spans, Lost{}); err != nil || string(whole) != string(want) {
+		t.Errorf("within twice MaxTraceSize = %d bytes, %v; want what EncodeAttempt stores, %d bytes", len(whole),
+			err, len(want))
+	}
+}
+
 // TestWithRecorderAt checks that spans started from a context it returns are recorded apart from ctx's,
 // yet nest and lie as ctx's own would.
 func TestWithRecorderAt(t *testing.T) {

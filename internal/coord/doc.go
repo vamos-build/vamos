@@ -44,8 +44,11 @@
 // A record written before builds recorded their platforms resumes with the platforms configured.
 // A worker renews each attempt's lease by heartbeat, carrying its estimate of its clock's offset, made from the
 // coordinator's clock in earlier answers, and sends what it prints and traces as events, which reach the attached
-// builds and, shifted by that offset onto the coordinator's clock, the attempt's trace, which sched.Sharing stores,
-// tries that were lost included; an assignment always carries a trace context, since every attempt records.
+// builds and, shifted onto the coordinator's clock, the attempt's trace, which sched.Sharing stores, tries that were
+// lost included; an assignment always carries a trace context, since every attempt records.
+// Each batch of events carries the offset the worker estimated before the attempt started, the same for every batch,
+// which shifts its spans, so that a step never lands before the one it followed, as an estimate the heartbeats refine
+// between two batches could place it; a batch from an older worker, which carries none, is shifted by the heartbeats'.
 // The successful try's run, from its assignment to its report, is the result's, as sched.Report.Ran gives it.
 // An attempt told to die at a heartbeat ends then, freeing its worker's slot.
 // Every job but a prune runs under Coordinator.traced, which stores its manifest before its outcome is returned,

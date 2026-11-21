@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io/fs"
 	"maps"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -213,13 +214,41 @@ func (w *world) ThenTheTraceSpanIsOnTrack(process, name, track string) {
 // traceArgs are the arguments of a span, by key, as JSON decodes them: a number is a float64.
 type traceArgs map[string]any
 
+// aCount stands, in traceArgs, for any whole number above zero, for a count that a scenario can't know exactly,
+// such as how many spans a trace cut short dropped, which depends on how long each span's encoding is.
+var aCount = positiveCount{}
+
+// positiveCount is the type of aCount.
+type positiveCount struct{}
+
 // ThenTheTraceSpanSaysAtLeast checks the span's arguments that want names, and not its others, in which a string
 // value may start with "*" or end in "*", or both, to say only how it ends or starts, or what it holds, "<image>"
 // stands for the full ID of the image that the command sent, and other placeholders for what atPlaceholders says.
-// A number is compared as a number.
+// A number is compared as a number, and aCount matches any whole number above zero.
 func (w *world) ThenTheTraceSpanSaysAtLeast(process, name string, want traceArgs) {
 	w.t.Helper()
-	s := w.span(process, name)
+	w.spanSaysAtLeast(w.span(process, name), want)
+}
+
+// ThenTheTraceSpansSayAtLeast checks that the trace has as many spans of process that name names as want has
+// arguments, as a target looked up and then built again has two, and that each, in the order they started, says at
+// least what want has for it, as ThenTheTraceSpanSaysAtLeast checks; a count that differs stops the scenario.
+func (w *world) ThenTheTraceSpansSayAtLeast(process, name string, want ...traceArgs) {
+	w.t.Helper()
+	tr := w.theTrace()
+	found := tr.all(process, w.atPlaceholders(name))
+	if len(found) != len(want) {
+		w.t.Fatalf("the trace has %d spans of %s named %q, want %d; it has:\n%s", len(found), process, name,
+			len(want), tr)
+	}
+	for i, s := range found {
+		w.spanSaysAtLeast(s, want[i])
+	}
+}
+
+// spanSaysAtLeast checks s's arguments that want names, as ThenTheTraceSpanSaysAtLeast says.
+func (w *world) spanSaysAtLeast(s *traceSlice, want traceArgs) {
+	w.t.Helper()
 	for _, key := range slices.Sorted(maps.Keys(want)) {
 		got, ok := s.Args[key]
 		if !ok {
@@ -227,6 +256,10 @@ func (w *world) ThenTheTraceSpanSaysAtLeast(process, name string, want traceArgs
 			continue
 		}
 		switch v := want[key].(type) {
+		case positiveCount:
+			if n, isNumber := got.(float64); !isNumber || n < 1 || n != math.Trunc(n) { // as JSON decodes it
+				w.t.Errorf("%q says %s = %#v, want a count above zero", s.Name, key, got)
+			}
 		case int:
 			if got != float64(v) { // as JSON decodes it
 				w.t.Errorf("%q says %s = %#v, want %d", s.Name, key, got, v)
