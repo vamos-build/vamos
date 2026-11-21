@@ -22,8 +22,9 @@ import (
 const clientProcess = "vamos"
 
 // The bounds on a command's cleanup once its jobs end, each under the command's context without its cancellation,
-// so that an interrupted command still stores and writes its trace, and no step can take the others' time.
-const (
+// so that an interrupted command still stores and writes its trace, and no step can take the others' time;
+// tests shorten them.
+var (
 	traceStoreTimeout    = 10 * time.Second // storing the command trace, of at most tracing.MaxTraceSize
 	traceAssembleTimeout = 60 * time.Second // reading the manifests and attempt traces for --trace's file
 	releaseTimeout       = 10 * time.Second // releasing the jobs, which lets a prune run

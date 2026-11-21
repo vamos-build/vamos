@@ -565,7 +565,9 @@ func (p *pool) Heartbeat(_ context.Context, id string, beat remote.Heartbeat) (r
 }
 
 // Events relays what the attempt printed to the builds attached to it, and its spans, shifted onto the
-// coordinator's clock, to the trace of the build that started it.
+// coordinator's clock, to the trace of the build that started it: by the offset that the batch carries, which is the
+// same for every batch of the attempt, so that its spans keep their order, or else, from an older worker, by the
+// best that its heartbeats have said so far.
 func (p *pool) Events(_ context.Context, id string, events remote.AttemptEvents) error {
 	p.mu.Lock()
 	at, err := p.live(id)
@@ -576,7 +578,10 @@ func (p *pool) Events(_ context.Context, id string, events remote.AttemptEvents)
 	at.lease = p.now().Add(p.cfg.Lease)
 	out, trace := at.out, at.trace
 	var offset tracing.Offset
-	if at.clock != nil {
+	switch {
+	case events.Clock != nil:
+		offset = *events.Clock
+	case at.clock != nil:
 		offset = *at.clock
 	}
 	p.mu.Unlock()

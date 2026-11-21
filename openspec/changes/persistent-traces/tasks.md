@@ -147,7 +147,7 @@
 
 ## 7. The client: command traces, `--trace` and `vamos trace` (`internal/cli`)
 
-- [ ] 7.1 Stop sending `EventSpans`, and the transitional streaming 5.1 kept for `--trace`. Make `inv.traced` always
+- [x] 7.1 Stop sending `EventSpans`, and the transitional streaming 5.1 kept for `--trace`. Make `inv.traced` always
   record. Measure the clock offset with one sample without `--trace` and three with it.
   Once a command's jobs end, and before it releases them, store the `CommandTrace` in the executor's content store and
   print `vamos: trace <digest>` on stderr, warning instead if it can't be stored. Store it, assemble `--trace`'s file
@@ -158,8 +158,6 @@
   ends at its bound. A command that ran no job stores nothing. Warn about a clock offset that can't be measured,
   storing a zero offset marked unknown, rather than failing the command, and test it. Warn when a job's outcome names
   no manifest. Verify with `go test ./internal/cli`.
-  Open: the tests of a prune refused while the command trace is stored, and of each cleanup step against an
-  executor that stops answering, wait on the testing harness, which is addressed in a separate PR.
 - [x] 7.2 Assemble traces in `cli/trace.go`: manifests and the attempt traces they took with `ReadMany`, falling back to
   one read per blob when a batch meets a missing or corrupt one, with gaps for those. Place joined attempts on their own
   `(shared)` track with parents cleared, and shift client spans by the stored offset. Place an attempt that several of
@@ -179,13 +177,11 @@
   unknown; check and write the output as `--trace` does. Test each message in `internal/cli`, the oversized blob's, a
   log's, malformed JSON's and an unknown kind's and version's included, and a content store that refuses the command
   trace, against a remote coordinator. Verify with `go test ./internal/cli`.
-- [ ] 7.4 Add steps for a printed trace digest, `vamos trace` by digest and by job, and of a step's log, an attempt
+- [x] 7.4 Add steps for a printed trace digest, `vamos trace` by digest and by job, and of a step's log, an attempt
   trace removed from the cache, and a step that checks a span lacks named arguments, for cached targets' causes and old
   results' provenance. Add `trace_test.go` rules and scenarios for every `build-traces` requirement, the secret one
   checking the stored command trace, manifest and attempt trace as well as the file, the coordinator ones in the remote
   steps. Verify with `go test ./internal/features -run TestTrace_`.
-  Open: the scenario of an attempt that traces past the cap waits on the testing harness, which is addressed in a
-  separate PR.
 - [x] 7.5 Update the user docs: `docs/user/reference/cache.md#traces` (always on, what is stored, prune),
   `flags.md`'s `--trace`, a new `docs/user/reference/cli/trace.md` with its row in the CLI README table, `output.md`
   (the trace line), and `prune.md` (traces go, history stays until unused). Update `internal/cli/doc.go`. Make the
@@ -193,14 +189,12 @@
 
 ## 8. Miss attribution scenarios (`internal/features`)
 
-- [ ] 8.1 Add `misses_test.go` with a background for a named workspace, and a rule for each `cache-miss-attribution`
+- [x] 8.1 Add `misses_test.go` with a background for a named workspace, and a rule for each `cache-miss-attribution`
   requirement, with its scenarios, checked through `ThenTheTraceSpanSaysAtLeast`, and through 7.4's absence step where a
   scenario says no cause. Add a step for each new setup the scenarios need (moving a tag under `--pins=resolve`, two
   builds at once on a coordinator, and ageing a target's history by setting its record's `Used` back, for the
   retention scenarios). Document the causes in `docs/user/reference/cache.md` and have the rules quote it. Verify with
   `go test ./internal/features -run TestMisses_`.
-  Open: the scenario of a task whose cached files are corrupt apart from its sources, and proof that concurrent
-  builds write their history at the same moment, wait on the testing harness, which is addressed in a separate PR.
 
 ## 9. Integration
 
@@ -218,11 +212,13 @@
 
 ## Workflow follow-up
 
-- The author elected to address the gaps in the testing harness as a separate PR: a coordinator that holds chosen
-  requests unanswered, for the cleanup bounds and the prune refused while a command trace is stored (7.1); a test-only
-  trace cap (7.4); a runnable image in a scenario's own registry, for a task's cached files corrupt apart from its
-  sources, and a barrier within attempts, for history written by concurrent builds (8.1); and the cause of a rare
-  overlap of a left attempt's steps on its shared track. Tasks 7.1, 7.4 and 8.1 stay open until then.
+- The gaps in the testing harness, first left to a separate PR, are closed: a coordinator that holds chosen requests
+  unanswered, for the cleanup bounds and the prune refused while a command trace is stored (7.1); a test-only cap on
+  attempt traces (7.4); busybox in a scenario's own registry, for a task's cached files corrupt apart from its sources,
+  and a barrier within attempts, so that the builds that each add their action to history overlap (8.1). The rare overlap of a left attempt's
+  steps on its shared track came from the coordinator shifting each batch of a worker's spans by its latest estimate
+  of the worker's clock, which heartbeats refine between batches; each batch now carries the estimate the worker made
+  before the attempt started.
 - Archive the change with `/opsx:archive` once it is reviewed and merged, creating `openspec/specs/build-traces` and
   `openspec/specs/cache-miss-attribution`.
 - `telemetry-export` builds on the manifests and miss causes added here.

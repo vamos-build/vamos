@@ -71,34 +71,40 @@ type world struct {
 	coordinator       string               // the URL of the scenario's coordinator, <coordinator>, once started
 	coordinatorStores storage.StoreOptions // the stores of GivenACoordinator's, which a restart opens again
 	coordinatorLocal  *run.Local           // the executor of GivenACoordinator's
-	timeline          *jobTimeline         // what the events of the coordinator's jobs said, if a step watches them
-	otherJob          string               // the job of GivenAnotherClientBuildsOnTheCoordinator's client
-	otherBuild        *otherClient         // the client of GivenAnotherClientBuildsOnTheCoordinator, if started
-	jobs              atomic.Int64         // the jobs that the scenario's coordinator was given
-	toldMu            sync.Mutex           // guards told
-	told              []toldJob            // what each job the scenario's coordinator was given told it, in order
-	served            atomic.Int64         // the requests that the scenario's coordinator was sent
-	coordinatorServer *httptest.Server     // that serves <coordinator>, counting what it is sent
-	watching          chan struct{}        // told, if it has room, once front sends on a command's watch of a job
-	interruptedAt     time.Time            // when WhenIInterruptTheCoordinatorWhileIBuild interrupted the coordinator
-	buildTook         time.Duration        // how long after that the build ended
-	local             *server              // the coordinator that GivenALocalCoordinator started
-	interruptLocal    context.CancelFunc   // interrupts it
-	localErr          error                // what it ended with, once interrupted
-	localTook         time.Duration        // how long it took to end, once interrupted
+	// attemptTraceLimit bounds each attempt's stored trace on GivenACoordinator's, in bytes, if positive.
+	attemptTraceLimit  int
+	timeline           *jobTimeline       // what the events of the coordinator's jobs said, if a step watches them
+	otherJob           string             // the job of GivenAnotherClientBuildsOnTheCoordinator's client
+	otherBuild         *otherClient       // the client of GivenAnotherClientBuildsOnTheCoordinator, if started
+	jobs               atomic.Int64       // the jobs that the scenario's coordinator was given
+	toldMu             sync.Mutex         // guards told
+	told               []toldJob          // what each job the scenario's coordinator was given told it, in order
+	served             atomic.Int64       // the requests that the scenario's coordinator was sent
+	coordinatorServer  *httptest.Server   // that serves <coordinator>, counting what it is sent
+	coordinatorStarted time.Time          // when GivenACoordinatorWithAWorker started its coordinator
+	cgroupRoot         string             // where the scenario's worker makes its attempts' cgroups, if it has one
+	watching           chan struct{}      // told, if it has room, once front sends on a command's watch of a job
+	interruptedAt      time.Time          // when WhenIInterruptTheCoordinatorWhileIBuild interrupted the coordinator
+	buildTook          time.Duration      // how long after that the build ended
+	local              *server            // the coordinator that GivenALocalCoordinator started
+	interruptLocal     context.CancelFunc // interrupts it
+	localErr           error              // what it ended with, once interrupted
+	localTook          time.Duration      // how long it took to end, once interrupted
 
-	prepared   string                   // the folder the next command sends to, if Given steps have put something there
-	outside    string                   // a folder outside the project, for files that commands read, such as secrets
-	outsideWas map[string]outsideFile   // what GivenAFileOutsideTheProjectHolds wrote there, by name
-	registry   string                   // the host of the scenario's registry, <registry>, once a Given step starts it
-	login      authn.Authenticator      // that the scenario's registry needs, which steps that read from it use
-	server     *httptest.Server         // that serves the scenario's registry, once a Given step starts it
-	asked      atomic.Int64             // the requests that the scenario's registry has served
-	stopped    atomic.Bool              // whether the scenario's registry has stopped answering
-	refusedMu  sync.Mutex               // guards refused, which the registry's requests read
-	refused    map[string]bool          // the repositories whose writes it refuses, true for tags alone
-	unlisting  map[string]tagListAnswer // how it answers lists of the tags of repositories, by path, in their place
-	tagPage    int                      // how many tags it lists a page, or 0 for all of them on one
+	prepared   string                 // the folder the next command sends to, if Given steps have put something there
+	outside    string                 // a folder outside the project, for files that commands read, such as secrets
+	outsideWas map[string]outsideFile // what GivenAFileOutsideTheProjectHolds wrote there, by name
+	registry   string                 // the host of the scenario's registry, <registry>, once a Given step starts it
+	// barrier is GivenABarrierThatOpensOnceReachedBy's server, at <barrier>, once a Given step starts it.
+	barrier   *barrier
+	login     authn.Authenticator      // that the scenario's registry needs, which steps that read from it use
+	server    *httptest.Server         // that serves the scenario's registry, once a Given step starts it
+	asked     atomic.Int64             // the requests that the scenario's registry has served
+	stopped   atomic.Bool              // whether the scenario's registry has stopped answering
+	refusedMu sync.Mutex               // guards refused, which the registry's requests read
+	refused   map[string]bool          // the repositories whose writes it refuses, true for tags alone
+	unlisting map[string]tagListAnswer // how it answers lists of the tags of repositories, by path, in their place
+	tagPage   int                      // how many tags it lists a page, or 0 for all of them on one
 	// pinnedMeanwhile, if a step gave it, is the lockfile that another command writes the first time the scenario's
 	// registry lists tags, as one that pins a pull while this command resolves it would; pinMeanwhile writes it.
 	pinnedMeanwhile string

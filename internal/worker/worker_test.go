@@ -94,7 +94,7 @@ func startWorker(t *testing.T, f *fixture, configure ...func(*Config)) (*Worker,
 		Store:       stores.Options,
 		Capacity:    2,
 		Child:       TestChild(stores.Options),
-		CgroupRoot:  testCgroupRoot(t),
+		CgroupRoot:  testenv.CgroupRoot(t),
 		Log:         testWriter{t},
 	}
 	for _, c := range configure {
@@ -155,18 +155,6 @@ func tagsOf(h http.Handler, repo string) []string {
 	}
 	_ = json.Unmarshal(rec.Body.Bytes(), &list) // an error, for a repository it doesn't know, lists no tags
 	return list.Tags
-}
-
-// testCgroupRoot returns a cgroup root for this test binary's workers, removed when the test ends.
-func testCgroupRoot(t *testing.T) string {
-	t.Helper()
-	root := filepath.Join(filepath.Dir(cgroupRoot), fmt.Sprintf("vamos-test-%d", os.Getpid()))
-	t.Cleanup(func() {
-		if err := os.Remove(root); err != nil && !errors.Is(err, os.ErrNotExist) {
-			t.Logf("removing the test's cgroup root: %v", err)
-		}
-	})
-	return root
 }
 
 // testWriter logs to the test.

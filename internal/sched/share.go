@@ -42,6 +42,8 @@ type Sharing struct {
 	runner  Runner
 	content cache.ContentStore // holds the logs that late jobs are replayed
 	records cache.RecordStore  // takes what attempts Report
+	// traceLimit bounds each attempt's stored trace, if positive, below tracing.MaxTraceSize; see LimitTraces.
+	traceLimit int
 
 	mu       sync.Mutex
 	inflight map[digest.Digest]*attempt
@@ -159,6 +161,13 @@ func (s *Sharing) attempt(ctx context.Context, req Request, ev Output) (*cache.A
 	return s.await(ctx, at, l)
 }
 
+// LimitTraces makes each attempt's stored trace fit in limit bytes, rather than tracing.MaxTraceSize, if it is
+// smaller, so that tests can see a trace cut short without recording megabytes of spans.
+// It is for tests, before any attempt starts.
+func (s *Sharing) LimitTraces(limit int) {
+	s.traceLimit = limit
+}
+
 // join tells ev, if it is a Joiner, whose attempt runs its job's action: the one starter started, or its own.
 func join(ev Output, starter Output) {
 	if j, ok := ev.(Joiner); ok {
@@ -172,7 +181,11 @@ func join(ev Output, starter Output) {
 // It returns nil, with why, if the trace couldn't be stored, which fails nothing.
 func (s *Sharing) saveTrace(ctx context.Context, id string, spans []tracing.Span, lost tracing.Lost) (
 	*cache.Blob, error) {
-	data, err := tracing.EncodeAttempt(id, spans, lost)
+	limit := tracing.MaxTraceSize
+	if s.traceLimit > 0 {
+		limit = s.traceLimit
+	}
+	data, err := tracing.EncodeAttemptWithin(id, spans, lost, limit)
 	if err != nil {
 		return nil, err
 	}
