@@ -3,7 +3,7 @@ load("//:defs.star", "PLATFORMS")
 pull(
     name = "python",
     image = "docker.io/library/python",
-    tag = "3.14",
+    tag = "3.15",
 )
 
 glob(

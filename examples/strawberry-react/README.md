@@ -27,7 +27,7 @@ config:
 flowchart TD
     subgraph backend["backend/BUILD"]
         direction TB
-        backend-python[<div style="text-align:left"><i>pull python</i><hr/>python:3.14</div>]
+        backend-python[<div style="text-align:left"><i>pull python</i><hr/>python:3.15</div>]
         backend-packages[<div style="text-align:left"><i>layer packages</i><hr/>pip install</div>]
         backend-source[<div style="text-align:left"><i>glob server-files</i><hr/>*.py</div>]
         backend-layer[<div style="text-align:left"><i>layer layer</i><hr/>fastapi run server.py</div>]
@@ -41,7 +41,7 @@ flowchart TD
 
     subgraph ui["ui/BUILD"]
         direction TB
-        ui-nodejs[<div style="text-align:left"><i>pull nodejs</i><hr/>node:24-alpine</div>]
+        ui-nodejs[<div style="text-align:left"><i>pull nodejs</i><hr/>node:26-alpine</div>]
         ui-packages[<div style="text-align:left"><i>layer packages</i><hr/>pnpm install</div>]
         codegen[<div style="text-align:left"><i>task graphql-codegen</i><hr/>pnpm graphql-codegen<hr/>src/gql/**</div>]
         ui-source[<div style="text-align:left"><i>glob build-files</i><hr/>index.html<br/>src/**</div>]
@@ -67,7 +67,7 @@ Backend:
 
 ```
 cd backend
-uv venv --python 3.14 .venv
+uv venv --python 3.15 .venv
 uv pip sync --python .venv requirements_dev_lock.txt
 . .venv/bin/activate
 pyright && pytest
@@ -155,9 +155,9 @@ Then open http://localhost:8080.
 After changing either, regenerate both locks, with `--exclude-newer` set to two weeks ago:
 
 ```
-uv pip compile --python-platform linux --python-version 3.14 --generate-hashes --exclude-newer YYYY-MM-DD \
+uv pip compile --python-platform linux --python-version 3.15 --generate-hashes --exclude-newer YYYY-MM-DD \
   requirements.txt -o requirements_lock.txt
-uv pip compile --python-platform linux --python-version 3.14 --generate-hashes --exclude-newer YYYY-MM-DD \
+uv pip compile --python-platform linux --python-version 3.15 --generate-hashes --exclude-newer YYYY-MM-DD \
   requirements_dev.txt -o requirements_dev_lock.txt
 ```
 

@@ -1,7 +1,7 @@
 pull(
     name="python",
     image="docker.io/library/python",
-    tag="3.14-slim",
+    tag="3.15-slim",
 )
 
 glob(

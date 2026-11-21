@@ -1,7 +1,7 @@
 pull(
     name="nodejs",
     image="docker.io/library/node",
-    tag="24-alpine",
+    tag="26-alpine",
 )
 
 glob(

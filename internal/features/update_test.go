@@ -93,7 +93,18 @@ func TestUpdate_TheLockfilePinsEachPulledTag(t *testing.T) {
 				  "pulls": {}
 				}
 			`,
-			error: `/project/vamos.lock:2:16: "version" holds a string, want a number`,
+			error: `/project/vamos.lock:2:16: version holds a string, want a number`,
+		},
+		{
+			name: "a version that isn't a number, after a number too large for a float64",
+			lockfile: `
+				{
+				  "extra": 1e400,
+				  "version": "1",
+				  "pulls": {}
+				}
+			`,
+			error: `/project/vamos.lock:3:16: version holds a string, want a number`,
 		},
 		{
 			name: "a pin that isn't an object",
@@ -103,7 +114,7 @@ func TestUpdate_TheLockfilePinsEachPulledTag(t *testing.T) {
 				  "pulls": {"docker.io/library/busybox:1.36": "1.36.1"}
 				}
 			`,
-			error: `/project/vamos.lock:3:54: "pulls" holds a string, want an object`,
+			error: `/project/vamos.lock:3:54: pulls["docker.io/library/busybox:1.36"] holds a string, want an object`,
 		},
 		{
 			name: "an image not written as vamos writes it",

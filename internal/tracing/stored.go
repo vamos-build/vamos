@@ -74,7 +74,7 @@ func EncodeAttempt(id string, spans []Span, lost Lost) ([]byte, error) {
 	if len(id) > maxAttemptID {
 		return nil, fmt.Errorf("an attempt's ID of %d bytes is longer than %d", len(id), maxAttemptID)
 	}
-	a := Attempt{Header: Header{Version: Version, Kind: KindAttempt}, ID: id, Spans: []Span{}}
+	a := Attempt{Version: Version, Kind: KindAttempt, ID: id, Spans: []Span{}}
 	empty, err := json.Marshal(a)
 	if err != nil {
 		return nil, err

@@ -2,7 +2,7 @@
 
 [tool.ruff]
 line-length = 120
-target-version = "py314"
+target-version = "py315"
 
 [tool.ruff.lint]
 select = ["ALL"]
@@ -20,7 +20,7 @@ ignore = [
 ]
 
 [tool.pyright]
-pythonVersion = "3.14"
+pythonVersion = "3.15"
 typeCheckingMode = "strict"
 venvPath = "."
 venv = ".venv"
@@ -38,4 +38,9 @@ reportUnusedCallResult = "error"
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 addopts = ["--strict-config", "--strict-markers"]
-filterwarnings = ["error"]
+filterwarnings = [
+    "error",
+    # Python 3.15 deprecates isinstance() on protocols that aren't @runtime_checkable, which beartype reports for
+    # py-key-value-aio 0.4.6's AsyncKeyValue. Drop this once the lock takes a py-key-value-aio that decorates it.
+    "ignore:<class 'key_value.aio.protocols.key_value.AsyncKeyValue'> isn't explicitly decorated with @runtime_checkable:DeprecationWarning",
+]

@@ -47,8 +47,8 @@ func TestPullerPinnedIndex(t *testing.T) {
 		img, err := random.Image(64, 1)
 		testenv.Must(t, err)
 		idx := mutate.AppendManifests(empty.Index, mutate.IndexAddendum{
-			Add:        img,
-			Descriptor: v1.Descriptor{Platform: &v1.Platform{OS: "linux", Architecture: "amd64"}},
+			Add:      img,
+			Platform: &v1.Platform{OS: "linux", Architecture: "amd64"},
 		})
 		ref, err := name.ParseReference(image, name.Insecure)
 		testenv.Must(t, err)
@@ -162,8 +162,8 @@ func TestMaterializeFromRegistry(t *testing.T) {
 		img, err = mutate.ConfigFile(img, config)
 		testenv.Must(t, err)
 		idx = mutate.AppendManifests(idx, mutate.IndexAddendum{
-			Add:        img,
-			Descriptor: v1.Descriptor{Platform: &v1.Platform{OS: p.OS, Architecture: p.Architecture}},
+			Add:      img,
+			Platform: &v1.Platform{OS: p.OS, Architecture: p.Architecture},
 		})
 	}
 	tag, err := name.ParseReference(host+"/team/multi:v1", name.Insecure)

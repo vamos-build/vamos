@@ -181,14 +181,68 @@ func unmarshal(path string, data []byte, v any) error {
 		return fmt.Errorf("%s:%d:%d: %w", path, line, col, err)
 	case errors.As(err, &typ):
 		line, col := lineCol(data, typ.Offset)
-		where := "the lockfile"
-		if f := strings.TrimPrefix(typ.Field, "."); f != "" {
-			where = strconv.Quote(f)
+		where := jsonPath(data, typ.Offset)
+		if where == "" {
+			where = "the lockfile"
 		}
 		return fmt.Errorf("%s:%d:%d: %s holds %s, want %s", path, line, col, where, withArticle(typ.Value),
 			withArticle(jsonKind(typ.Type)))
 	}
 	return fmt.Errorf("%s: %w", path, err)
+}
+
+// jsonPath returns the path in data, valid JSON, to the value whose first token ends at offset, as a type error
+// gives it, such as pulls["docker.io/library/node:24-alpine"].tag, or "" for data's own value or an offset at no
+// value's first token. UnmarshalTypeError.Field can't give it: it joins names with dots, which keys may hold.
+func jsonPath(data []byte, offset int64) string {
+	type level struct {
+		object bool
+		key    string // in an object, the key of the value read last, or being read
+		index  int    // in an array, the index of the value being read, from -1 before the first
+		keyed  bool   // in an object, whether the key of the next value has been read
+	}
+	var levels []level
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber() // a number too large for a float64 is still a token
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			return ""
+		}
+		if d, ok := tok.(json.Delim); ok && (d == '}' || d == ']') {
+			levels = levels[:len(levels)-1]
+			continue
+		}
+		if n := len(levels); n > 0 && levels[n-1].object && !levels[n-1].keyed {
+			levels[n-1].key, levels[n-1].keyed = tok.(string), true
+			continue
+		}
+		if n := len(levels); n > 0 && !levels[n-1].object {
+			levels[n-1].index++
+		}
+		if dec.InputOffset() == offset {
+			var b strings.Builder
+			for _, l := range levels {
+				switch {
+				case !l.object:
+					fmt.Fprintf(&b, "[%d]", l.index)
+				case isIdentifier(l.key) && b.Len() == 0:
+					b.WriteString(l.key)
+				case isIdentifier(l.key):
+					b.WriteString("." + l.key)
+				default:
+					b.WriteString("[" + strconv.Quote(l.key) + "]")
+				}
+			}
+			return b.String()
+		}
+		if n := len(levels); n > 0 && levels[n-1].object {
+			levels[n-1].keyed = false
+		}
+		if d, ok := tok.(json.Delim); ok {
+			levels = append(levels, level{object: d == '{', index: -1})
+		}
+	}
 }
 
 // jsonKind returns what JSON calls a value that decodes into t.

@@ -13,7 +13,7 @@ config:
     padding: 6
 ---
 flowchart TD
-    nodejs[<div style="text-align:left"><i>pull nodejs</i><hr/>node:24-alpine</div>]
+    nodejs[<div style="text-align:left"><i>pull nodejs</i><hr/>node:26-alpine</div>]
     install-files[<div style="text-align:left"><i>glob install-files</i><hr/>package.json<br/>pnpm-lock.yaml<br/>pnpm-workspace.yaml</div>]
     packages[<div style="text-align:left"><i>layer packages</i><hr/>install pnpm<br/>pnpm install</div>]
     source-files[<div style="text-align:left"><i>glob source-files</i><hr/>index.html<br/>tsconfig.json<br/>src/**</div>]

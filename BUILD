@@ -11,13 +11,13 @@
 pull(
     name = "golang",
     image = "docker.io/library/golang",
-    tag = "1.26-bookworm",
+    tag = "1.27-bookworm",
 )
 
 pull(
     name = "fedora",
     image = "docker.io/library/fedora",
-    tag = "44",
+    tag = "45",
 )
 
 glob(

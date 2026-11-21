@@ -2,7 +2,7 @@
 # and Debian 12's glibc is old enough for it to run on Ubuntu 24.04 and later: it needs glibc 2.34.
 # Buildah's namespace setup needs cgo, so the binary can't be static;
 # these tags drop its other C libraries: signatures are checked in Go, not by gpgme, and there is no btrfs storage.
-FROM golang:1.26-bookworm AS build
+FROM golang:1.27-bookworm AS build
 
 WORKDIR /build
 COPY go.mod go.sum ./
@@ -18,7 +18,7 @@ RUN go build -tags "containers_image_openpgp exclude_graphdriver_btrfs" \
 FROM scratch AS binary
 COPY --from=build /build/vamos /vamos
 
-FROM fedora:44
+FROM fedora:45
 
 RUN dnf -y install \
     containers-common \

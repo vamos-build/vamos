@@ -14,7 +14,6 @@ import (
 	"github.com/vamos-build/vamos/internal/tracing"
 
 	"github.com/opencontainers/go-digest"
-	"github.com/opencontainers/image-spec/specs-go"
 	imgspecv1 "github.com/opencontainers/image-spec/specs-go/v1"
 	imagecopy "go.podman.io/image/v5/copy"
 	"go.podman.io/image/v5/manifest"
@@ -212,9 +211,9 @@ func WriteLayoutIndex(dir string, index imgspecv1.Index, ref string) ([]byte, er
 func writeIndexJSON(dir string, desc imgspecv1.Descriptor, ref string) error {
 	desc.Annotations = map[string]string{imgspecv1.AnnotationRefName: ref}
 	top := imgspecv1.Index{
-		Versioned: specs.Versioned{SchemaVersion: 2},
-		MediaType: imgspecv1.MediaTypeImageIndex,
-		Manifests: []imgspecv1.Descriptor{desc},
+		SchemaVersion: 2,
+		MediaType:     imgspecv1.MediaTypeImageIndex,
+		Manifests:     []imgspecv1.Descriptor{desc},
 	}
 	data, err := json.Marshal(top)
 	if err != nil {
@@ -239,7 +238,7 @@ func LayoutIndex(
 	ctx context.Context, policyContext *signature.PolicyContext, dir string, members []IndexMember,
 	sys *types.SystemContext,
 ) (types.ImageReference, []byte, error) {
-	index := imgspecv1.Index{Versioned: specs.Versioned{SchemaVersion: 2}, MediaType: imgspecv1.MediaTypeImageIndex}
+	index := imgspecv1.Index{SchemaVersion: 2, MediaType: imgspecv1.MediaTypeImageIndex}
 	for i, m := range members {
 		layoutRef, err := layout.NewReference(dir, fmt.Sprintf("manifest-%d", i))
 		if err != nil {
