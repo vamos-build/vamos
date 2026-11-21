@@ -2,6 +2,7 @@ package load
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -266,5 +267,31 @@ func TestLockWaitEndsWithItsContext(t *testing.T) {
 				t.Errorf("a lockfile exists (%v), want none", err)
 			}
 		})
+	}
+}
+
+func TestJSONPath(t *testing.T) {
+	for _, c := range []struct {
+		data string
+		v    any
+		want string
+	}{
+		{`{"version":"1"}`, &struct{ Version int }{}, "version"},
+		{`{"version":{"a":1}}`, &struct{ Version int }{}, "version"},
+		{`[1]`, &map[string]int{}, ""},
+		{`{"pulls":[1,2]}`, &struct{ Pulls map[string]Pin }{}, "pulls"},
+		{`{"pulls":{"docker.io/library/busybox:1.36":"x"}}`, &struct{ Pulls map[string]Pin }{},
+			`pulls["docker.io/library/busybox:1.36"]`},
+		{`{"pulls":{"a":{"tag":"t"},"b:1.tag":{"tag":1}}}`, &struct{ Pulls map[string]Pin }{}, `pulls["b:1.tag"].tag`},
+		{`{"pulls":{"b":{"tag":{"x":[1]}}}}`, &struct{ Pulls map[string]Pin }{}, `pulls.b.tag`},
+		{`{"x":[[],[{"y":1},{"y":true}]]}`, &struct{ X [][]struct{ Y int } }{}, "x[1][1].y"},
+	} {
+		var typ *json.UnmarshalTypeError
+		if !errors.As(json.Unmarshal([]byte(c.data), c.v), &typ) {
+			t.Fatalf("%s: no type error", c.data)
+		}
+		if got := jsonPath([]byte(c.data), typ.Offset); got != c.want {
+			t.Errorf("jsonPath(%s) = %q, want %q", c.data, got, c.want)
+		}
 	}
 }
