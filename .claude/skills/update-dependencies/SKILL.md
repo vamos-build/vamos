@@ -39,7 +39,7 @@ So the user invokes this skill the same way both times, and a session that was c
 | --- | --- |
 | Go toolchain | Fedora `golang` in the devcontainer ≥ the `go` line of [go.mod](../../../go.mod); [Dockerfile](../../../Dockerfile)'s `golang:1.NN-bookworm` and the root [BUILD](../../../BUILD)'s `golang` pull have go.mod's minor |
 | Go in the example | the devcontainer's Go minor; [examples/golang-cli/go.mod](../../../examples/golang-cli/go.mod)'s `go` line, its [BUILD](../../../examples/golang-cli/BUILD) tag `1.NN-alpine`, [vamos.lock](../../../examples/golang-cli/vamos.lock), its README's "`1.NN.x-alpine`", and the comment on line 62 of [smoke-checks.md](../../../.agents/kb/smoke-checks.md) |
-| Node.js major | Fedora `nodejs24`/`nodejs24-npm`; `node:24-alpine` in the BUILD files of typescript-mcp, typescript-ui and strawberry-react/ui; [docs/user/tutorial.md](../../../docs/user/tutorial.md) (its BUILD walkthrough and mermaid diagram); the example READMEs' mermaid diagrams; `engines` and `@types/node` in typescript-mcp's package.json; `engines` in docs/site's package.json |
+| Node.js major | Fedora `nodejs26`/`nodejs26-npm`; `node:24-alpine` in the BUILD files of typescript-mcp, typescript-ui and strawberry-react/ui; [docs/user/tutorial.md](../../../docs/user/tutorial.md) (its BUILD walkthrough and mermaid diagram); the example READMEs' mermaid diagrams; `engines` and `@types/node` in typescript-mcp's package.json; `engines` in docs/site's package.json |
 | pnpm | Fedora `pnpm`; `packageManager` in [docs/site/package.json](../../../docs/site/package.json) and [examples/typescript-ui/package.json](../../../examples/typescript-ui/package.json); `pnpm@X` in [examples/typescript-ui/BUILD](../../../examples/typescript-ui/BUILD), [examples/strawberry-react/ui/BUILD](../../../examples/strawberry-react/ui/BUILD) and tutorial.md |
 | Python minor | Fedora `python3`; `python:3.NN` / `3.NN-slim` in the fastmcp and strawberry-react/backend BUILD files and vamos.lock files; `--python-version 3.NN` in each lockfile header and README command; `target-version`/`pythonVersion` in [examples/fastmcp/pyproject.toml](../../../examples/fastmcp/pyproject.toml); `uv venv --python 3.NN` in the strawberry-react README |
 | kubectl | Fedora `kubernetes1.NN-client` matches the Kubernetes minor of the default node image of the `kind` that Fedora ships |
@@ -60,13 +60,13 @@ The only file is [.devcontainer/Dockerfile](../../../.devcontainer/Dockerfile).
   `curl -fsSL https://fedoraproject.org/releases.json | jq -r '.[].version' | sort -un`, ignoring Beta entries.
   A new release is a major. Before proposing it, check that every package in the `dnf install` list exists there:
   `dnf -q --releasever=NN repoquery --latest-limit=1 --qf '%{name} %{version}\n' <packages>`.
-  Watch the versioned names `nodejs24`, `nodejs24-npm` and `kubernetes1.NN-client`.
+  Watch the versioned names `nodejs26`, `nodejs26-npm` and `kubernetes1.NN-client`.
 - **Fedora packages** are unpinned, so a rebuild takes their newest builds by itself.
   Still list what a rebuild would bring, since phase 2 depends on it:
-  `dnf -q repoquery --latest-limit=1 --qf '%{name} %{version}\n' golang nodejs24 pnpm python3 uv helm kind`,
+  `dnf -q repoquery --latest-limit=1 --qf '%{name} %{version}\n' golang nodejs26 pnpm python3 uv helm kind`,
   against the installed `go version`, `node --version`, `pnpm --version`, `python3 --version`, `uv --version`,
   `helm version --short` and `kind version`.
-  - A newer **Node.js LTS major** (`nodejs26` and so on) is a major. Taking it renames the package in the
+  - A newer **Node.js LTS major** (`nodejs28` and so on) is a major. Taking it renames the package in the
     Dockerfile and moves the whole Node.js coherence group in phase 2.
   - **`kubernetes1.NN-client`**: find the default node image of the `kind` version that the repoquery reports, from
     `gh release view v<kind version> -R kubernetes-sigs/kind` (its notes name `kindest/node:v1.NN.x`).
@@ -121,7 +121,7 @@ Skip this step if nothing needs an edit: step 3 checks the running container dir
 Phase 1 is done, and phase 2 may start **in this session**, only when:
 - the Dockerfile needed no edits, and
 - the running container already has what it pins (compare the `docker run` line above, run directly here), and
-- the repoquery showed no newer `golang`, `nodejs24`, `pnpm`, `python3` or `uv` than is installed.
+- the repoquery showed no newer `golang`, `nodejs26`, `pnpm`, `python3` or `uv` than is installed.
   Newer builds of other packages don't matter.
 
 Otherwise:

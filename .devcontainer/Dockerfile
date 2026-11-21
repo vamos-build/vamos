@@ -1,4 +1,4 @@
-FROM fedora:44
+FROM fedora:45
 
 # - useful dev tools
 # - build dependencies
@@ -22,11 +22,11 @@ RUN dnf -y install \
     helm \
     jq \
     kind \
-    kubernetes1.35-client \
+    kubernetes1.37-client \
     less \
     netavark \
-    nodejs24 \
-    nodejs24-npm \
+    nodejs26 \
+    nodejs26-npm \
     openssh-clients \
     pnpm \
     procps-ng \
@@ -55,12 +55,12 @@ RUN case "$(uname -m)" in \
 
 # OpenSpec's standalone build, which runs without Node.js, for the change proposals under openspec/.
 RUN case "$(uname -m)" in \
-      x86_64) arch=x64 sum=f27fb2ff5c6c4aafb207cb0b797189215adb3a1150d4b4600a2d6a0b6e192ae1 ;; \
-      aarch64) arch=arm64 sum=b9b61371a7caa1819da34f766cc24896cfe7a743841f53121b66bd1e2f1b9e93 ;; \
+      x86_64) arch=x64 sum=9e5215b8f9a7024fa635f693a6a691d82220703868f1949927e675b87503c608 ;; \
+      aarch64) arch=arm64 sum=06d2a38a322b4da993500edd6726a3b554adfe565d7e4834d140f72102c5c0b3 ;; \
       *) echo "no openspec for $(uname -m)" >&2; exit 1 ;; \
     esac \
  && curl -fsSL -o /tmp/openspec.tar.gz \
-      "https://github.com/Fission-AI/OpenSpec/releases/download/v1.16.0/openspec-linux-$arch.tar.gz" \
+      "https://github.com/Fission-AI/OpenSpec/releases/download/v1.16.1/openspec-linux-$arch.tar.gz" \
  && echo "$sum  /tmp/openspec.tar.gz" | sha256sum -c - \
  && tar -xzf /tmp/openspec.tar.gz -C /usr/local/bin openspec \
  && rm /tmp/openspec.tar.gz
@@ -96,7 +96,7 @@ RUN GOBIN=/usr/local/bin GOMODCACHE=/tmp/gomodcache GOCACHE=/tmp/gocache \
 # since Chromium won't start as root with it on; the wrapper gives mmdc both through a Puppeteer config.
 # min-release-age takes dependencies at least two weeks old, as the repository's npm projects do.
 RUN PUPPETEER_SKIP_DOWNLOAD=1 npm install -g --min-release-age=14 --no-fund --no-audit \
-      @mermaid-js/mermaid-cli@12.0.0 puppeteer@25.16.0 \
+      @mermaid-js/mermaid-cli@12.2.0 puppeteer@25.16.0 \
  && printf '%s\n' '{ "executablePath": "/usr/lib64/chromium-browser/headless_shell", "args": ["--no-sandbox"] }' \
       > /usr/local/etc/mmdc-puppeteer.json \
  && rm -f /usr/local/bin/mmdc \
