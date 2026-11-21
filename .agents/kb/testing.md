@@ -72,9 +72,8 @@ BUILD snippets start with `pullBusybox`; image commands usually name `app`.
 Tests that build call `requireBuildah(t)`.
 Every `TestMain` that uses buildah is `testenv.Main(m)`, which calls `buildah.InitReexec()` first
 and `testenv.RemoveSuiteStores` after the tests; packages whose tests run a worker pass it `worker.ChildFromEnv`.
-Tests that start workers use `testenv.CgroupRoot(t)`, passed as `cli.Config.CgroupRoot` for CLI commands,
-so that a starting worker doesn't kill another test binary's attempts as leftovers.
-Each call within a binary returns the same root, so tests that start workers don't run in parallel.
+Tests that start a worker give it `testenv.CgroupRoot(t)`, as `worker.Config`'s or `cli.Config`'s `CgroupRoot`,
+and mustn't run in parallel.
 Table cases use keyed struct literals, one field per line.
 
 On failure, a scenario checks that no output is left with `ThenNothingIsSaved` or `ThenNothingIsExported`,
@@ -161,7 +160,7 @@ reads back what the daemon loaded, and `GivenTheHostsDockerDaemon` loads into th
 see a glob's files in a layer that adds them, which the scenario declares, such as
 `layer(name="app", base="busybox", steps=[add("code", "/app")])`.
 For attempts that must run at once, `GivenABarrierThatOpensOnceReachedBy(n)` starts a barrier whose URL
-`<barrier>` stands for in BUILD text; steps fetch it with busybox's `wget` and wait until n requests arrive.
+`<barrier>` stands for in BUILD text; a BUILD step that runs busybox's `wget` on it waits until n requests arrive.
 `ThenTheBarrierOpened` checks that the barrier opened, rather than relying on sleeps to make attempts overlap.
 A scenario shows its input, its BUILD file and project, in its own text or in a fixture of its feature:
 a constant, such as `theApp`, or a function of the values that vary, such as `depsSizeAndApp(nonce)`,
