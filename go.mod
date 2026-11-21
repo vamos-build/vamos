@@ -1,6 +1,6 @@
 module github.com/vamos-build/vamos
 
-go 1.26.9
+go 1.27.4
 
 require (
 	github.com/containerd/platforms v1.0.0-rc.5
@@ -19,7 +19,7 @@ require (
 	go.podman.io/image/v5 v5.42.0
 	go.podman.io/storage v1.65.0
 	go.starlark.net v0.0.0-20261021141710-4f4267fb140d
-	golang.org/x/sys v0.49.0
+	golang.org/x/sys v0.50.0
 	golang.org/x/term v0.47.0
 )
 

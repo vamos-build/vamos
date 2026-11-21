@@ -12,7 +12,7 @@ config:
     padding: 6
 ---
 flowchart TD
-    python[<div style="text-align:left"><i>pull python</i><hr/>python:3.14-slim</div>]
+    python[<div style="text-align:left"><i>pull python</i><hr/>python:3.15-slim</div>]
     manifest[<div style="text-align:left"><i>glob package-manifest</i><hr/>requirements_lock.txt</div>]
     packages[<div style="text-align:left"><i>layer packages</i><hr/>pip install</div>]
     source[<div style="text-align:left"><i>glob server-source</i><hr/>server.py</div>]
@@ -39,9 +39,9 @@ ruff check . && ruff format --check . && pyright && pytest
 After changing either, regenerate both locks, with `--exclude-newer` set to two weeks ago:
 
 ```
-uv pip compile --python-platform linux --python-version 3.14 --generate-hashes --exclude-newer YYYY-MM-DD \
+uv pip compile --python-platform linux --python-version 3.15 --generate-hashes --exclude-newer YYYY-MM-DD \
   requirements.txt -o requirements_lock.txt
-uv pip compile --python-platform linux --python-version 3.14 --generate-hashes --exclude-newer YYYY-MM-DD \
+uv pip compile --python-platform linux --python-version 3.15 --generate-hashes --exclude-newer YYYY-MM-DD \
   requirements-dev.txt -o requirements-dev_lock.txt
 ```
 

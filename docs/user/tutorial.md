@@ -257,7 +257,7 @@ config:
     padding: 6
 ---
 flowchart TD
-    nodejs[<div style="text-align:left"><i>pull nodejs</i><hr/>node:24-alpine</div>]
+    nodejs[<div style="text-align:left"><i>pull nodejs</i><hr/>node:26-alpine</div>]
     install-files[<div style="text-align:left"><i>glob install-files</i><hr/>manifest + lockfile</div>]
     packages[<div style="text-align:left"><i>layer packages</i><hr/>install pnpm<br/>pnpm install</div>]
     source-files[<div style="text-align:left"><i>glob source-files</i><hr/>index.html<br/>src/**</div>]
@@ -289,7 +289,7 @@ The first section declares the base image and source files:
 pull(
     name = "nodejs",
     image = "docker.io/library/node",
-    tag = "24-alpine",
+    tag = "26-alpine",
 )
 
 glob(

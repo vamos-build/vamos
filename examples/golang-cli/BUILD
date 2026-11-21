@@ -4,7 +4,7 @@
 pull(
     name = "golang",
     image = "docker.io/library/golang",
-    tag = "1.26-alpine",
+    tag = "1.27-alpine",
 )
 
 glob(

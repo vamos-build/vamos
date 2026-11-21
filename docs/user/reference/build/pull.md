@@ -4,7 +4,7 @@ description: "Pulling base images from registries, pinning, and tag resolution."
 ---
 
 ```python
-pull(name = "node", image = "docker.io/library/node", tag = "24-alpine")
+pull(name = "node", image = "docker.io/library/node", tag = "26-alpine")
 ```
 
 | Argument | Description | Default |

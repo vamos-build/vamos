@@ -23,8 +23,7 @@ func TestLayout(t *testing.T) {
 	testenv.Must(t, err)
 	layer, err := store.PutBytes(ctx, []byte("layer bytes"))
 	testenv.Must(t, err)
-	m := imgspecv1.Manifest{MediaType: imgspecv1.MediaTypeImageManifest}
-	m.SchemaVersion = 2
+	m := imgspecv1.Manifest{SchemaVersion: 2, MediaType: imgspecv1.MediaTypeImageManifest}
 	m.Config = imgspecv1.Descriptor{MediaType: imgspecv1.MediaTypeImageConfig, Digest: config.Digest,
 		Size: config.Size}
 	m.Layers = []imgspecv1.Descriptor{{MediaType: imgspecv1.MediaTypeImageLayer, Digest: layer.Digest,

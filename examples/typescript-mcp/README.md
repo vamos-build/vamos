@@ -16,7 +16,7 @@ config:
     padding: 6
 ---
 flowchart TD
-    node[<div style="text-align:left"><i>pull node</i><hr/>node:24-alpine</div>]
+    node[<div style="text-align:left"><i>pull node</i><hr/>node:26-alpine</div>]
     manifest[<div style="text-align:left"><i>glob package-manifest</i><hr/>manifest + lockfile</div>]
     packages[<div style="text-align:left"><i>layer packages</i><hr/>npm ci --omit=dev</div>]
     dev-packages[<div style="text-align:left"><i>layer dev-packages</i><hr/>npm ci</div>]
@@ -36,7 +36,7 @@ flowchart TD
 
 ## Develop
 
-Needs Node.js 24.2 or later, for `import.meta.main`.
+Needs Node.js 26 or later, the major it is built and typed against.
 
 ```
 npm ci

@@ -530,8 +530,8 @@ func (w *world) GivenTheRegistryHoldsAnIndex(image, label string, platformNames 
 	var index v1.ImageIndex = empty.Index
 	for _, platform := range platformNames {
 		index = mutate.AppendManifests(index, mutate.IndexAddendum{
-			Add:        w.heldImage(label, platform),
-			Descriptor: v1.Descriptor{Platform: w.parsedPlatform(platform)},
+			Add:      w.heldImage(label, platform),
+			Platform: w.parsedPlatform(platform),
 		})
 	}
 	if err := remote.WriteIndex(w.registryRef(image), index, w.readingTheRegistry()...); err != nil {
@@ -597,8 +597,8 @@ func (w *world) GivenTheRegistryHoldsAnIndexOf(image, label, of, platform string
 		w.t.Fatalf("no Given step put %s for %s in the registry", of, platform)
 	}
 	index := mutate.AppendManifests(empty.Index, mutate.IndexAddendum{
-		Add:        img,
-		Descriptor: v1.Descriptor{Platform: w.parsedPlatform(platform)},
+		Add:      img,
+		Platform: w.parsedPlatform(platform),
 	})
 	if err := remote.WriteIndex(w.registryRef(image), index, w.readingTheRegistry()...); err != nil {
 		w.t.Fatal(err)
@@ -962,8 +962,8 @@ func (w *world) GivenAPullThroughCacheMirrorsTheRegistryWithAnIndex(image, label
 	var index v1.ImageIndex = empty.Index
 	for _, platform := range platformNames {
 		index = mutate.AppendManifests(index, mutate.IndexAddendum{
-			Add:        w.heldImage(label, platform),
-			Descriptor: v1.Descriptor{Platform: w.parsedPlatform(platform)},
+			Add:      w.heldImage(label, platform),
+			Platform: w.parsedPlatform(platform),
 		})
 	}
 	ref, err := name.ParseReference(strings.Replace(w.atRegistry(image), w.registry, host, 1), name.Insecure)

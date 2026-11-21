@@ -183,7 +183,7 @@ func unmarshal(path string, data []byte, v any) error {
 		line, col := lineCol(data, typ.Offset)
 		where := "the lockfile"
 		if f := strings.TrimPrefix(typ.Field, "."); f != "" {
-			where = strconv.Quote(f)
+			where = strconv.Quote(strings.NewReplacer("~1", "/", "~0", "~").Replace(f))
 		}
 		return fmt.Errorf("%s:%d:%d: %s holds %s, want %s", path, line, col, where, withArticle(typ.Value),
 			withArticle(jsonKind(typ.Type)))

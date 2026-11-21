@@ -42,7 +42,7 @@ func TestCacheTreeRoundTrip(t *testing.T) {
 		t.Errorf("cache holds %d blobs, want %d", got, want)
 	}
 	// app/copy.js has the content of app/main.js, stored just before it.
-	want := Stats{Count: cache.Count{Files: 5, Dirs: 1, Links: 1, Bytes: 21}, NewFiles: 4, NewBytes: 17}
+	want := Stats{Files: 5, Dirs: 1, Links: 1, Bytes: 21, NewFiles: 4, NewBytes: 17}
 	if stats != want {
 		t.Errorf("stats = %+v, want %+v", stats, want)
 	}

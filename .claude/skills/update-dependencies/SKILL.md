@@ -27,7 +27,7 @@ So the user invokes this skill the same way both times, and a session that was c
 - **Same major, freely; new major, ask.** Move within a major version without asking.
   Collect every available new major version first: base OS, language runtime, image tag, package or action.
   Then ask the user once per phase, in a single question listing them, which ones to take.
-  Fedora's next release, Node's next LTS and a new Go minor (1.26 → 1.27) count as majors here.
+  Fedora's next release, Node's next LTS and a new Go minor (1.27 → 1.28) count as majors here.
 - **Keep coherence groups together** (below): a version that appears in several files changes in all of them or none.
 - **Commit at the end of each phase.** If the branch is `main`, first create `update-dependencies-<YYYY-MM-DD>`.
   End commit messages with the attribution lines the session asks for.
@@ -39,7 +39,7 @@ So the user invokes this skill the same way both times, and a session that was c
 | --- | --- |
 | Go toolchain | Fedora `golang` in the devcontainer ≥ the `go` line of [go.mod](../../../go.mod); [Dockerfile](../../../Dockerfile)'s `golang:1.NN-bookworm` and the root [BUILD](../../../BUILD)'s `golang` pull have go.mod's minor |
 | Go in the example | the devcontainer's Go minor; [examples/golang-cli/go.mod](../../../examples/golang-cli/go.mod)'s `go` line, its [BUILD](../../../examples/golang-cli/BUILD) tag `1.NN-alpine`, [vamos.lock](../../../examples/golang-cli/vamos.lock), its README's "`1.NN.x-alpine`", and the comment on line 62 of [smoke-checks.md](../../../.agents/kb/smoke-checks.md) |
-| Node.js major | Fedora `nodejs26`/`nodejs26-npm`; `node:24-alpine` in the BUILD files of typescript-mcp, typescript-ui and strawberry-react/ui; [docs/user/tutorial.md](../../../docs/user/tutorial.md) (its BUILD walkthrough and mermaid diagram); the example READMEs' mermaid diagrams; `engines` and `@types/node` in typescript-mcp's package.json; `engines` in docs/site's package.json |
+| Node.js major | Fedora `nodejs26`/`nodejs26-npm`; `node:26-alpine` in the BUILD files of typescript-mcp, typescript-ui and strawberry-react/ui; [docs/user/tutorial.md](../../../docs/user/tutorial.md) (its BUILD walkthrough and mermaid diagram); the example READMEs' mermaid diagrams; `engines` and `@types/node` in typescript-mcp's package.json; `engines` in docs/site's package.json |
 | pnpm | Fedora `pnpm`; `packageManager` in [docs/site/package.json](../../../docs/site/package.json) and [examples/typescript-ui/package.json](../../../examples/typescript-ui/package.json); `pnpm@X` in [examples/typescript-ui/BUILD](../../../examples/typescript-ui/BUILD), [examples/strawberry-react/ui/BUILD](../../../examples/strawberry-react/ui/BUILD) and tutorial.md |
 | Python minor | Fedora `python3`; `python:3.NN` / `3.NN-slim` in the fastmcp and strawberry-react/backend BUILD files and vamos.lock files; `--python-version 3.NN` in each lockfile header and README command; `target-version`/`pythonVersion` in [examples/fastmcp/pyproject.toml](../../../examples/fastmcp/pyproject.toml); `uv venv --python 3.NN` in the strawberry-react README |
 | kubectl | Fedora `kubernetes1.NN-client` matches the Kubernetes minor of the default node image of the `kind` that Fedora ships |
@@ -57,7 +57,7 @@ The only file is [.devcontainer/Dockerfile](../../../.devcontainer/Dockerfile).
 ### 1. Find what is new
 
 - **Fedora base**, `FROM fedora:NN`: the newest *released* Fedora, from
-  `curl -fsSL https://fedoraproject.org/releases.json | jq -r '.[].version' | sort -un`, ignoring Beta entries.
+  `curl -fsSL https://fedoraproject.org/releases.json | jq -r '.[].version' | grep -v Beta | sort -un`.
   A new release is a major. Before proposing it, check that every package in the `dnf install` list exists there:
   `dnf -q --releasever=NN repoquery --latest-limit=1 --qf '%{name} %{version}\n' <packages>`.
   Watch the versioned names `nodejs26`, `nodejs26-npm` and `kubernetes1.NN-client`.
@@ -221,12 +221,12 @@ Find it with `curl -fsSL https://nodejs.org/dist/index.json | jq -r '[.[] | sele
 
 | Project | BUILD tags | Lock |
 | --- | --- | --- |
-| [Repository root](../../../BUILD) | `golang:1.26-bookworm`, `fedora:44` | [vamos.lock](../../../vamos.lock) |
-| [examples/fastmcp](../../../examples/fastmcp/BUILD) | `python:3.14-slim` | `vamos.lock` |
-| [examples/golang-cli](../../../examples/golang-cli/BUILD) | `golang:1.26-alpine` | `vamos.lock` |
-| [examples/typescript-mcp](../../../examples/typescript-mcp/BUILD) | `node:24-alpine` | `vamos.lock` |
-| [examples/typescript-ui](../../../examples/typescript-ui/BUILD) | `node:24-alpine`, `nginx:alpine` | `vamos.lock` |
-| [examples/strawberry-react](../../../examples/strawberry-react/vamos.lock) | `backend/BUILD`: `python:3.14`; `ui/BUILD`: `node:24-alpine`, `nginx:alpine` | `vamos.lock` (one for the workspace) |
+| [Repository root](../../../BUILD) | `golang:1.27-bookworm`, `fedora:45` | [vamos.lock](../../../vamos.lock) |
+| [examples/fastmcp](../../../examples/fastmcp/BUILD) | `python:3.15-slim` | `vamos.lock` |
+| [examples/golang-cli](../../../examples/golang-cli/BUILD) | `golang:1.27-alpine` | `vamos.lock` |
+| [examples/typescript-mcp](../../../examples/typescript-mcp/BUILD) | `node:26-alpine` | `vamos.lock` |
+| [examples/typescript-ui](../../../examples/typescript-ui/BUILD) | `node:26-alpine`, `nginx:alpine` | `vamos.lock` |
+| [examples/strawberry-react](../../../examples/strawberry-react/vamos.lock) | `backend/BUILD`: `python:3.15`; `ui/BUILD`: `node:26-alpine`, `nginx:alpine` | `vamos.lock` (one for the workspace) |
 
 1. Build the CLI: `go build -o vamos .`.
 2. For each project, run `./vamos update --dry-run -C <project>` and then `./vamos update -C <project>`; use `-C .` for the repository root.
@@ -237,6 +237,10 @@ Find it with `curl -fsSL https://nodejs.org/dist/index.json | jq -r '[.[] | sele
 3. If a tag changes, update its coherence group. That includes the tutorial, which walks through typescript-ui's BUILD,
    and [docs/user/reference/build/pull.md](../../../docs/user/reference/build/pull.md)'s example `pull`.
    Then run `vamos update` again.
+4. In strawberry-react, `vamos update` keeps the old tag's pin ("kept ..., since "release", which couldn't be
+   configured"), because the `release` publication's `registry` has no default. `release` uses only the pulls of
+   `//ui:server` and `//backend:server`, so delete the pins no pull uses from its vamos.lock by hand,
+   and check that `vamos update --dry-run` then reports it up to date.
 
 Leave `busybox:1.36` and `BusyboxIndex` in [internal/testenv/testenv.go](../../../internal/testenv/testenv.go) alone.
 The test suite pins them on purpose. Change them only if Docker Hub stops serving that digest, as its comment says.

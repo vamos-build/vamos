@@ -103,7 +103,7 @@ func TestUpdate_TheLockfilePinsEachPulledTag(t *testing.T) {
 				  "pulls": {"docker.io/library/busybox:1.36": "1.36.1"}
 				}
 			`,
-			error: `/project/vamos.lock:3:54: "pulls" holds a string, want an object`,
+			error: `/project/vamos.lock:3:54: "pulls.docker.io/library/busybox:1.36" holds a string, want an object`,
 		},
 		{
 			name: "an image not written as vamos writes it",

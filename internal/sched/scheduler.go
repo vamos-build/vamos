@@ -240,7 +240,8 @@ func (s *Scheduler) failed(ref graph.Ref, err error) error {
 		return err
 	}
 	f = &failure{
-		Failure: api.Failure{Nodes: []graph.Ref{ref}, Message: err.Error()},
+		Nodes:   []graph.Ref{ref},
+		Message: err.Error(),
 		graph:   s.graph,
 		cause:   err,
 	}
@@ -1057,13 +1058,11 @@ func (s *Scheduler) emulationRefused(ref graph.Ref, platform string) error {
 		native = "only " + native
 	}
 	return &failure{
-		Failure: api.Failure{
-			Nodes: []graph.Ref{ref},
-			Message: fmt.Sprintf("its commands would run under emulation: its image is for %s, and this build "+
-				"runs commands %s", platform, native),
-			Hint: fmt.Sprintf("give --platform %s to build for the platform that runs them, add a worker for %s, "+
-				"or give --emulate to allow emulation", s.graph.ExecPlatform, platform),
-		},
+		Nodes: []graph.Ref{ref},
+		Message: fmt.Sprintf("its commands would run under emulation: its image is for %s, and this build "+
+			"runs commands %s", platform, native),
+		Hint: fmt.Sprintf("give --platform %s to build for the platform that runs them, add a worker for %s, "+
+			"or give --emulate to allow emulation", s.graph.ExecPlatform, platform),
 		graph: s.graph,
 		cause: ErrEmulationNeeded,
 	}
@@ -1116,7 +1115,7 @@ func (s *Scheduler) describe(ref graph.Ref, key digest.Digest, err error) error 
 	n := s.graph.Node(ref)
 	var se *StepError
 	if !errors.As(err, &se) || se.Step >= len(n.Steps()) {
-		f := &failure{Failure: api.Failure{Nodes: []graph.Ref{ref}, Action: key}, graph: s.graph, cause: err}
+		f := &failure{Nodes: []graph.Ref{ref}, Action: key, graph: s.graph, cause: err}
 		var logged *loggedError
 		switch {
 		case se != nil: // a step the node doesn't have: a bug, reported with what is known
@@ -1138,16 +1137,14 @@ func (s *Scheduler) describe(ref graph.Ref, key digest.Digest, err error) error 
 	}
 	step := se.Step
 	described := &failure{
-		Failure: api.Failure{
-			Nodes:   []graph.Ref{ref},
-			Action:  key,
-			Step:    &step,
-			Message: se.message(),
-			Hint:    hint,
-			Log:     se.Log,
-		},
-		graph: s.graph,
-		cause: se.Err,
+		Nodes:   []graph.Ref{ref},
+		Action:  key,
+		Step:    &step,
+		Message: se.message(),
+		Hint:    hint,
+		Log:     se.Log,
+		graph:   s.graph,
+		cause:   se.Err,
 	}
 	if in.From != nil {
 		return &inputError{from: *in.From, err: described, cleanup: se.Cleanup}
