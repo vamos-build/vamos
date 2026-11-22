@@ -38,5 +38,6 @@ Read the routes relevant to the change before editing.
 | `internal/transfer/` | [internal/transfer/doc.go](internal/transfer/doc.go) |
 | `internal/testenv/` | [internal/testenv/doc.go](internal/testenv/doc.go) |
 | `internal/remote/` | [internal/remote/doc.go](internal/remote/doc.go) |
+| `internal/telemetry/` | [internal/telemetry/doc.go](internal/telemetry/doc.go) |
 | Example projects and their own checks | [.agents/kb/development.md](.agents/kb/development.md) |
 | Go example payload | [examples/golang-cli/doc.go](examples/golang-cli/doc.go) |

@@ -222,11 +222,21 @@ event streams, which remote's watch serves, and retries. Each is created at star
 has its own three counters: fenced attempts, event batches the coordinator refused, and cgroups that `kill` couldn't
 empty in time.
 
-`otelhttp` wraps the API in `Server.Middleware`, composed outside any middleware the server already has. It reports
-`http.server.request.duration` labeled by `http.route`. Since Go 1.22's `ServeMux`, `otelhttp` takes the route from
-`Request.Pattern`. Task 1.3 checks that the pinned version does. If it doesn't, the middleware sets the route itself
-from `Pattern` with `otelhttp.WithMetricAttributesFn`. Bytes moved come from a `Server.Transferred(direction, n)` hook
-that the blob handlers call, so `remote` stays free of the metric SDK.
+`otelhttp` reports `http.server.request.duration` labeled by `http.route`.
+Since Go 1.22's `ServeMux`, `otelhttp` takes the route from `Request.Pattern`:
+the pinned version, as task 1.3 checks, labels `GET /v1/jobs/{id}/events`
+with `http.route` `/v1/jobs/{id}/events` and `http.request.method` `GET`, as the semantic conventions split them,
+and never with the path.
+The mux sets `Pattern` on the request it is handed, and `otelhttp` reads the request it handed on,
+so a middleware between them that passes on a copy, as `r.WithContext` makes, would leave every request without a route.
+So `otelhttp` wraps the mux directly, through a new `Server.Instrument` that `Handler` applies inside
+`Server.Middleware`, rather than through `Middleware` itself;
+a request that the middleware refuses, such as an unauthenticated one, isn't measured.
+`otelhttp` also labels by `server.address` and `server.port`, from the request's `Host`, which a client chooses,
+so a metric view keeps only the method, the route and the status code on every instrument of `otelhttp`'s scope,
+the request and response body sizes' as well as the duration's, as the labels must be bounded.
+Bytes moved come from a `Server.Transferred(direction, n)` hook that the blob handlers call,
+so that `remote` stays free of the metric SDK.
 
 `runtime` instrumentation from `contrib/instrumentation/runtime` adds the Go runtime's metrics on both roles.
 

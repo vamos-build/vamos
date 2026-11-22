@@ -11,12 +11,17 @@ const module = "github.com/vamos-build/vamos/internal/"
 
 // TestImportRules checks which packages each of vamos's may depend on, directly or not: load must not reach buildah,
 // so that it could run where buildah can't, run must not reach Starlark, so that a graph is all an executor needs,
-// and api must reach neither buildah nor the container store, so that a client of a remote executor needs neither.
+// api must reach neither buildah nor the container store, so that a client of a remote executor needs neither,
+// and OpenTelemetry's SDK stays in telemetry: sched, api and tracing reach no OpenTelemetry module,
+// and remote not the SDK, so that they hand telemetry spans and counts without depending on it.
 func TestImportRules(t *testing.T) {
 	starlark := "go.starlark.net/..."
 	buildah := "go.podman.io/buildah/..."
 	// The container store itself; image references use a regexp package from the same module.
 	storage := "go.podman.io/storage"
+	otel := "go.opentelemetry.io/..."
+	otelSDK := "go.opentelemetry.io/otel/sdk/..."
+	telemetry := module + "telemetry"
 	rules := []struct {
 		pkg      string
 		internal []string // the packages of vamos it may use; nil for any
@@ -34,6 +39,7 @@ func TestImportRules(t *testing.T) {
 		{
 			pkg:      "tracing",
 			internal: []string{},
+			not:      []string{otel, telemetry},
 		},
 		{
 			pkg:      "fileset",
@@ -48,7 +54,7 @@ func TestImportRules(t *testing.T) {
 		{
 			pkg:      "api",
 			internal: []string{"cache", "fileset", "graph", "tracing"},
-			not:      []string{starlark, buildah, storage},
+			not:      []string{starlark, buildah, storage, otel, telemetry},
 		},
 		{
 			pkg:      "api/apitest",
@@ -58,12 +64,17 @@ func TestImportRules(t *testing.T) {
 		{
 			pkg:      "sched",
 			internal: []string{"api", "cache", "fileset", "graph", "tracing"},
+			not:      []string{starlark, buildah, storage, otel, telemetry},
+		},
+		{
+			pkg:      "telemetry",
+			internal: []string{"tracing"},
 			not:      []string{starlark, buildah, storage},
 		},
 		{
 			pkg:      "remote",
 			internal: []string{"api", "cache", "fileset", "graph", "sched", "tracing"},
-			not:      []string{starlark, buildah, storage},
+			not:      []string{starlark, buildah, storage, otelSDK},
 		},
 		{
 			pkg:      "coord",

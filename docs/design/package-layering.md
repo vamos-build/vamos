@@ -45,6 +45,8 @@ flowchart TB
         tracing
     end
 
+    telemetry
+
     finish --> api
     finish --> transfer
     load --> graphpkg
@@ -65,6 +67,8 @@ The boundary rules enforced by the test suite are:
 | `api`, `sched`, `remote`, and `coord` import neither `buildah`, container storage, nor Starlark | Coordinators and client stubs coordinate execution without runtime image tools |
 | `finish` imports neither `buildah`, container storage, `load`, nor `run` | Artifact delivery reads completed results, not in-memory loader or executor state |
 | `cache` and `tracing` import no other internal packages | Foundational utilities must remain dependency-free |
+| `telemetry` imports only `tracing` of vamos's packages, and neither `buildah`, container storage, nor Starlark | It turns spans into OpenTelemetry's and needs nothing of a build |
+| `sched`, `api`, and `tracing` import no OpenTelemetry module, nor `telemetry`; `remote` does not import OpenTelemetry's SDK | OpenTelemetry's SDK stays in `telemetry`, so the executor contract and the local executor carry none of it |
 
 The root entry point [main.go](../../main.go) handles process re-execution initialization,
 CLI command dispatch, and root error reporting.

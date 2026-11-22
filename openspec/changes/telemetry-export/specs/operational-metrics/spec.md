@@ -94,8 +94,9 @@ platform; `vamos.builds.waiting` for a platform; `vamos.jobs.open`; and `vamos.j
 ### Requirement: Speed metrics
 
 A coordinator SHALL export `vamos.attempts.duration`, a histogram of attempts' runs, by platform, kind and outcome;
-`vamos.jobs.duration`, of jobs, by kind and outcome; and the duration of the API's requests, by method, route pattern
-and status, never by a path that holds an ID or digest.
+`vamos.jobs.duration`, of jobs, by kind and outcome; and the duration of the API's requests that its middleware passes,
+by method, route pattern and status, never by a path that holds an ID or digest,
+and without a route for a request that matches none.
 
 #### Scenario: A build's job and attempt are timed
 
@@ -109,7 +110,8 @@ and status, never by a path that holds an ID or digest.
 
 - **GIVEN** a coordinator with a worker, serving Prometheus metrics
 - **WHEN** I build `app` on the coordinator, and scrape the metrics
-- **THEN** the request durations have `http_route` values such as `GET /jobs/{id}/events`, and none holds a job's ID
+- **THEN** the request durations have `http_route` values such as `/v1/jobs/{id}/events`, with the method in
+  `http_request_method`, and no label holds a job's ID
 
 ### Requirement: Cache metrics
 

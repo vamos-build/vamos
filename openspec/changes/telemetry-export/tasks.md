@@ -6,17 +6,18 @@
   the Prometheus exporter and `contrib/instrumentation/runtime`, at releases at least two weeks old and matching the
   indirect `otel` v1.46.0 line where possible. Run `go mod tidy`, record the release binary's size before and after in
   the commit message, and verify that `scripts/check` passes and `govulncheck` reports nothing reachable
-- [ ] 1.2 Create `internal/telemetry` with its `doc.go` from the documentation template, and a test proving the design's
+- [x] 1.2 Create `internal/telemetry` with its `doc.go` from the documentation template, and a test proving the design's
   span path against the pinned SDK: a span started under a remote parent with an `IDGenerator` that takes its IDs from
   the context, and `WithTimestamp` start and end, is exported with exactly those IDs, parent and times, to
   `tracetest.InMemoryExporter`. If it isn't, switch the design to the `tracetest.SpanStub` fallback in `design.md`
   before going on. Verify with `go test ./internal/telemetry -run TestChosenIDs`
-- [ ] 1.3 Add a test in `internal/remote` that wraps a `Server` in the pinned `otelhttp` handler and checks, with an
+- [x] 1.3 Add a test in `internal/remote` that wraps a `Server` in the pinned `otelhttp` handler and checks, with an
   `sdkmetric.ManualReader`, that `http.server.request.duration` is labeled with the `ServeMux` pattern, such as
-  `GET /jobs/{id}/events`, and never with a job's ID. If it isn't, add `WithMetricAttributesFn` setting `http.route`
-  from `Request.Pattern`, and verify that the test passes
-- [ ] 1.4 Add `telemetry` to `TestImportRules` with `internal: ["tracing"]` and Starlark, buildah and the container
-  store forbidden, and forbid `go.opentelemetry.io/otel/sdk/...` and `.../telemetry` to `sched`, `api` and `tracing`.
+  `http.route` `/v1/jobs/{id}/events` with `http.request.method` `GET`, and never with a job's ID.
+  If it isn't, add `WithMetricAttributesFn` setting `http.route` from `Request.Pattern`, and verify that the test passes
+- [x] 1.4 Add `telemetry` to `TestImportRules` with `internal: ["tracing"]` and Starlark, buildah and the container
+  store forbidden, and forbid `go.opentelemetry.io/...` and `.../telemetry` to `sched`, `api` and `tracing`,
+  and `go.opentelemetry.io/otel/sdk/...` to `remote`.
   Verify with `go test ./internal -run TestImportRules`
 
 ## 2. The telemetry package: configuration, sampling, IDs and conversion
@@ -125,9 +126,12 @@
 - [ ] 6.4 Keep `cache.Directory`'s content and record sizes as running counts after a background walk at open, expose
   them with `Size()`, and observe them as `vamos.store.size`. Verify with `cachetest.Content` cases for puts, duplicate
   puts, removals of corrupt blobs and clears, and a `Directory` test that the walk counts what was there before
-- [ ] 6.5 Wrap the coordinator's API in `otelhttp` through `Server.Middleware`, composed outside any existing
-  middleware, and add `Server.Transferred` for `vamos.transfer.bytes`. Verify with `remote` tests for the middleware's
-  composition and the bytes counted for puts and reads
+- [ ] 6.5 Wrap the coordinator's API's mux in `otelhttp` through `Server.Instrument`, inside `Server.Middleware`,
+  with a view that keeps only the method, route and status code on each of `otelhttp`'s instruments,
+  and add `Server.Transferred` for `vamos.transfer.bytes`. Move 1.3's test onto `Server.Instrument`, and verify with
+  `remote` tests that the route survives a middleware that passes on `r.WithContext`, that requests with other `Host`s
+  and ports add no series to any HTTP metric, that a 200 and a 404 on one route are separate series, and the bytes
+  counted for puts and reads
 - [ ] 6.6 Add Prometheus scrape steps to `steps_telemetry_test.go`, plain and OpenMetrics, and
   `internal/features/metrics_test.go` with a rule for each coordinator requirement of `operational-metrics` and its
   scenarios, parallel or alone as in 5.3. The lost worker's scenario keeps its step running with `GivenABarrier`.

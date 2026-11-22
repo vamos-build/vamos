@@ -59,8 +59,9 @@ None.
 - A new package that bridges `internal/tracing` spans to OpenTelemetry, kept out of `internal/tracing`, which still
   imports nothing; `TestImportRules` places it.
 - `internal/coord`: gauges observed from its state; the bridge applied to spans it receives.
-- `internal/remote`: `otelhttp` at `Server.Middleware`; `internal/worker`: cgroup usage at an attempt's end, and its
-  counters; `internal/api`: the outer trace context on requests; `internal/cli`: reading `TRACEPARENT`.
+- `internal/remote`: `otelhttp` around the mux, through a `Server.Instrument` inside `Server.Middleware`;
+  `internal/worker`: cgroup usage at an attempt's end, and its counters;
+  `internal/api`: the outer trace context on requests; `internal/cli`: reading `TRACEPARENT`.
 - `remote/helm/vamos`: values for the `OTEL_*` variables and the metrics port.
 - Risks to settle early:
   - that the Go SDK can export a finished span with chosen IDs and timestamps (a custom `IDGenerator` with
