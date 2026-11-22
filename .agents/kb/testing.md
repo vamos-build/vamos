@@ -88,8 +88,18 @@ Tests never touch the developer's container store or build cache.
 `testenv.PrivateStores` makes a test its own, for one that destroys what they hold, as the prune feature's scenarios
 do through `GivenStoresOfTheScenariosOwn`.
 In `internal/cli`, `vamos` runs against the suite's stores unless the test called `usePrivateStores`.
-Each run of the suite pulls `busybox:1.36` once into its fresh store, which Docker Hub counts against its pull limit,
-so tests that need only a base to add files to push one to an in-process registry instead.
+`testenv.Main` makes an in-process registry docker.io's mirror for pulls by digest,
+keeping what it fetches in `~/.cache/vamos-test/docker.io`, or `$VAMOS_TEST_HUB_CACHE`, across runs,
+so pinned pulls of `busybox:1.36`, as test projects' lockfiles and `testenv.BusyboxIndex` pin it,
+reach Docker Hub only until the cache holds them.
+A tag still goes to Docker Hub, which counts it against its pull limit, and so does what the mirror can't fetch,
+which the mirror says on stderr.
+The mirror's entry is in a `registries.conf` that `CONTAINERS_REGISTRIES_CONF_OVERRIDE` names,
+read after the environment's, such as `remote/registries.conf` exported as `CONTAINERS_REGISTRIES_CONF`,
+so it keeps their settings, as the files that `InsecureRegistry` and `MirroredRegistry` write do,
+and there is no mirror where the environment configures Docker Hub itself or names an override of its own.
+Pin a pull of busybox in a graph or BUILD file a test writes itself,
+and push a base to an in-process registry for a test that needs only one to add files to.
 Use `newNonce`, `testenv.NewNonce`, for cases that need fresh actions within a run;
 `cached` versus `building` is observable.
 Tests that need buildah call `requireBuildah(t)`; those that change owners call `testenv.RequireOwnership`;
