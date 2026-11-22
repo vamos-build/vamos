@@ -1,7 +1,10 @@
 package cli
 
 import (
+	"archive/tar"
+	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -10,9 +13,12 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/google/go-containerregistry/pkg/v1/tarball"
 	"github.com/spf13/afero"
 	"github.com/vamos-build/vamos/internal/run"
+	"github.com/vamos-build/vamos/internal/testenv"
 	"go.podman.io/storage"
 )
 
@@ -118,6 +124,122 @@ func TestExplicitStoreRoots(t *testing.T) {
 				t.Errorf("prune: %v, want %q", err, want)
 			}
 		})
+	}
+}
+
+// diffedBuild is a BUILD file whose layers change files in every way that a layer's diff records: a file's content
+// and mode, a file and a directory removed, a directory replaced, files added, a symbolic link and a hard link.
+// The nonce goes into the first layer, so that its results are never reused from another test's.
+func diffedBuild(nonce string) string {
+	return pullBusybox + fmt.Sprintf(`
+glob(name="input", include=["input.txt"])
+layer(
+    name="base",
+    base="busybox",
+    steps=[
+        run(["sh", "-c", "echo %s > /nonce; mkdir -p /d/sub /e /g"]),
+        run(["sh", "-c", "echo a > /d/a; echo b > /d/sub/b; echo c > /c; echo e > /e/e; echo g > /g/g"]),
+    ],
+)
+layer(
+    name="app",
+    base="base",
+    steps=[
+        add("input", "/d"),
+        run(["sh", "-c", "echo A > /d/a; chmod 600 /d/sub/b; rm /c; rm -r /g"]),
+        run(["sh", "-c", "rm -r /e; mkdir /e; echo f > /e/f; ln -s /d/a /l; ln /d/a /h"]),
+    ],
+)
+`, nonce)
+}
+
+// naiveDiffHelperEnv marks the test binary run by TestNaiveAndNativeDiffsMakeTheSameImage, and holds the nonce
+// that TestNaiveDiffHelper builds diffedBuild with; naiveDiffOutEnv names the file that it writes what it saved to.
+const (
+	naiveDiffHelperEnv = "VAMOS_TEST_NAIVE_DIFF_HELPER"
+	naiveDiffOutEnv    = "VAMOS_TEST_NAIVE_DIFF_OUT"
+)
+
+// TestNaiveDiffHelper saves diffedBuild's app with stores of its own, and writes whether the store diffed natively
+// and what the image holds, when TestNaiveAndNativeDiffsMakeTheSameImage runs it; otherwise it does nothing.
+func TestNaiveDiffHelper(t *testing.T) {
+	nonce := os.Getenv(naiveDiffHelperEnv)
+	if nonce == "" {
+		return
+	}
+	native, image := saveDiffedBuild(t, nonce)
+	must(t, os.WriteFile(os.Getenv(naiveDiffOutEnv), fmt.Appendf(nil, "native diff %t\n%s", native, image), 0o644))
+}
+
+// saveDiffedBuild saves diffedBuild's app with stores of the test's own, and returns whether the store diffed
+// natively, and what the image holds: its configuration, but for the digests of its layers, and its flattened
+// filesystem, each entry's header and the digest of its content.
+// Its layers' digests are left out since the diffs differ in how they record a directory replaced, which a native
+// diff marks opaque and a naive diff removes the files of, though the filesystems are the same.
+func saveDiffedBuild(t *testing.T, nonce string) (native bool, image string) {
+	t.Helper()
+	usePrivateStores(t)
+	fsys := project(t, map[string]string{"BUILD": diffedBuild(nonce), "input.txt": "input\n"})
+	path := filepath.Join(t.TempDir(), "app.tar")
+	vamos(t, fsys, "save", "app", path, "-C", projectDir).succeeds(t)
+	withStore(t, func(store storage.Store) {
+		status, err := store.Status()
+		must(t, err)
+		for _, pair := range status {
+			if pair[0] == "Native Overlay Diff" {
+				native = pair[1] == "true"
+			}
+		}
+	})
+
+	img, err := tarball.ImageFromPath(path, nil)
+	must(t, err)
+	config, err := img.ConfigFile()
+	must(t, err)
+	config.RootFS.DiffIDs = nil
+	text, err := json.Marshal(config)
+	must(t, err)
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s\n", text)
+	_, err = testenv.WalkImage(img, func(hdr *tar.Header, r io.Reader) bool {
+		content := sha256.New()
+		_, err := io.Copy(content, r)
+		must(t, err)
+		fmt.Fprintf(&b, "%s %c %o %d:%d %q %s %x\n", testenv.ImagePath(hdr.Name), hdr.Typeflag, hdr.Mode, hdr.Uid,
+			hdr.Gid, hdr.Linkname, hdr.ModTime.UTC().Format(time.RFC3339Nano), content.Sum(nil))
+		return false
+	})
+	must(t, err)
+	return native, b.String()
+}
+
+// TestNaiveAndNativeDiffsMakeTheSameImage checks that an overlay store that diffs layers naively, as with Fedora's
+// default storage.conf, and one that diffs them natively, as the stores of tests do, make the same image, but for
+// how its layers record a directory replaced: so the images that tests check are those that users of either get.
+// containers/storage settles which diff it uses once per process, so the naive diff is in a new one.
+func TestNaiveAndNativeDiffsMakeTheSameImage(t *testing.T) {
+	requireBuildah(t)
+	nonce := newNonce()
+	native, nativeImage := saveDiffedBuild(t, nonce)
+	if !native {
+		testenv.Unavailable(t, "diffing a layer natively", errors.New("the store's overlay driver diffs naively here"))
+	}
+
+	out := filepath.Join(t.TempDir(), "naive.txt")
+	cmd := exec.Command(os.Args[0], "-test.run", "^TestNaiveDiffHelper$")
+	cmd.Env = append(os.Environ(), naiveDiffHelperEnv+"="+nonce, naiveDiffOutEnv+"="+out, testenv.NaiveDiffEnv+"=1")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("building with naive diffs failed: %v; output:\n%s", err, output)
+	}
+	got, err := os.ReadFile(out)
+	must(t, err)
+	// A kernel without metacopy, before Linux 4.19, refuses it, and the driver then drops metacopy=on and diffs
+	// natively, so naive diffs can't be had there.
+	if strings.HasPrefix(string(got), "native diff true\n") {
+		testenv.Unavailable(t, "diffing a layer naively", errors.New("the overlay driver doesn't take metacopy here"))
+	}
+	if want := "native diff false\n" + nativeImage; string(got) != want {
+		t.Errorf("building with naive diffs saved\n%s\nwant, as with native diffs,\n%s", got, want)
 	}
 }
 

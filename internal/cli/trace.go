@@ -16,6 +16,7 @@ import (
 	"github.com/vamos-build/vamos/internal/cache"
 	"github.com/vamos-build/vamos/internal/finish"
 	"github.com/vamos-build/vamos/internal/remote"
+	"github.com/vamos-build/vamos/internal/run"
 	"github.com/vamos-build/vamos/internal/tracing"
 )
 
@@ -126,7 +127,16 @@ func (t *traceSession) addJob(id api.JobID, outcome api.Outcome, warn func(error
 // bound, as on a reused connection that was reset, is taken once more, timed afresh, so that its failure doesn't skew
 // the offset, within what is left of that bound. None is ended by an interrupt, which the jobs' end may meet.
 // An offset not measured is warned about, and noted in the trace.
+// The local executor runs in this process, on its clock, so its offset is none, exactly: measuring it would place the
+// spans a sample's round trip apart at worst, which, under load, can put a job's span before the client's that
+// started it.
 func (t *traceSession) measure(ctx context.Context, ex api.Executor, warn func(error)) {
+	if _, local := ex.(*run.Local); local {
+		t.mu.Lock()
+		t.offset = tracing.Offset{}
+		t.mu.Unlock()
+		return
+	}
 	samples := 1
 	if t.path != "" {
 		samples = 3

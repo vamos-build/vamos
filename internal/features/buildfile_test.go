@@ -27,6 +27,7 @@ var theCode = files{"app.sh": "echo hi"}
 // before anything runs,
 // with an error that names the file, line and column of the call that made it.
 func TestBuildFile_MistakesFailAsItLoads(t *testing.T) {
+	parallelRule(t)
 	for _, example := range []struct {
 		name  string
 		build string // after the pull of busybox and theCodeGlob, on line 3
@@ -185,6 +186,7 @@ func TestBuildFile_MistakesFailAsItLoads(t *testing.T) {
 // TestBuildFile_StringsHoldNoNULByte specifies that no string that a BUILD file gives a target or step,
 // such as a name, an argument, a path, an owner or a variable, may hold a NUL byte, which can't reach a container.
 func TestBuildFile_StringsHoldNoNULByte(t *testing.T) {
+	parallelRule(t)
 	for _, example := range []struct {
 		name  string
 		build string // after the pull of busybox and theCodeGlob, on line 3
@@ -247,6 +249,7 @@ func TestBuildFile_StringsHoldNoNULByte(t *testing.T) {
 // TestBuildFile_StepsAreMadeInAStepsList specifies that steps are made in the steps list of a task or layer,
 // and that a step made anywhere else is an error.
 func TestBuildFile_StepsAreMadeInAStepsList(t *testing.T) {
+	parallelRule(t)
 	for _, example := range []struct {
 		name  string
 		build string // after the pull of busybox and theCodeGlob, on line 3

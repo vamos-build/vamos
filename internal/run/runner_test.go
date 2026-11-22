@@ -17,6 +17,8 @@ import (
 
 	"github.com/spf13/afero"
 	"go.podman.io/buildah"
+	"go.podman.io/image/v5/types"
+	"go.podman.io/storage"
 )
 
 // memFile returns a filesystem holding the file /f with content.
@@ -110,4 +112,82 @@ func TestBuilderOptionsNoHostMounts(t *testing.T) {
 	if got := builderOptions("scratch", nil, nil).DefaultMountsFilePath; got != os.DevNull {
 		t.Errorf("the builder's mounts file = %q, want %s", got, os.DevNull)
 	}
+}
+
+// TestStartCancelled checks that a target cancelled before buildah makes its container makes none, and that one
+// cancelled just after buildah made it, as an interrupt that comes then is, returns the container, unmounted, so that
+// the caller deletes it, rather than leaving it in the store, as buildah's NewBuilder does with a context that has
+// ended by then, or mounting it, whose failure would hide the cancellation.
+func TestStartCancelled(t *testing.T) {
+	testenv.RequireBuildah(t)
+	for _, tt := range []struct {
+		name    string
+		before  bool // cancelled before start, rather than once the container is made
+		created int
+	}{
+		{name: "before the container is made", before: true, created: 0},
+		{name: "as the container is made", created: 1},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			store, err := storage.GetStore(testenv.PrivateStores(t).Options)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _, _ = store.Shutdown(true) })
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			if tt.before {
+				cancel()
+			}
+			counting := &cancelOnCreate{Store: store, cancel: cancel}
+			r := &localRunner{store: counting, systemContext: &types.SystemContext{}}
+			req := sched.Request{Action: &sched.Action{Kind: sched.KindTask, Base: sched.Scratch}}
+			st, err := r.start(ctx, req, nil, nil)
+			if st != nil {
+				if err := st.delete(); err != nil {
+					t.Errorf("deleting the target's container: %v", err)
+				}
+			}
+			if !errors.Is(err, context.Canceled) {
+				t.Errorf("start returned %v, want it cancelled", err)
+			}
+			if counting.created != tt.created {
+				t.Errorf("start made %d containers, want %d", counting.created, tt.created)
+			}
+			if counting.mounted != 0 {
+				t.Errorf("start mounted a container %d times, want none", counting.mounted)
+			}
+			containers, err := store.Containers()
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, c := range containers {
+				t.Errorf("the store holds the container %s, which start left", c.ID)
+			}
+		})
+	}
+}
+
+// cancelOnCreate is a container store that cancels a build once it has made a container, counting those it made,
+// and the mounts of containers.
+type cancelOnCreate struct {
+	storage.Store
+	cancel           context.CancelFunc
+	created, mounted int
+}
+
+func (s *cancelOnCreate) Mount(id, mountLabel string) (string, error) {
+	s.mounted++
+	return s.Store.Mount(id, mountLabel)
+}
+
+func (s *cancelOnCreate) CreateContainer(
+	id string, names []string, image, layer, metadata string, options *storage.ContainerOptions,
+) (*storage.Container, error) {
+	c, err := s.Store.CreateContainer(id, names, image, layer, metadata, options)
+	if err == nil {
+		s.created++
+	}
+	s.cancel()
+	return c, err
 }

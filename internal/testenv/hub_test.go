@@ -1,8 +1,10 @@
 package testenv
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log"
 	"net/http"
@@ -196,6 +198,107 @@ registry = [{location = "registry:5000", insecure = true}]
 			}
 		}
 	})
+}
+
+// TestUnsharedRegistriesConfOfTheTestsOwn checks that, where Main couldn't share a registries.conf, a test that set the
+// override itself, to nothing where it was unset, is left to make a file of its own, rather than failed.
+func TestUnsharedRegistriesConfOfTheTestsOwn(t *testing.T) {
+	t.Setenv(overrideEnv, "") // restored once the test ends
+	c := &registriesConf{err: errors.New("no shared file"), wasSet: false}
+	if c.add(t, map[string]any{"location": "own:5000"}) {
+		t.Error("add added a table to a file that was never shared")
+	}
+}
+
+// TestSharedRegistriesConf checks that the binary's own registries.conf keeps what the override file it replaces says,
+// that tests' registries are in it while the tests run, and removed as each ends, a subtest's entry replacing its
+// test's for the same prefix until then, without the environment changing, so that tests running in parallel can add
+// theirs, and that stopping names the replaced file again.
+func TestSharedRegistriesConf(t *testing.T) {
+	own := filepath.Join(t.TempDir(), "override.conf")
+	Must(t, os.WriteFile(own, []byte("[[registry]]\nlocation = \"registry:5000\"\ninsecure = true\n"), 0o644))
+	t.Setenv(overrideEnv, own)
+	t.Cleanup(sysregistriesv2.InvalidateCache)
+	insecure := func(t *testing.T, host string) bool {
+		t.Helper()
+		reg, err := sysregistriesv2.FindRegistry(nil, host+"/app")
+		Must(t, err)
+		return reg != nil && reg.Insecure
+	}
+
+	var c registriesConf
+	stop, err := c.share()
+	Must(t, err)
+	stopped := false
+	t.Cleanup(func() { // if the test stops before it does
+		if !stopped {
+			stop()
+		}
+	})
+	shared := os.Getenv(overrideEnv)
+	if shared == own || shared == "" {
+		t.Fatalf("%s = %q, want a file of the binary's own", overrideEnv, shared)
+	}
+	if !insecure(t, "registry:5000") {
+		t.Error("registry:5000, which the replaced file marks insecure, isn't")
+	}
+	t.Run("one", func(t *testing.T) {
+		if !c.add(t, map[string]any{"location": "one:5000", "insecure": true}) {
+			t.Fatal("there was no file to add to")
+		}
+		t.Run("two", func(t *testing.T) {
+			c.add(t, map[string]any{"location": "two:5000", "insecure": true})
+			for _, host := range []string{"registry:5000", "one:5000", "two:5000"} {
+				if !insecure(t, host) {
+					t.Errorf("%s isn't insecure while both tests run", host)
+				}
+			}
+			// A subtest's entry replaces its test's for the same prefix while it runs.
+			c.add(t, map[string]any{"location": "one:5000", "insecure": false})
+			if insecure(t, "one:5000") {
+				t.Error("one:5000 is insecure still, once a subtest's entry replaced it")
+			}
+		})
+		if insecure(t, "two:5000") {
+			t.Error("two:5000 is insecure still once its test ended")
+		}
+		if !insecure(t, "one:5000") {
+			t.Error("one:5000 isn't insecure while its test runs, once its subtest's entry is gone")
+		}
+	})
+	if insecure(t, "one:5000") {
+		t.Error("one:5000 is insecure still once its test ended")
+	}
+
+	// A table that containers/image rejects never replaces the file that tests running at once read.
+	before, err := os.ReadFile(shared)
+	Must(t, err)
+	c.mu.Lock()
+	c.entries["bad.example"] = []registryEntry{{t: t, table: map[string]any{"prefix": "bad.example"}}}
+	err = c.write()
+	delete(c.entries, "bad.example")
+	c.mu.Unlock()
+	if err == nil {
+		t.Error("a table without a location, for a prefix that isn't a wildcard, was written")
+	}
+	if after, readErr := os.ReadFile(shared); readErr != nil || !bytes.Equal(after, before) {
+		t.Errorf("the binary's file changed for a rejected table: %v\n%s", readErr, after)
+	}
+	if got := os.Getenv(overrideEnv); got != shared {
+		t.Errorf("%s = %q after the tests, want it unchanged, %q", overrideEnv, got, shared)
+	}
+
+	stopped = true
+	stop()
+	if got := os.Getenv(overrideEnv); got != own {
+		t.Errorf("%s = %q once stopped, want the replaced file again, %q", overrideEnv, got, own)
+	}
+	if _, err := os.Stat(shared); !os.IsNotExist(err) {
+		t.Errorf("the binary's file is left once stopped: %v", err)
+	}
+	if c.add(t, map[string]any{"location": "three:5000", "insecure": true}) {
+		t.Error("an entry was added once stopped, want the test's own file used")
+	}
 }
 
 // TestRegistriesConfWith checks that a test's registry entry is merged into a registries.conf of any layout TOML

@@ -168,7 +168,8 @@ func (w *world) ThenTheTraceSpanIsWithin(process, name, outerProcess, outer stri
 	w.t.Helper()
 	s, o := w.span(process, name), w.span(outerProcess, outer)
 	if !s.within(o) {
-		w.t.Errorf("%q isn't within %q", s.Name, o.Name)
+		w.t.Errorf("%q, from %.0fµs to %.0fµs, isn't within %q, from %.0fµs to %.0fµs", s.Name, s.TS, s.end, o.Name,
+			o.TS, o.end)
 	}
 	if s.process == o.process && s.track == o.track {
 		for p := s.parent; ; p = p.parent {
@@ -203,10 +204,11 @@ func (w *world) ThenEverySpanEndsBeforeAnyStarts(process, first, then string) {
 	}
 }
 
-// ThenTheTraceSpanIsOnTrack checks that the span of process that name names is on the track named track.
+// ThenTheTraceSpanIsOnTrack checks that the span of process that name names is on the track named track, in both of
+// which placeholders stand for what they name in the scenario, as in the command lines that steps run.
 func (w *world) ThenTheTraceSpanIsOnTrack(process, name, track string) {
 	w.t.Helper()
-	if s := w.span(process, name); s.track != track {
+	if s, track := w.span(process, name), w.atPlaceholders(track); s.track != track {
 		w.t.Errorf("%q is on the track %q, want %q", s.Name, s.track, track)
 	}
 }

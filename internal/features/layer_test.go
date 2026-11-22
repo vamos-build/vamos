@@ -21,6 +21,7 @@ func newLayerWorld(t *testing.T) *world {
 
 // TestLayer_ImageIsBasesWithChanges specifies that a layer's image is its base's, with the layer's changes.
 func TestLayer_ImageIsBasesWithChanges(t *testing.T) {
+	parallelRule(t)
 	t.Run("A layer keeps its base's files and adds its own", func(t *testing.T) {
 		w := newLayerWorld(t)
 		w.GivenTheBuildFileDeclares(`
@@ -124,6 +125,7 @@ func TestLayer_ImageIsBasesWithChanges(t *testing.T) {
 
 // TestLayer_StepsApplyInOrder specifies that steps apply in order, and later steps see earlier changes.
 func TestLayer_StepsApplyInOrder(t *testing.T) {
+	parallelRule(t)
 	t.Run("Files added later replace those added before", func(t *testing.T) {
 		w := newLayerWorld(t)
 		w.GivenTheBuildFileDeclares(`
@@ -222,6 +224,7 @@ func TestLayer_StepsApplyInOrder(t *testing.T) {
 
 // TestLayer_FilesKeepModes specifies that files keep their modes as a layer adds them.
 func TestLayer_FilesKeepModes(t *testing.T) {
+	parallelRule(t)
 	t.Run("A layer adds a task's output with the modes it was selected with", func(t *testing.T) {
 		w := newLayerWorld(t)
 		w.GivenTheBuildFileDeclares(`
@@ -269,6 +272,7 @@ func TestLayer_FilesKeepModes(t *testing.T) {
 // TestLayer_CommandAndEntrypoint specifies that a layer's command and entrypoint
 // work as a Dockerfile's CMD and ENTRYPOINT.
 func TestLayer_CommandAndEntrypoint(t *testing.T) {
+	parallelRule(t)
 	for _, example := range []struct {
 		name       string
 		base       string

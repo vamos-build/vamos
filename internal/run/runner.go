@@ -361,12 +361,20 @@ func (r *localRunner) start(
 	if r.attempt != "" {
 		options.Container = attemptPrefix + r.attempt
 	}
-	builder, err := buildah.NewBuilder(ctx, r.store, options)
+	// NewBuilder leaves the container it made if ctx ends just after it made it (buildah v1.46.0, new.go), so it
+	// isn't given an end; it pulls nothing, and only reads the store. An interrupt is checked before and after.
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	builder, err := buildah.NewBuilder(context.WithoutCancel(ctx), r.store, options)
 	if err != nil {
 		return nil, err
 	}
 	st := &targetState{
 		runner: r, builder: builder, log: log, events: ev, buildEnv: map[string]string{}, secrets: req.Secrets,
+	}
+	if err := ctx.Err(); err != nil {
+		return st, err
 	}
 	if a.Kind == sched.KindLayer {
 		if err := setPlatform(builder, a); err != nil {

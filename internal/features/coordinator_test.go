@@ -13,6 +13,7 @@ func newCoordinatorWorld(t *testing.T) *world {
 // TestCoordinator_PullThroughNamesRegistryHosts specifies that --pull-through maps a registry to a pull-through
 // cache, each named by its host: one with a dot or a port, or localhost.
 func TestCoordinator_PullThroughNamesRegistryHosts(t *testing.T) {
+	parallelRule(t)
 	for _, example := range []struct {
 		name, mapping string
 	}{
@@ -79,6 +80,7 @@ func TestCoordinator_PullThroughNamesRegistryHosts(t *testing.T) {
 // TestCoordinator_OffersPlatformsItNames specifies that the platforms a coordinator offers, natively or emulated,
 // are os/arch, or os/arch/variant, and that its default execution platform is one that --offer names.
 func TestCoordinator_OffersPlatformsItNames(t *testing.T) {
+	parallelRule(t)
 	t.Run("A default execution platform that isn't offered fails", func(t *testing.T) {
 		w := newCoordinatorWorld(t)
 		w.WhenIStartACoordinatorUntilItListens("--offer", "linux/amd64", "--default-exec-platform", "linux/arm64")

@@ -13,8 +13,8 @@ a `//nolint:<linter>` needs a comment saying why the finding is wrong there.
 govulncheck fails only for a known vulnerability that vamos's code can reach;
 fix one by updating the module, under the update-dependencies skill's policy.
 
-For timeout planning, previous devcontainer runs took under one second for the short suite
-and about 90 seconds for the full suite.
+For timeout planning, previous devcontainer runs with a warm Go build cache took about 15 seconds for the short suite
+and about 45 seconds for the full suite, most of it `internal/features`, whose scenarios run in parallel.
 These are approximate timings, not deadlines: allow extra time for cold Go compilation, image pulls and emulation.
 
 Run the full suite before finishing changes to building, committing or destinations.
@@ -73,7 +73,7 @@ Tests that build call `requireBuildah(t)`.
 Every `TestMain` that uses buildah is `testenv.Main(m)`, which calls `buildah.InitReexec()` first
 and `testenv.RemoveSuiteStores` after the tests; packages whose tests run a worker pass it `worker.ChildFromEnv`.
 Tests that start a worker give it `testenv.CgroupRoot(t)`, as `worker.Config`'s or `cli.Config`'s `CgroupRoot`,
-and mustn't run in parallel.
+a root of the test's own, so that its worker never kills another test's attempts as leftovers.
 Table cases use keyed struct literals, one field per line.
 
 On failure, a scenario checks that no output is left with `ThenNothingIsSaved` or `ThenNothingIsExported`,
@@ -85,8 +85,12 @@ and the end-to-end cases routed by [container-builds.md](container-builds.md).
 
 Tests never touch the developer's container store or build cache.
 `testenv.SuiteStores` makes a store and cache for the test binary, beside the default store, removed after the run;
-`testenv.PrivateStores` makes a test its own, for one that destroys what they hold, as the prune feature's scenarios
-do through `GivenStoresOfTheScenariosOwn`.
+`testenv.PrivateStores` makes a test its own, for one that destroys what they hold or runs in parallel,
+as every scenario of a parallel rule has, and a serial one gets through `GivenStoresOfTheScenariosOwn`;
+on overlay, it starts with the overlay driver's checks of the filesystem that the suite's store made,
+all but those of a first layer mount in `-short` runs, which mount no layer,
+since a check forks the test binary into a user namespace that holds every file it has open,
+and with them the build cache locks of the scenarios running beside it.
 In `internal/cli`, `vamos` runs against the suite's stores unless the test called `usePrivateStores`.
 `testenv.Main` makes an in-process registry docker.io's mirror for pulls by digest,
 keeping what it fetches in `~/.cache/vamos-test/docker.io`, or `$VAMOS_TEST_HUB_CACHE`, across runs,
@@ -138,8 +142,9 @@ start from a background that needs no buildah, such as `newGlobMistakeWorld`, so
 a mistake that loading a BUILD file catches is checked with `ThenItFailsWith`, its position and all,
 `ThenNoTargetRan`, and `ThenNothingIsSaved` or `ThenNothingIsExported` for the command that sends.
 Scenarios run the command line in process, through `cli.NewRootCommand`,
-on the suite's stores, or, for one that prunes them with `WhenIPrune`, stores of its own that
-`GivenStoresOfTheScenariosOwn` gives it, and on a project held in memory,
+on stores of their own, or, in a rule that runs alone, on the suite's,
+unless `GivenStoresOfTheScenariosOwn` gives it its own, as one that prunes them with `WhenIPrune` needs,
+and on a project held in memory,
 or on disk once `GivenTheProjectLinks` gives it symbolic links, `GivenTheProjectIsReachedThroughALink` makes its
 directory one, or `WhenISave` saves into it with `intoTheProject`.
 They observe only what a user can:
@@ -171,7 +176,11 @@ see a glob's files in a layer that adds them, which the scenario declares, such 
 `layer(name="app", base="busybox", steps=[add("code", "/app")])`.
 For attempts that must run at once, `GivenABarrierThatOpensOnceReachedBy(n)` starts a barrier whose URL
 `<barrier>` stands for in BUILD text; a BUILD step that runs busybox's `wget` on it waits until n requests arrive.
-`ThenTheBarrierOpened` checks that the barrier opened, rather than relying on sleeps to make attempts overlap.
+For a step that must still be running when something else happens, such as another build joining its attempt,
+`GivenABarrier` starts one that holds until a later step opens it, as `GivenTheBarrierOpensOnceTheOtherClientIsJoined`
+does once that build has joined.
+`ThenTheBarrierOpened` checks that the barrier opened, or that what opens it happened,
+rather than relying on sleeps to make attempts overlap or to keep a step running.
 A scenario shows its input, its BUILD file and project, in its own text or in a fixture of its feature:
 a constant, such as `theApp`, or a function of the values that vary, such as `depsSizeAndApp(nonce)`,
 that returns BUILD text, or the files of a project, such as `locales`,
@@ -297,5 +306,11 @@ Keys that more than one step reports name the step, such as `token during` and `
 
 Select with `-run`: `go test ./internal/features -run TestTask_` runs the task scenarios,
 `-run TestTask_WithoutOutputIsACheck` one rule, and `-v` lists the scenarios as they run.
-Scenarios share the suite's container store, so they don't call `t.Parallel`:
-another scenario's build would leave images that `ThenNoImageIsLeftBehind` can't tell apart.
+A rule calls `parallelRule(t)` first, which runs it, and its scenarios as their worlds start, in parallel,
+each scenario on stores of its own, so that `ThenNoImageIsLeftBehind` sees only its own leftovers.
+A rule whose steps change what the whole process shares, such as `GivenTheEnvironmentSets`, `GivenADockerDaemon`,
+which sets `DOCKER_HOST`, a working directory or the umask, doesn't, and runs alone, on the suite's stores,
+before the parallel rules start; `t.Setenv` panics in a parallel test, which catches a rule that forgot,
+but nothing catches one that sets the umask or the working directory otherwise.
+Steps that start servers share the process otherwise: `testenv.InsecureRegistry` edits the registries.conf
+that `testenv.Main` names for the whole run, and `testenv.CgroupRoot` gives each test's workers a root of its own.

@@ -33,6 +33,7 @@ func newPushMistakeWorld(t *testing.T) *world {
 // from the executor by default, or from the client with --push-from=client,
 // and that an image name without a tag gets :latest.
 func TestPush_PublishesToTheRepository(t *testing.T) {
+	parallelRule(t)
 	for _, example := range []struct {
 		name    string
 		options []option
@@ -144,6 +145,7 @@ func TestPush_EachSideUsesItsOwnSettings(t *testing.T) {
 
 // TestPush_FailureSaysWhy specifies that a push to a registry that can't be reached fails, saying why.
 func TestPush_FailureSaysWhy(t *testing.T) {
+	parallelRule(t)
 	for _, example := range []struct {
 		name    string
 		options []option

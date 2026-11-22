@@ -315,6 +315,9 @@ Its `cli.traceSession` measures the executor's clock against its own through `ap
 each sample without the client's retries, since a retried one is skewed and a coordinator that has gone would hold
 the command,
 and stores the offset in the command trace, by which assembly places the client's spans among the executor's.
+The local executor runs on the client's own clock, so its offset is none, exactly, rather than measured:
+a measurement is only as good as half a sample's round trip, which, under load, can put a job's span before the
+client's that started it.
 
 Recording costs every build something now, so `tracing.Enabled` guards no longer spare an executor anything:
 arguments prepared only for a trace are prepared whenever a job runs.

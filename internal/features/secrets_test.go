@@ -240,6 +240,7 @@ func TestSecrets_VariableMustBeSet(t *testing.T) {
 
 // TestSecrets_EachGivesAVariableOrAFile specifies that each secret gives exactly one of env and file.
 func TestSecrets_EachGivesAVariableOrAFile(t *testing.T) {
+	parallelRule(t)
 	for _, example := range []struct {
 		name   string
 		secret string
@@ -272,6 +273,7 @@ func TestSecrets_EachGivesAVariableOrAFile(t *testing.T) {
 // TestSecrets_IDsAndFilesAreWellFormed specifies that a secret's ID is letters, digits, "_", "." or "-",
 // starting with a letter or digit, and that its file is a clean absolute path.
 func TestSecrets_IDsAndFilesAreWellFormed(t *testing.T) {
+	parallelRule(t)
 	for _, example := range []struct {
 		name   string
 		secret string
@@ -313,6 +315,7 @@ func TestSecrets_IDsAndFilesAreWellFormed(t *testing.T) {
 // TestSecrets_AStepGivesEachVariableAndFileOnce specifies that no two secrets of a step give the same variable,
 // or the same file.
 func TestSecrets_AStepGivesEachVariableAndFileOnce(t *testing.T) {
+	parallelRule(t)
 	for _, example := range []struct {
 		name    string
 		secrets string
@@ -344,6 +347,7 @@ func TestSecrets_AStepGivesEachVariableAndFileOnce(t *testing.T) {
 // TestSecrets_AReachedStepsMissingSecretFailsAsTheFileLoads specifies that a build that reaches a step whose secret
 // the command line doesn't give fails when the BUILD file loads, before anything runs.
 func TestSecrets_AReachedStepsMissingSecretFailsAsTheFileLoads(t *testing.T) {
+	parallelRule(t)
 	t.Run("A step's secret that no --secret gives fails, saying how to give it", func(t *testing.T) {
 		w := newSecretMistakeWorld(t)
 		w.GivenTheBuildFileDeclares(`

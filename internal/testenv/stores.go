@@ -7,6 +7,7 @@ import (
 	"hash/fnv"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -184,12 +185,20 @@ func SuiteStores(t *testing.T) *Stores {
 	return s
 }
 
-// PrivateStores returns stores for the test alone, removed once it ends.
+// PrivateStores returns stores for the test alone, removed once it ends, whose run root starts with the overlay
+// driver's checks of the filesystem that the suite's store recorded, as seedDriverChecks says, where the suite's store
+// is overlay; in -short runs, which mount no layer, without those made at a first mount, as driverChecks says.
 func PrivateStores(t *testing.T) *Stores {
 	t.Helper()
 	s, err := newStores(storesName(t.Name()))
 	if err != nil {
 		t.Fatal(err)
+	}
+	if overlayOrDefault(s.Options.GraphDriverName) {
+		if err := seedDriverChecks(s.Options.RunRoot); err != nil {
+			os.RemoveAll(s.Dir)
+			t.Fatalf("copying the overlay driver's checks of the filesystem: %v", err)
+		}
 	}
 	t.Cleanup(func() {
 		if err := s.remove(); err != nil {
@@ -241,7 +250,13 @@ var suiteMade atomic.Bool
 // a container's own overlay filesystem, as /tmp often is, can't hold an overlay store.
 // Where that can't be written, as without root, it is in the temporary directory, where non-building tests
 // can still use it.
-// The store takes the default driver and its options, so that it works as the developer's does.
+// The store takes the default driver and its options, so that it works as the developer's does,
+// but with overlay's metacopy off, which Fedora's default storage.conf turns on, unless NaiveDiffEnv is set:
+// explicitly where the kernel takes the option and no mount program is given, so that a kernel whose overlay module
+// turns it on by default doesn't.
+// With metacopy, the overlay driver can't diff a layer natively, and diffs it naively instead,
+// which waits for the next whole second after every commit, since it compares the times of files only to the second:
+// that wait was most of the time the suite took.
 func newStores(name string) (*Stores, error) {
 	options, err := storage.DefaultStoreOptions()
 	if err != nil {
@@ -259,7 +274,176 @@ func newStores(name string) (*Stores, error) {
 	options.ImageStore = ""
 	options.TransientStore = false
 	options.GraphDriverOptions = withoutSharedStores(options.GraphDriverOptions)
+	if overlayOrDefault(options.GraphDriverName) {
+		sayOff := overlayTakesMetacopy() && !hasMountProgram(options.GraphDriverOptions)
+		options.GraphDriverOptions = withMetacopy(options.GraphDriverOptions, os.Getenv(NaiveDiffEnv) != "", sayOff)
+	}
 	return &Stores{Dir: dir, Options: options}, nil
+}
+
+// overlayOrDefault reports whether a store whose driver is named driver may use the overlay driver: one that names
+// none takes the first that works, as storage.conf's driver_priority, or containers/storage, orders them, which is
+// overlay where it works.
+func overlayOrDefault(driver string) bool {
+	return driver == "overlay" || driver == ""
+}
+
+// seedDriverChecks copies into runRoot the overlay driver's checks of the filesystem, which it records in its run root
+// and reads before checking again: whether overlay works there, with metacopy, with native diffs, and with idmapped
+// lower directories. A store's checks are the same for every test's, since each is on the same filesystem with the
+// same options, so the suite's store makes them once, and each test's store starts with them, as a store that has
+// been opened before does, rather than making them again. A check makes mounts, and the check of idmapped lower
+// directories forks this process, without starting a program, into a user namespace until it ends: the fork holds
+// every file this process has open, and so every lock on one, such as a build cache's, that another test, running in
+// parallel, would then find held after it closed it. Where the suite's store can't be opened, as without root,
+// nothing is copied, and a store checks the filesystem itself.
+func seedDriverChecks(runRoot string) error {
+	from := driverChecks()
+	if from == "" {
+		return nil
+	}
+	entries, err := os.ReadDir(from)
+	if err != nil {
+		return err
+	}
+	to := filepath.Join(runRoot, "overlay")
+	if err := os.MkdirAll(to, 0o700); err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if !e.Type().IsRegular() {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(from, e.Name()))
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(to, e.Name()), data, 0o644); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// driverChecks returns the folder of the overlay driver's checks of the filesystem in the run root of the suite's
+// store, having opened the store, and mounted a container in it where buildah can, outside -short runs, so that it
+// made them all, since the driver makes some only as it first mounts a layer; or "" if the store can't be opened, or
+// uses another driver, as one that names none may.
+var driverChecks = sync.OnceValue(func() string {
+	if !testing.Short() {
+		_ = buildahAvailable() // which mounts a container in the suite's store; RequireBuildah reports why it can't
+	}
+	s, err := suiteStores()
+	if err != nil {
+		return ""
+	}
+	overlay := false
+	if err := s.WithStore(func(store storage.Store) error {
+		overlay = store.GraphDriverName() == "overlay"
+		return nil
+	}); err != nil || !overlay {
+		return ""
+	}
+	return filepath.Join(s.Options.RunRoot, "overlay")
+})
+
+// NaiveDiffEnv is the environment variable that, when set, gives the overlay driver of the stores that tests make
+// metacopy, as Fedora's default storage.conf does, so that it diffs layers naively, comparing their files with their
+// parent layers', rather than natively, as it does without metacopy; another driver always diffs naively.
+// containers/storage settles which diff its overlay driver uses once per process, for the first overlay store it opens,
+// so the variable applies to a whole test binary, such as one that a test runs to build with naive diffs.
+const NaiveDiffEnv = "VAMOS_TEST_NAIVE_DIFF"
+
+// withMetacopy returns the driver options with overlay's metacopy turned on, in its mount options, or off: with
+// metacopy=off where sayOff says the kernel takes it, or else with metacopy=on left out, and an explicit metacopy=off
+// kept, which leaves it as the kernel's overlay module has it, off unless that turns it on. The overlay driver takes
+// the last mount option meant for it, as overlay.mountopt=nodev,metacopy=on or mountopt=nodev, which containers/storage
+// emits for storage.conf's overlay and general options, and skips those of another driver, as zfs.mountopt, so only
+// that last one is changed.
+// Emptied, it stays, unless none came before it, since dropping it would make an earlier one the last.
+func withMetacopy(options []string, on, sayOff bool) []string {
+	setting := ""
+	switch {
+	case on:
+		setting = "metacopy=on"
+	case sayOff:
+		setting = "metacopy=off"
+	}
+	kept := slices.Clone(options)
+	last, earlier := -1, false
+	for i, o := range kept {
+		key, _, _ := strings.Cut(o, "=")
+		driver, name, ok := strings.Cut(strings.ToLower(strings.TrimSpace(key)), ".")
+		if !ok {
+			driver, name = "", driver
+		}
+		if name == "mountopt" && (driver == "" || driver == "overlay" || driver == "overlay2") {
+			earlier = earlier || last >= 0
+			last = i
+		}
+	}
+	if last < 0 {
+		if setting != "" {
+			kept = append(kept, "overlay.mountopt="+setting)
+		}
+		return kept
+	}
+	key, value, _ := strings.Cut(kept[last], "=")
+	var opts []string
+	for opt := range strings.SplitSeq(value, ",") {
+		optName, optValue, _ := strings.Cut(opt, "=")
+		metacopy := strings.TrimSpace(optName) == "metacopy"
+		if opt != "" && (!metacopy || setting == "" && strings.TrimSpace(optValue) == "off") {
+			opts = append(opts, opt)
+		}
+	}
+	if setting != "" {
+		opts = append(opts, setting)
+	}
+	if len(opts) == 0 && !earlier {
+		return slices.Delete(kept, last, last+1)
+	}
+	kept[last] = key + "=" + strings.Join(opts, ",")
+	return kept
+}
+
+// overlayTakesMetacopy reports, once for the process, so that every store a test binary makes has the same mount
+// options, which key the driver's checks that seedDriverChecks copies, whether the kernel's overlay module takes the
+// metacopy mount option, as it does from Linux 4.19, with a parameter for its default: an older one refuses to mount
+// with it, even as metacopy=off. A module that isn't loaded yet has no parameters to look at, so the kernel's version
+// decides then.
+var overlayTakesMetacopy = sync.OnceValue(func() bool {
+	if _, err := os.Stat("/sys/module/overlay"); err == nil {
+		_, err := os.Stat("/sys/module/overlay/parameters/metacopy")
+		return err == nil
+	}
+	release, err := os.ReadFile("/proc/sys/kernel/osrelease")
+	return err == nil && kernelAtLeast(string(release), 4, 19)
+})
+
+// kernelAtLeast reports whether release, a kernel release such as 6.8.0-45-generic, is at least major.minor.
+func kernelAtLeast(release string, major, minor int) bool {
+	var gotMajor, gotMinor int
+	if _, err := fmt.Sscanf(strings.TrimSpace(release), "%d.%d", &gotMajor, &gotMinor); err != nil {
+		return false
+	}
+	return gotMajor > major || gotMajor == major && gotMinor >= minor
+}
+
+// hasMountProgram reports whether the driver options give overlay a program to mount with, such as fuse-overlayfs,
+// which is handed the mount options, and with which the driver diffs naively whatever metacopy says.
+func hasMountProgram(options []string) bool {
+	for _, o := range options {
+		key, _, _ := strings.Cut(o, "=")
+		driver, name, ok := strings.Cut(strings.ToLower(strings.TrimSpace(key)), ".")
+		if !ok {
+			driver, name = "", driver
+		}
+		if name == "mount_program" && (driver == "" || driver == "overlay" || driver == "overlay2") {
+			return true
+		}
+	}
+	return false
 }
 
 // withoutSharedStores returns the driver options without stores that the store would share with others:

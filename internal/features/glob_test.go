@@ -31,6 +31,7 @@ func newGlobMistakeWorld(t *testing.T) *world {
 // TestGlob_PathsStayRelativeToTheBuildDirectory specifies that a glob selects files relative to the directory
 // containing its BUILD file, and that their paths stay relative to it, even when a pattern has a leading directory.
 func TestGlob_PathsStayRelativeToTheBuildDirectory(t *testing.T) {
+	parallelRule(t)
 	t.Run("A directory selects its contents recursively, beneath its own name", func(t *testing.T) {
 		w := newGlobWorld(t)
 		w.GivenTheBuildFileDeclares(`
@@ -96,6 +97,7 @@ func TestGlob_PathsStayRelativeToTheBuildDirectory(t *testing.T) {
 // * matches within one path component, ** matches zero or more directories,
 // and an exclusion matching a directory omits all of it.
 func TestGlob_PatternsSelectFiles(t *testing.T) {
+	parallelRule(t)
 	t.Run("Patterns select files at any depth, less those excluded", func(t *testing.T) {
 		w := newGlobWorld(t)
 		w.GivenTheBuildFileDeclares(`
@@ -192,6 +194,7 @@ func TestGlob_PatternsSelectFiles(t *testing.T) {
 // TestGlob_ModeMaskRetainsPermissionBits specifies that a glob's mode_mask masks its files' and directories'
 // existing permission bits, rather than assigning a fixed mode, and retains those of 0o755 by default.
 func TestGlob_ModeMaskRetainsPermissionBits(t *testing.T) {
+	parallelRule(t)
 	for _, example := range []struct {
 		name     string
 		modeMask string // the glob's mode_mask argument, if any
@@ -266,6 +269,7 @@ func TestGlob_ModeMaskRetainsPermissionBits(t *testing.T) {
 // TestGlob_LinksAreCopiedAsLinks specifies that links matched by wildcards or found within an included directory
 // are copied as links and never followed.
 func TestGlob_LinksAreCopiedAsLinks(t *testing.T) {
+	parallelRule(t)
 	t.Run("Links within an included directory are copied as links, wherever they point", func(t *testing.T) {
 		w := newGlobWorld(t)
 		w.GivenTheBuildFileDeclares(`
@@ -328,6 +332,7 @@ func TestGlob_LinksAreCopiedAsLinks(t *testing.T) {
 // must exist and must not be a symbolic link, even when allow_no_files = True.
 // The links point within the project, so that following one would select a file rather than fail.
 func TestGlob_IncludesMustNotBeLinks(t *testing.T) {
+	parallelRule(t)
 	for _, example := range []struct {
 		name    string
 		include string
@@ -407,6 +412,7 @@ func TestGlob_IncludesMustNotBeLinks(t *testing.T) {
 // TestGlob_SelectionIsBounded specifies that a glob must select files unless allow_no_files = True,
 // and no more files or bytes than its limits.
 func TestGlob_SelectionIsBounded(t *testing.T) {
+	parallelRule(t)
 	t.Run("Allowing no files, a glob may select none", func(t *testing.T) {
 		w := newGlobWorld(t)
 		w.GivenTheBuildFileDeclares(`
@@ -461,6 +467,7 @@ func TestGlob_SelectionIsBounded(t *testing.T) {
 // TestGlob_ReadBeforeExecution specifies that vamos captures reachable globs once before execution,
 // and that globs that no requested target uses are not read.
 func TestGlob_ReadBeforeExecution(t *testing.T) {
+	parallelRule(t)
 	t.Run("A glob's mistake is reported before any target runs", func(t *testing.T) {
 		w := newGlobMistakeWorld(t)
 		w.GivenTheBuildFileDeclares(fmt.Sprintf(`
@@ -534,6 +541,7 @@ func TestGlob_ReadBeforeExecution(t *testing.T) {
 
 // TestGlob_NameAndANonemptyIncludeAreRequired specifies that a glob's name and a nonempty include list are required.
 func TestGlob_NameAndANonemptyIncludeAreRequired(t *testing.T) {
+	parallelRule(t)
 	for _, example := range []struct {
 		name  string
 		glob  string
@@ -565,6 +573,7 @@ func TestGlob_NameAndANonemptyIncludeAreRequired(t *testing.T) {
 // TestGlob_PatternsStayWithinTheRoot specifies that patterns cannot be empty or resolve outside the selection root,
 // the BUILD file's directory for a glob, after normalizing . and .. components: use . to select the whole directory.
 func TestGlob_PatternsStayWithinTheRoot(t *testing.T) {
+	parallelRule(t)
 	for _, example := range []struct {
 		name  string
 		glob  string
@@ -616,6 +625,7 @@ func TestGlob_PatternsStayWithinTheRoot(t *testing.T) {
 
 // TestGlob_LimitsArePositive specifies that a selection's limits must be positive.
 func TestGlob_LimitsArePositive(t *testing.T) {
+	parallelRule(t)
 	for _, example := range []struct {
 		name  string
 		glob  string
@@ -652,6 +662,7 @@ func TestGlob_LimitsArePositive(t *testing.T) {
 
 // TestGlob_ModeMaskIsWithinThePermissionBits specifies that mode_mask must be between 0 and 0o7777.
 func TestGlob_ModeMaskIsWithinThePermissionBits(t *testing.T) {
+	parallelRule(t)
 	for _, example := range []struct {
 		name     string
 		modeMask string

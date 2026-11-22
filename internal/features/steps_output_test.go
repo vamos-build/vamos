@@ -137,13 +137,14 @@ func (w *world) fails(usage bool, wants []string) {
 
 // atPlaceholders returns s with each <destination> replaced by the folder that the last command sent to,
 // each <working directory> by the test's, each <registry> by the host of the scenario's registry,
+// each <barrier> by the URL of the scenario's barrier,
 // each <outside> by the folder of GivenAFileOutsideTheProjectHolds, each <coordinator> by the scenario's coordinator's
 // URL, each <digest of label> by the digest of the index or image that label names in the scenario's registry,
 // each <saved image N> by the short ID of the Nth image the scenario saved, as vamos shows one, and each <job> by the
 // ID of the last job the scenario's coordinator accepted.
 func (w *world) atPlaceholders(s string) string {
 	w.t.Helper()
-	s = w.atHeldDigests(w.atOutside(w.atRegistry(w.atCoordinator(s))))
+	s = w.atHeldDigests(w.atOutside(w.atBarrier(w.atRegistry(w.atCoordinator(s)))))
 	for i, img := range w.saved {
 		if placeholder := fmt.Sprintf("<saved image %d>", i+1); strings.Contains(s, placeholder) {
 			s = strings.ReplaceAll(s, placeholder, w.imageID(img)[:12])

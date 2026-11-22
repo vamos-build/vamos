@@ -32,6 +32,7 @@ func newRunMistakeWorld(t *testing.T) *world {
 // TestRun_CommandRunsInTheContainer specifies that run() runs a nonempty list of command arguments
 // in the container's current working directory, whose changes the layer keeps, and whose output reaches the user.
 func TestRun_CommandRunsInTheContainer(t *testing.T) {
+	parallelRule(t)
 	t.Run("A command's files stay in the image, and its output and errors reach the user", func(t *testing.T) {
 		w := newRunWorld(t)
 		w.GivenTheBuildFileDeclares(`
@@ -59,6 +60,7 @@ func TestRun_CommandRunsInTheContainer(t *testing.T) {
 // TestRun_NoShellIsImplicit specifies that run() runs its arguments as they are, with no shell:
 // use a shell explicitly for redirection, pipes, or shell variable expansion.
 func TestRun_NoShellIsImplicit(t *testing.T) {
+	parallelRule(t)
 	t.Run("Arguments reach the command as they are written", func(t *testing.T) {
 		w := newRunWorld(t)
 		w.GivenTheBuildFileDeclares(`layer(name="app", base="busybox", steps=[run(["echo", "$HOME", "|", "*"])])`)
@@ -80,6 +82,7 @@ func TestRun_NoShellIsImplicit(t *testing.T) {
 
 // TestRun_CommandMustSucceed specifies that run()'s command must exit successfully.
 func TestRun_CommandMustSucceed(t *testing.T) {
+	parallelRule(t)
 	for _, command := range []string{`["true"]`, `["echo", "hi"]`, `["sh", "-c", "exit 0"]`} {
 		t.Run("A command that exits successfully succeeds: "+command, func(t *testing.T) {
 			w := newRunWorld(t)
@@ -139,6 +142,7 @@ func TestRun_CommandMustSucceed(t *testing.T) {
 // such as subscription secrets at /run/secrets. Only on a host whose mounts.conf names /run/secrets,
 // as containers-common's does, does the scenario show it; TestBuilderOptionsNoHostMounts checks it everywhere.
 func TestRun_NoMountsFromTheHost(t *testing.T) {
+	parallelRule(t)
 	t.Run("A step sees no /run/secrets of the host's, nor one a secret before it was mounted in", func(t *testing.T) {
 		w := newRunWorld(t)
 		value := "secret " + testenv.NewNonce()
@@ -179,6 +183,7 @@ func TestRun_NoMountsFromTheHost(t *testing.T) {
 // TestRun_HostnameAndHostsStayOutOfTheImage specifies that a step gets a hostname of its own
 // and an /etc/hosts that names it and host.containers.internal, neither of which stays in the image.
 func TestRun_HostnameAndHostsStayOutOfTheImage(t *testing.T) {
+	parallelRule(t)
 	t.Run("A step sees its own hostname and hosts, which the image doesn't keep", func(t *testing.T) {
 		host, err := os.Hostname()
 		if err != nil {
