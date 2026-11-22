@@ -15,6 +15,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"go.podman.io/image/v5/pkg/sysregistriesv2"
+	"go.podman.io/image/v5/types"
 )
 
 // InsecureRegistry marks the registry at host, "host:port", insecure in the registries.conf that containers/image
@@ -58,6 +59,7 @@ var sharedConf registriesConf
 type registriesConf struct {
 	mu      sync.Mutex
 	path    string                     // the file, or "" if there is none
+	noDirs  string                     // an empty folder, as the drop-in folder of a staged file that write checks
 	base    []byte                     // what it holds but for the tests' tables
 	entries map[string][]registryEntry // the tests' tables, by prefix, the last of each in effect
 	added   int                        // how many tables tests have added, which numbers each
@@ -96,6 +98,10 @@ func (c *registriesConf) share() (stop func(), err error) {
 		return nil, err
 	}
 	c.path, c.base, c.entries = filepath.Join(dir, "registries.conf"), base, map[string][]registryEntry{}
+	c.noDirs = filepath.Join(dir, "registries.d")
+	if err = os.Mkdir(c.noDirs, 0o755); err != nil {
+		return nil, errors.Join(err, os.RemoveAll(dir))
+	}
 	if err = c.write(); err == nil {
 		err = os.Setenv(overrideEnv, c.path)
 	}
@@ -128,8 +134,8 @@ func (c *registriesConf) share() (stop func(), err error) {
 // for the same prefix before, which it restores then, and reports whether there is a file to add it to: there isn't
 // once the environment names another, as a test that sets overrideEnv itself makes it. It fails the test if Main
 // couldn't share a file, unless the test named one itself, if another test that is running has an entry for the
-// prefix, or if containers/image can't read the file with the entry, which it then removes again, so that other tests
-// read the file as it was.
+// prefix, or if containers/image can't read the file with the entry, which write checks before other tests can read
+// it, and which add then removes again.
 func (c *registriesConf) add(t *testing.T, entry map[string]any) bool {
 	t.Helper()
 	c.mu.Lock()
@@ -181,7 +187,9 @@ func (c *registriesConf) drop(prefix string, n int) {
 }
 
 // write writes the file, its base with the tests' tables, replacing it whole, so that a reader that a running test
-// starts never sees part of it, and makes containers/image read it again; c.mu is held.
+// starts never sees part of it, and makes containers/image read it again; c.mu is held. It has containers/image
+// read the new file first, staged, alone, so that one it rejects never replaces the one that tests running at once
+// read: as the main file, with an empty drop-in folder, which also leaves out the override.
 func (c *registriesConf) write() error {
 	text := c.base
 	for _, prefix := range slices.Sorted(maps.Keys(c.entries)) {
@@ -194,6 +202,11 @@ func (c *registriesConf) write() error {
 	tmp := c.path + ".new"
 	if err := os.WriteFile(tmp, text, 0o644); err != nil {
 		return err
+	}
+	sysregistriesv2.InvalidateCache() // which caches the staged file by its path, the same each time
+	staged := &types.SystemContext{SystemRegistriesConfPath: tmp, SystemRegistriesConfDirPath: c.noDirs}
+	if _, err := sysregistriesv2.GetRegistries(staged); err != nil {
+		return errors.Join(err, os.Remove(tmp))
 	}
 	if err := os.Rename(tmp, c.path); err != nil {
 		return err

@@ -1,6 +1,7 @@
 package testenv
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -267,6 +268,21 @@ func TestSharedRegistriesConf(t *testing.T) {
 	})
 	if insecure(t, "one:5000") {
 		t.Error("one:5000 is insecure still once its test ended")
+	}
+
+	// A table that containers/image rejects never replaces the file that tests running at once read.
+	before, err := os.ReadFile(shared)
+	Must(t, err)
+	c.mu.Lock()
+	c.entries["bad.example"] = []registryEntry{{t: t, table: map[string]any{"prefix": "bad.example"}}}
+	err = c.write()
+	delete(c.entries, "bad.example")
+	c.mu.Unlock()
+	if err == nil {
+		t.Error("a table without a location, for a prefix that isn't a wildcard, was written")
+	}
+	if after, readErr := os.ReadFile(shared); readErr != nil || !bytes.Equal(after, before) {
+		t.Errorf("the binary's file changed for a rejected table: %v\n%s", readErr, after)
 	}
 	if got := os.Getenv(overrideEnv); got != shared {
 		t.Errorf("%s = %q after the tests, want it unchanged, %q", overrideEnv, got, shared)
