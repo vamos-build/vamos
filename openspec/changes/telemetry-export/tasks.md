@@ -2,7 +2,7 @@
 
 ## 1. Dependencies and early risks
 
-- [ ] 1.1 Add the OpenTelemetry SDK and metric SDK, `contrib/exporters/autoexport`, the OTLP trace and metric exporters,
+- [x] 1.1 Add the OpenTelemetry SDK and metric SDK, the OTLP trace and metric exporters, the console exporters,
   the Prometheus exporter and `contrib/instrumentation/runtime`, at releases at least two weeks old and matching the
   indirect `otel` v1.46.0 line where possible. Run `go mod tidy`, record the release binary's size before and after in
   the commit message, and verify that `scripts/check` passes and `govulncheck` reports nothing reachable
@@ -22,41 +22,41 @@
 
 ## 2. The telemetry package: configuration, sampling, IDs and conversion
 
-- [ ] 2.1 Implement `telemetry.Setup(role, getenv)`: the unset-means-none defaults, `OTEL_SDK_DISABLED`, the validation
-  of `OTEL_TRACES_EXPORTER` and `OTEL_METRICS_EXPORTER` against each role's list (a worker refuses `prometheus` and
-  warns about `OTEL_TRACES_EXPORTER`), the resource attributes, and the returned shutdown that flushes within 10
-  seconds. Verify with a table test of environments and the errors each gives, each naming the variable, its value and
-  what it takes
-- [ ] 2.2 Implement sampler parsing of `OTEL_TRACES_SAMPLER` and `OTEL_TRACES_SAMPLER_ARG` (`always_on`, `always_off`,
+- [x] 2.1 Implement `telemetry.Setup(Config{Role, Getenv, ...})`: the unset-means-none defaults, `OTEL_SDK_DISABLED`,
+  the validation of `OTEL_TRACES_EXPORTER` and `OTEL_METRICS_EXPORTER` against each role's list (a worker refuses
+  `prometheus` and warns about `OTEL_TRACES_EXPORTER`), the resource attributes, and the returned shutdown that flushes
+  within 10 seconds. Verify with a table test of environments and the errors each gives, each naming the variable, its
+  value and what it takes
+- [x] 2.2 Implement sampler parsing of `OTEL_TRACES_SAMPLER` and `OTEL_TRACES_SAMPLER_ARG` (`always_on`, `always_off`,
   `traceidratio`, and `parentbased_` with each), and the per-job decision from the trace ID and outer parent. Verify with
   a table test that includes ratios 0, 0.5 and 1, an unknown sampler, a ratio outside [0, 1], and that the same job
   decides the same way twice
-- [ ] 2.3 Implement the ID derivations for traces, jobs, attempts and spans, with the zero-ID guard and the parent
+- [x] 2.3 Implement the ID derivations for traces, jobs, attempts and spans, with the zero-ID guard and the parent
   rules: a job's top-level spans under the job span, an attempt's top-level spans under the attempt span, and the
   attempt span under the starter's target. Verify with tests that IDs are stable across calls, differ across instances
   and jobs, and take the outer trace ID when there is one
-- [ ] 2.4 Implement `Bridge.Job`, which returns the job's context carrying `tracing.Exported`, and the conversion of a
-  snapshot: names, times, instants as zero-length spans, the `error` argument as an `Error` status, the attributes table
-  in `design.md`, the workspace on every span, and no spans at all for a dropped trace. Verify with tests against
+- [x] 2.4 Implement `Bridge.StartJob`, which returns the job's context carrying `tracing.Exported`, and the conversion
+  of a snapshot: names, times, instants as zero-length spans, the `error` argument as an `Error` status, the attributes
+  table in `design.md`, the workspace on every span, and no spans at all for a dropped trace. Verify with tests against
   `tracetest.InMemoryExporter`
-- [ ] 2.5 Implement links: joins through the attempt span's `tracing.Exported`, and arrows through the bounded `Produces`
-  index of 65,536 entries, with producers in the same snapshot indexed first and producers of dropped traces never
-  indexed. Verify with tests for a join, an arrow within a snapshot, one across snapshots, one whose producer is
+- [x] 2.5 Implement links: joins through the attempt span's `tracing.Exported`, and arrows through the bounded
+  `Produces` index of 65,536 entries, with producers in the same snapshot indexed first and producers of dropped traces
+  never indexed. Verify with tests for a join, an arrow within a snapshot, one across snapshots, one whose producer is
   unknown, and the index's eviction
-- [ ] 2.6 Add `BenchmarkConvertAttempt`, which converts an attempt trace at `tracing.MaxTraceSize` with export on and
+- [x] 2.6 Add `BenchmarkConvertAttempt`, which converts an attempt trace at `tracing.MaxTraceSize` with export on and
   sampled, reporting allocations. Verify that it runs under `go test -bench ConvertAttempt ./internal/telemetry`, and
   note the result in the commit
-- [ ] 2.7 Serve the Prometheus exporter on its own `http.Server` at `/metrics`, listening during `Setup` so that a port
+- [x] 2.7 Serve the Prometheus exporter on its own `http.Server` at `/metrics`, listening during `Setup` so that a port
   in use fails it, with OpenMetrics negotiation. Install the rate-limited `otel.SetErrorHandler`. Verify with tests: a
   scrape answers, a port in use fails naming the address, and a repeated error is logged once a minute with a count
   of those suppressed
-- [ ] 2.8 Write `internal/telemetry/doc.go`'s invariants, lifecycle and changes sections, and verify with `go doc
+- [x] 2.8 Write `internal/telemetry/doc.go`'s invariants, lifecycle and changes sections, and verify with `go doc
   ./internal/telemetry` that they render
 
 ## 3. Hooks in tracing, sched and api
 
-- [ ] 3.1 Add `tracing.Exported`, `WithExported` and `ExportedOf`, and the `role` argument's constants (`target`, `wait`,
-  `try`), to `tracing` without imports. Update `internal/tracing/doc.go`, and verify with unit tests and
+- [x] 3.1 Add `tracing.Exported`, `WithExported` and `ExportedOf`, and the `role` argument's constants (`target`,
+  `wait`, `try`), to `tracing` without imports. Update `internal/tracing/doc.go`, and verify with unit tests and
   `TestImportRules`
 - [ ] 3.2 Add `sched.SpanSink` and call it from `Sharing.attempt` (`AttemptStarted` as the attempt starts, `Attempt`
   beside `saveTrace`) and from `RunJob` (`Job` beside `JobTrace.Save`) with the same trimmed spans that are stored. Add
@@ -81,17 +81,18 @@
   every job of the command. Verify with `cli` tests for valid, malformed, all-zero and empty values, and for a push
   sending them on both its jobs
 - [ ] 4.3 Have the coordinator check a request's `Parent` again, log and ignore one it can't parse, and pass it to
-  `Bridge.Job`. Verify with a `coord` test of a malformed parent from a raw request
+  `Bridge.StartJob`. Verify with a `coord` test of a malformed parent from a raw request
 - [ ] 4.4 Document `TRACEPARENT` in the CLI reference's environment section and in the user docs on building on a
   coordinator, and verify the docs' link check passes
 
 ## 5. Exporting a coordinator's traces
 
-- [ ] 5.1 Add `coord.Config.Telemetry` (a bridge, or nil for none), wrap each job's context with `Bridge.Job` in
-  `Coordinator.traced`, give `Sharing` the bridge as its `SpanSink`, and have `inv.coordinator` call `telemetry.Setup`
-  and shut it down after the API stops, but not with `--local`. Verify with `coord/trace_test.go` cases with fake
-  workers against `tracetest.InMemoryExporter`: one trace per job, worker spans within it, a shared attempt exported
-  once with the joiner's link, and a resumed job in the same trace after a restart
+- [ ] 5.1 Add `coord.Config.Telemetry` (a bridge, or nil for none), wrap each job's context with `Bridge.StartJob` in
+  `Coordinator.traced`, give `Sharing` the bridge as its `SpanSink`, and have `inv.coordinator` call
+  `telemetry.HandleErrors(inv.warn)` and `telemetry.Setup`, and shut it down after the API stops, but not with
+  `--local`. Verify with `coord/trace_test.go` cases with fake workers against `tracetest.InMemoryExporter`: one trace
+  per job, worker spans within it, a shared attempt exported once with the joiner's link, and a resumed job in the same
+  trace after a restart
 - [ ] 5.2 Add `internal/features/steps_telemetry_test.go`: `GivenAnOTLPCollector`, an in-process OTLP/HTTP receiver that
   decodes `go.opentelemetry.io/proto/otlp`, a coordinator option for its environment, passed to `telemetry.Setup` as
   its `getenv` rather than set in the process's, so that rules using it can run in parallel, `GivenTRACEPARENT`, which
@@ -147,9 +148,9 @@
   with a `worker_test.go` case whose step burns CPU, its worker started with `testenv.CgroupRoot(t)` as its
   `CgroupRoot`, and a `coord` test that an older report without usage leaves them
   out
-- [ ] 7.2 Have `inv.worker` call `telemetry.Setup` for the worker role, and count fenced attempts, event batches the
-  coordinator refused and cgroups that `kill` couldn't empty. Verify with `worker` tests on a `ManualReader`, and the
-  worker scenarios of `metrics_test.go`
+- [ ] 7.2 Have `inv.worker` call `telemetry.HandleErrors(inv.warn)` and `telemetry.Setup` for the worker role, and count
+  fenced attempts, event batches the coordinator refused and cgroups that `kill` couldn't empty. Verify with `worker`
+  tests on a `ManualReader`, and the worker scenarios of `metrics_test.go`
 - [ ] 7.3 Update `internal/worker/doc.go` and `docs/user/reference/cli/worker.md` with the usage report and the
   variables a worker reads, and verify `go doc ./internal/worker` and the link check
 

@@ -43,6 +43,8 @@ starts. `OTEL_TRACES_EXPORTER` SHALL choose the exporter, `otlp`, `console` or `
 
 A build SHALL end as it would without export, whether the exporter's endpoint is reachable or not. A coordinator SHALL
 report an export that fails in its log, and no client SHALL be told of it.
+A coordinator whose exporter falls behind MAY cut a trace short, sending its spans up to a point and none after,
+and SHALL then say so in its log.
 
 #### Scenario: An unreachable collector fails nothing
 
@@ -107,7 +109,9 @@ that a job resumed after a restart that kept the coordinator's state goes on in 
 
 An attempt's spans SHALL be exported once, in the trace of the job that started it, under one span for the attempt,
 even if that job left the attempt running. Each job that joined the attempt SHALL link its target's span to that
-attempt span.
+attempt span, unless the joiner's spans are exported before the attempt's are handed to export, as a joiner cancelled
+while the attempt runs on may be, or after the coordinator has forgotten the attempt, as it remembers a bounded number;
+such a joiner MAY lack the link.
 
 #### Scenario: A joined attempt is linked, not repeated
 
@@ -121,8 +125,10 @@ attempt span.
 ### Requirement: Arrows become span links
 
 Where a stored trace draws an arrow from the span that made something to a span that used it, the exported span that
-used it SHALL link to the exported span that made it, in the same job's trace or in a job's still remembered by the
-coordinator that exports it.
+used it SHALL link to the exported span that made it, if that span was exported before it or in the same snapshot,
+in the same job's trace or in a job's still remembered by the coordinator that exports it.
+A span that used what a cache hit of its own job made, exported with the job's snapshot after the attempt that used it,
+MAY have no link.
 
 #### Scenario: A layer's start links to the commit of its base
 

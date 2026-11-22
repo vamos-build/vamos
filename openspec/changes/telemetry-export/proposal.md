@@ -54,8 +54,8 @@ None.
 
 ## Impact
 
-- New direct dependencies: the OpenTelemetry SDK and metric SDK, OTLP and Prometheus exporters,
-  `contrib/exporters/autoexport`, and runtime instrumentation; `otelhttp` and gRPC are already compiled in.
+- New direct dependencies: the OpenTelemetry SDK and metric SDK, OTLP, console and Prometheus exporters,
+  and runtime instrumentation; `otelhttp` and gRPC are already compiled in.
 - A new package that bridges `internal/tracing` spans to OpenTelemetry, kept out of `internal/tracing`, which still
   imports nothing; `TestImportRules` places it.
 - `internal/coord`: gauges observed from its state; the bridge applied to spans it receives.

@@ -2,6 +2,7 @@ package telemetry
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/binary"
 	"math/rand/v2"
 	"sync/atomic"
@@ -88,4 +89,58 @@ func randomSpanID() trace.SpanID {
 			return sid
 		}
 	}
+}
+
+// The IDs a job's export derives, each the first bytes of a SHA-256 of a label and what it names,
+// so that a job resumed after a restart that kept the coordinator's state is exported under the same trace,
+// and a joiner finds an attempt's span without asking its starter.
+
+// traceIDOf returns the trace ID of the job id of the coordinator instance, when it joined no outer trace.
+func traceIDOf(instance, job string) trace.TraceID {
+	var tid trace.TraceID
+	sum := hashOf("vamos/trace", instance, job)
+	copy(tid[:], sum[:])
+	if !tid.IsValid() {
+		tid[len(tid)-1] ^= 1
+	}
+	return tid
+}
+
+// jobSpanIDOf returns the ID of the job's own span.
+func jobSpanIDOf(instance, job string) trace.SpanID {
+	return spanIDFrom(hashOf("vamos/job", instance, job))
+}
+
+// attemptSpanIDOf returns the ID of an attempt's span; attempt IDs are 128 random bits, unique across instances.
+func attemptSpanIDOf(attempt string) trace.SpanID {
+	return spanIDFrom(hashOf("vamos/attempt", attempt))
+}
+
+// spanIDOf returns the ID of the vamos span whose ID is id, recorded by the job, or by an attempt the job started.
+func spanIDOf(instance, job, id string) trace.SpanID {
+	return spanIDFrom(hashOf("vamos/span", instance, job, id))
+}
+
+// hashOf returns the SHA-256 of label and parts, each after a NUL, which none of them holds.
+func hashOf(label string, parts ...string) [sha256.Size]byte {
+	h := sha256.New()
+	h.Write([]byte(label))
+	for _, p := range parts {
+		h.Write([]byte{0})
+		h.Write([]byte(p))
+	}
+	var sum [sha256.Size]byte
+	h.Sum(sum[:0])
+	return sum
+}
+
+// spanIDFrom returns the span ID that sum begins with, with its last bit flipped if it would be zero,
+// which OpenTelemetry takes as no ID, so that a derived ID is always valid and the same every time.
+func spanIDFrom(sum [sha256.Size]byte) trace.SpanID {
+	var sid trace.SpanID
+	copy(sid[:], sum[:])
+	if !sid.IsValid() {
+		sid[len(sid)-1] ^= 1
+	}
+	return sid
 }

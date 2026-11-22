@@ -22,7 +22,7 @@ a later `start` uses, and the client's load produces trees, which steps use. The
 argument on the current span. Journal records hold each job's request whole, so a field added to a request survives a
 restart. The coordinator's instance survives a restart that keeps `Config.State`. `remote.Server.Middleware` is the seam
 that tests already use to inject drops. OpenTelemetry's API, metric API and `otelhttp` v0.71.0 are indirect
-dependencies, through buildah. The SDK, the exporters and `autoexport` are not.
+dependencies, through buildah. The SDK and the exporters are not.
 
 ## Goals / Non-Goals
 
@@ -72,6 +72,25 @@ costs nothing. `saveTrace` trims an attempt's spans once, to `Sharing`'s limit (
 one `LimitTraces` sets in tests), and passes that slice both to the encoder, which then has nothing more to trim, and to
 the sink; `RunJob` does the same with the job's. So an exported trace drops what the stored one dropped.
 
+The bridge doesn't convert a snapshot as the sink is called: it queues it, and converts the queue in order on a goroutine
+of its own, so that a large attempt's conversion, some 85 ms for one of `tracing.MaxTraceSize`, isn't on the build's
+path, and the sink's caller doesn't change the slice afterwards. The SDK's batch processor, whose queue holds its
+default 2,048 spans, so that what it holds is bounded, blocks that goroutine when it is full, rather than drop a span,
+so a snapshot is handed over whole, though the SDK sends it in batches, of which one may fail while another arrives.
+What the bridge drops, when more than sixteen traces of `tracing.MaxTraceSize` wait, by an estimate of their size, as
+they would for a collector that has fallen behind, is the next snapshot whole, and every later snapshot of its job,
+whose trace is then cut short; it reports the drops through the error handler, once for each burst of them, from a
+goroutine of its own. A job is
+cut alone, not the outer trace it may share with other jobs, and a span that joined an attempt whose snapshot was
+dropped links to nothing. Every exporter of traces shares the converter, so one whose collector stops answering holds up the others.
+Shutdown converts what is queued, then stops every batch processor and metric reader at once, itself, since the
+providers stop theirs one after another and skip the rest once their context ends, and then the providers; each
+step may use what the steps before left of the 10 seconds, but the least share each later step is left: half for the
+processors and readers, so that a slow bridge leaves them time to send, and a second for the providers. A step that
+runs out of time thus leaves the next a live context. Once the bridge's step is over, done or not, the snapshots
+that still wait are dropped and reported, and the converter converts no more, but hands over the one it was
+converting, in part if its step ran out of time.
+
 *Alternative:* a recorder callback that exports each span as it ends. Rejected: recorders keep spans for storage, so a
 second path would have to agree with `Trim`, and a worker's spans arrive relayed in batches anyway. See Risks for the
 delay this costs.
@@ -91,8 +110,8 @@ func WithExported(ctx context.Context, e Exported) context.Context
 func ExportedOf(ctx context.Context) Exported
 ```
 
-When a job starts, `Coordinator.traced` asks the bridge for the job's export context, `telemetry.Bridge.Job(ctx,
-JobInfo{Instance, ID, Kind, Workspace, Parent})`. That context carries `tracing.Exported` and the bridge's own job
+When a job starts, `Coordinator.traced` asks the bridge for the job's export context, `telemetry.Bridge.StartJob(ctx,
+JobInfo{ID, Kind, Workspace, Parent, State})`, named apart from `SpanSink.Job`, which the bridge also has. That context carries `tracing.Exported` and the bridge's own job
 record, which holds the sampling decision, the start time and the workspace. Every attempt the job starts inherits it,
 so `Attempt` exports into the starter's trace even after the starter has left.
 
@@ -129,7 +148,7 @@ would need the starter's map.
 The bridge uses a `TracerProvider` built with an `IDGenerator` that reads the wanted IDs from the context it is handed,
 with the configured span processor and exporter. Each vamos span becomes `tracer.Start(ctx, name,
 WithTimestamp(start), WithLinks(...), WithAttributes(...))` and `End(WithTimestamp(end))`, under a context that holds the
-parent as a remote `SpanContext` with the job's sampled flag. The provider's sampler is `ParentBased(AlwaysOn)`, so the
+parent as a `SpanContext` with the job's sampled flag, remote only for the outer span a job joined. The provider's sampler is `ParentBased(AlwaysOn)`, so the
 flag set on that parent decides. The job's decision is made once (below). An instant becomes a zero-length span. An
 `error` argument sets the span's status to `Error` with the argument as its description.
 
@@ -152,7 +171,8 @@ made at all. Their metrics are still counted, without exemplars.
 
 - A join: `sched.AttemptTrace` gains `Exported tracing.Exported`, the attempt span's trace and span ID, which `Sharing`
   takes from the bridge when the attempt starts, through a `SpanSink.AttemptStarted(ctx, id) tracing.Exported` method.
-  A joiner's target span, as it is converted, links to it. The bridge finds the target span through the manifest entry,
+  A joiner's target span, as it is converted, links to it: a span whose `role` is `target`, since others, such as a
+  cache write's, name the attempt they are part of. The bridge finds the target span through the manifest entry,
   whose `Attempt` the `Traced` output now records on the target span as an `attempt` argument.
 - Arrows: the bridge keeps a bounded LRU of 65,536 `Produces` tokens to the exported span that produced them. Within one
   snapshot it indexes producers first. A span whose `Uses` token is in the index links to that span, whichever trace it
@@ -170,30 +190,65 @@ made at all. Their metrics are still counted, without exemplars.
 
 The resource is `service.name` `vamos-coordinator` or `vamos-worker` unless `OTEL_SERVICE_NAME` says otherwise,
 `service.version`, and `service.instance.id`: the coordinator's instance, or the worker's host name. `OTEL_RESOURCE_ATTRIBUTES`
-adds to it. The SDK's attribute limits, which `OTEL_ATTRIBUTE_*_LIMIT` set, bound what a span carries.
+adds to it. The bridge bounds what an exported span holds itself, since the SDK's limits count runes rather than bytes,
+keep alive what they cut, and bound neither a list's length nor a span's keys or status: a span's name and status, each
+key and string, each list's length, and its attributes in all, past which it keeps only `vamos.truncated`, so that a
+span holds some 20 KiB and the 2,048 spans an exporter's queue holds some 40 MiB. The attributes the table names come
+first, so that a span over its budget keeps them. Every string is made valid UTF-8, since OTLP's protobuf encoding
+refuses a whole request for one that isn't, as a file's name may not be. A request sends 128 spans unless
+`OTEL_BSP_MAX_EXPORT_BATCH_SIZE` says otherwise, rather than the SDK's 512, which could pass the 4 MiB a gRPC receiver
+takes by default.
 
 ### Configuration and its defaults
 
-`telemetry.Setup(role, getenv)` builds the providers, called by `inv.coordinator` and `inv.worker` before they serve.
-Behind it, `autoexport` builds the exporters, so `OTEL_EXPORTER_OTLP_*` (protocol, headers, timeouts, TLS),
-`OTEL_BSP_*`, `OTEL_METRIC_EXPORT_*` and `OTEL_EXPORTER_PROMETHEUS_HOST`/`PORT` mean what the specification says.
-Before calling it, `Setup` settles two things itself:
+`telemetry.Setup(Config{Role, Instance, Version, Getenv, Warn})` builds the providers,
+called by `inv.coordinator` and `inv.worker` before they serve.
+It reads the variables through `Getenv`, so that a test can give one coordinator of many in a process its own,
+and builds the exporters itself, OTLP over HTTP or gRPC, console and Prometheus,
+passing what it read as the exporters' and processors' options:
+the exporters, the sampler, the OTLP endpoints, protocols, headers and timeouts, `OTEL_BSP_*`,
+`OTEL_METRIC_EXPORT_*`, `OTEL_EXPORTER_PROMETHEUS_HOST`/`PORT`, `OTEL_SERVICE_NAME` and `OTEL_RESOURCE_ATTRIBUTES`,
+each meaning what the specification says, and each passed, its default if it is unset,
+so that the exporters don't take a setting `Getenv` left unset, such as another collector's headers, from the
+process's environment. An unset endpoint is the specification's plain `http://localhost`, unless
+`OTEL_EXPORTER_OTLP_[SIGNAL_]INSECURE=false` or a certificate variable asks for TLS, and is given whole, so that
+neither the SDK's own default, which is TLS, nor an ambient endpoint's scheme decides the transport's security. A
+certificate the exporters load, a CA or a client certificate with its key, means TLS, as the gRPC exporter uses one
+whatever the scheme says and the HTTP one refuses one for plaintext, so an `http` endpoint beside one fails `Setup`,
+naming both, as `INSECURE=true` does where no endpoint is set; an endpoint's own scheme otherwise decides.
+Booleans take only `true` or `false`, in any case, rather than taking any other value as false, since `INSECURE` chooses
+the transport's security. An endpoint may not hold credentials, a query or an escaped path, which the exporters would
+drop, decode or trim, nor, over gRPC, a path, which it drops; headers may not repeat a name in another case. A
+certificate or client key pair named must load, as the exporters would otherwise only log it and go on with the system's
+roots or without the client's identity; half a pair fails too, though the exporters would skip it for the other
+prefix's whole one, as it is more likely a mistake than meant. The provider's span limits are given, not read from `OTEL_SPAN_*_LIMIT`, since
+the bridge bounds a span itself and lower limits would drop the attributes it keeps first, or the links. The HTTP trace exporter is given protobuf, which
+it would otherwise read from the process's `OTEL_EXPORTER_OTLP_PROTOCOL`. Enumerated values are read in any case, as the specification asks.
+The exporters read the rest, such as TLS certificates and compression, from the process's environment,
+which outside a test is the one `Getenv` reads.
+`Setup` settles two things itself:
 
 - **Nothing configured exports nothing.** An unset `OTEL_TRACES_EXPORTER` or `OTEL_METRICS_EXPORTER` means `otlp` if
   `OTEL_EXPORTER_OTLP_ENDPOINT` or that signal's own endpoint variable is set, and `none` otherwise. The SDK's own
   default, `otlp` to `localhost:4318`, would make every coordinator try to send to a collector nobody set up.
   `OTEL_SDK_DISABLED=true` means `none` for both.
-- **Mistakes fail the start.** Exporter names are checked against the lists the specs give, before `autoexport`, which
-  would otherwise fall back with only a log line. The error names the variable, its value and the values taken. For a
+- **Mistakes fail the start.** Exporter names are checked against the lists the specs give,
+  where the SDK's own reading of the environment would fall back with only a log line. The error names the variable, its value and the values taken. For a
   worker, `prometheus` is refused and `OTEL_TRACES_EXPORTER` is warned about and ignored.
 
 The Prometheus exporter is served by the bridge on its own `http.Server` at `/metrics`, on
 `OTEL_EXPORTER_PROMETHEUS_HOST:PORT`, `localhost:9464` by default, listening before the coordinator serves its API, so
 that a port in use fails the start. It serves OpenMetrics when asked, which carries exemplars.
 
-Export errors go to `otel.SetErrorHandler`, which logs them through `inv.warn`, at most once a minute for each distinct
-message, with a count of those suppressed. On shutdown, `Setup`'s returned `shutdown` flushes and closes the providers,
-bounded by 10 seconds. It runs after the API stops, so the last jobs' spans are in it.
+Export errors go to OpenTelemetry's error handler, which is the process's, not a `Setup`'s:
+`inv.coordinator` and `inv.worker` install it once with `telemetry.HandleErrors(inv.warn)`,
+so that coordinators that tests run in one process don't take over each other's warnings.
+It logs each distinct message at most once a minute, with a count of those suppressed, remembering each by a digest
+and logging at most 4 KiB of it, as an exporter's error may hold a collector's whole response.
+A `Setup` that fails stops what it had started.
+On shutdown, `Telemetry.Shutdown` flushes and closes the providers, and returns after 10 seconds whether or not they
+have finished, as an exporter whose collector doesn't answer may not.
+It runs after the API stops, so the last jobs' spans are in it.
 
 ### Metrics are derived from spans, gauges from state, and counters where things happen
 
@@ -301,14 +356,30 @@ With `otlp.endpoint` set, both roles get it. With Prometheus enabled, the coordi
   confined to `telemetry`.
 - [Hashing every span's ID costs CPU on a coordinator] → One SHA-256 of under 100 bytes per span, at export only.
   Sampled-out traces make no spans. Task 2.6's benchmark measures conversion of a large attempt trace.
+- [A joiner's link is made when its target's span is converted, so an attempt whose snapshot is dropped later leaves
+  the link pointing at a span that never arrives] → Links are a convenience; a link is made only to an attempt whose
+  snapshot was queued, so the sched hook reports an attempt before its joiners are released; a joiner cancelled while
+the attempt runs on, or one exported once the bounded index has forgotten the attempt, lacks the link. A snapshot abandoned at
+  shutdown can still leave one dangling.
 - [The arrow index misses producers that were evicted or exported after their user] → Links are a convenience. A user
-  exported before its producer, which can happen only across jobs, gets no link.
+  exported before its producer gets no link. That happens across jobs, and within one too: a cache hit's span, which
+  produces the image a later attempt of the same job starts from, is in the job's snapshot, exported when the job
+  ends, after that attempt's.
+- [A collector that falls behind fills the bridge's queue, and a trace is cut short: the snapshots sent before the
+  first one dropped, its attempts' without its job's] → Each snapshot is sent whole or not at all, the rest of a
+  trace that lost one is dropped too, and the drops are reported. The queue holds sixteen traces of
+  `tracing.MaxTraceSize`.
+- [An attempt's span names its starter's target as its parent, which the starter's trimmed snapshot may have dropped,
+  since attempts' spans aren't in it] → The attempt's spans are then a subtree of their own in the backend, whose
+  parent is missing, with no mark that the trace is incomplete. The stored trace refers to the target the same way,
+  and marks its truncation. Trimming drops the latest-started spans, so it takes a job of many targets for it to drop
+  one that started an attempt.
 - [`role` arguments and the new `wait` and `try` spans change what stored traces show] → They add spans and arguments
   and change none. The trace feature's scenarios check nesting and names they already list. The new spans nest within
   the attempt's.
 - [Gauges' callbacks take the pool's and jobs' locks on every collection] → Once per export interval or scrape, reading
   counts that are kept as maps by platform, not walked.
-- [`autoexport` pulls in gRPC and the Prometheus client] → gRPC is already compiled in through buildah's dependencies.
+- [The exporters pull in gRPC and the Prometheus client] → gRPC is already compiled in through buildah's dependencies.
   The Prometheus client and `prometheus/common` are new. Binary size is checked in task 1.1.
 - [A misconfigured collector floods the coordinator's log] → The error handler logs each distinct message at most once
   a minute.

@@ -166,3 +166,57 @@ func TestChosenIDsAreGivenOnce(t *testing.T) {
 			c.SpanContext.TraceID(), c.SpanContext.SpanID(), c.Parent.SpanID(), ownTrace, chosenSpan)
 	}
 }
+
+// TestDerivedIDs checks that the IDs a job's export derives are those design.md's hashes give, so that they are the
+// same each time they are derived, in any process or release, as a resumed job's must be,
+// that they differ across instances, jobs, attempts and spans, and that none is zero.
+func TestDerivedIDs(t *testing.T) {
+	for _, c := range []struct{ name, got, want string }{
+		{name: "the trace", got: traceIDOf("i", "job-1").String(), want: "5abf51f38d408ffc105f18970efc990a"},
+		{name: "the job's span", got: jobSpanIDOf("i", "job-1").String(), want: "1a775e1f4f0ef4be"},
+		{name: "the attempt's span", got: attemptSpanIDOf("a").String(), want: "e144f3fda09fdd9d"},
+		{name: "a span", got: spanIDOf("i", "job-1", "s-1").String(), want: "d6559762fb6ab6ea"},
+	} {
+		if c.got != c.want {
+			t.Errorf("%s's ID = %s, want %s", c.name, c.got, c.want)
+		}
+	}
+	traces := map[trace.TraceID]string{}
+	for _, c := range []struct{ name, instance, job string }{
+		{name: "the job", instance: "i", job: "job-1"},
+		{name: "another job", instance: "i", job: "job-2"},
+		{name: "the job of another instance", instance: "j", job: "job-1"},
+		{name: "a job whose instance and ID run together alike", instance: "ij", job: "ob-1"},
+	} {
+		tid := traceIDOf(c.instance, c.job)
+		if other, ok := traces[tid]; ok || !tid.IsValid() {
+			t.Errorf("%s has trace ID %s, as %s does, or it is invalid", c.name, tid, other)
+		}
+		traces[tid] = c.name
+	}
+	spans := map[trace.SpanID]string{}
+	for name, sid := range map[string]trace.SpanID{
+		"the job's span":                     jobSpanIDOf("i", "job-1"),
+		"another job's span":                 jobSpanIDOf("i", "job-2"),
+		"an attempt's span":                  attemptSpanIDOf("attempt-1"),
+		"another attempt's span":             attemptSpanIDOf("attempt-2"),
+		"a span of the job":                  spanIDOf("i", "job-1", "s-1"),
+		"another span of the job":            spanIDOf("i", "job-1", "s-2"),
+		"the same span of another job":       spanIDOf("i", "job-2", "s-1"),
+		"the same span of another instance":  spanIDOf("j", "job-1", "s-1"),
+		"a span named like the job's own ID": spanIDOf("i", "job-1", ""),
+	} {
+		if other, ok := spans[sid]; ok || !sid.IsValid() {
+			t.Errorf("%s has span ID %s, as %s does, or it is invalid", name, sid, other)
+		}
+		spans[sid] = name
+	}
+}
+
+// TestDerivedIDsAreNeverZero checks that a hash that begins with zeros gives a valid ID, the same every time.
+func TestDerivedIDsAreNeverZero(t *testing.T) {
+	var zero [32]byte
+	if sid := spanIDFrom(zero); !sid.IsValid() || sid != spanIDFrom(zero) {
+		t.Errorf("spanIDFrom zeros = %s, want a valid ID, the same every time", sid)
+	}
+}
