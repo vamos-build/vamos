@@ -4,12 +4,14 @@
 
 See proposal.md for motivation, and the `trace-export` and `operational-metrics` specs for required behavior.
 
-`persistent-traces` (32 of 35 tasks done) records every job and attempt, always. On a coordinator, spans become
+`persistent-traces` (all tasks done, awaiting archive) records every job and attempt, always. On a coordinator, spans become
 complete documents at two points, both in `sched`, which the local executor shares:
 
 - `Sharing.attempt` snapshots the attempt's recorder when its runner returns and stores it with `saveTrace`. On a
   coordinator the runner is the pool, which relays the worker's spans, shifted onto the coordinator's clock, into the
-  attempt's context (`tracing.Relay`), so this snapshot holds the worker's spans, failed tries included.
+  attempt's context (`tracing.Relay`), so this snapshot holds the worker's spans, failed tries included. Each batch of
+  events carries the offset the worker estimated before the attempt started, the same for the whole attempt, so the
+  relayed spans keep the order they ran in, and so do the spans exported from them.
 - `sched.RunJob`, through `Coordinator.traced`, snapshots the job's recorder in `JobTrace.Save` before the job's
   outcome is returned.
 
@@ -66,8 +68,9 @@ type SpanSink interface {
 
 `Sharing` takes it through `NewSharing`'s options and calls `Attempt` beside `saveTrace`, whether or not the store
 succeeded. `RunJob` takes it as an argument and calls `Job` beside `JobTrace.Save`. A nil sink, the local executor's,
-costs nothing. The calls pass the same slices that are stored, after the same `Trim`, so an exported trace drops what
-the stored one dropped.
+costs nothing. `saveTrace` trims an attempt's spans once, to `Sharing`'s limit (`tracing.MaxTraceSize`, or the smaller
+one `LimitTraces` sets in tests), and passes that slice both to the encoder, which then has nothing more to trim, and to
+the sink; `RunJob` does the same with the job's. So an exported trace drops what the stored one dropped.
 
 *Alternative:* a recorder callback that exports each span as it ends. Rejected: recorders keep spans for storage, so a
 second path would have to agree with `Trim`, and a worker's spans arrive relayed in batches anyway. See Risks for the

@@ -147,7 +147,7 @@ A coordinator SHALL count `vamos.attempts.retries`, `vamos.leases.expired`, `vam
 #### Scenario: A lost worker's attempt is counted as retried
 
 - **GIVEN** a coordinator with two workers, serving Prometheus metrics
-- **AND** a project whose layer `app` runs a step that sleeps
+- **AND** a project whose layer `app` runs a step that is still running when its worker is stopped
 - **WHEN** I build `app` on the coordinator, and the worker running it is stopped without warning, and the build
   succeeds on the other
 - **THEN** `vamos_leases_expired_total` is 1 and `vamos_attempts_retries_total` is 1

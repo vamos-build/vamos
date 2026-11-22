@@ -59,8 +59,8 @@
   `TestImportRules`
 - [ ] 3.2 Add `sched.SpanSink` and call it from `Sharing.attempt` (`AttemptStarted` as the attempt starts, `Attempt`
   beside `saveTrace`) and from `RunJob` (`Job` beside `JobTrace.Save`) with the same trimmed spans that are stored. Add
-  `AttemptTrace.Exported`. Verify with `sched` tests using a fake sink: its spans equal the stored document's, an
-  attempt whose starter left is still passed under the starter's context, and a joiner's `Traced` gets the attempt's
+  `AttemptTrace.Exported`. Verify with `sched` tests using a fake sink: its spans equal the stored document's, one cut
+  short by `LimitTraces` included, an attempt whose starter left is still passed under the starter's context, and a joiner's `Traced` gets the attempt's
   `Exported`
 - [ ] 3.3 Have the scheduler set `role` `target`, `kind`, `outcome`, `target` (`graph.Node.Target`), `attempt`, and
   `lost` with its reason, on layers', tasks' and pulls' spans. Verify with `scheduler_trace_test.go` cases for a hit, a
@@ -92,11 +92,16 @@
   workers against `tracetest.InMemoryExporter`: one trace per job, worker spans within it, a shared attempt exported
   once with the joiner's link, and a resumed job in the same trace after a restart
 - [ ] 5.2 Add `internal/features/steps_telemetry_test.go`: `GivenAnOTLPCollector`, an in-process OTLP/HTTP receiver that
-  decodes `go.opentelemetry.io/proto/otlp`, a coordinator option for its environment, `GivenTRACEPARENT`, and Then
-  steps for traces, spans, parents, links and attributes. List the file in `.agents/kb/testing.md`, and verify that it
+  decodes `go.opentelemetry.io/proto/otlp`, a coordinator option for its environment, passed to `telemetry.Setup` as
+  its `getenv` rather than set in the process's, so that rules using it can run in parallel, `GivenTRACEPARENT`, which
+  sets the process's environment through `GivenTheEnvironmentSets`, and Then steps for traces, spans, parents, links
+  and attributes. List the file in `.agents/kb/testing.md`, and verify that it
   compiles with `go vet ./internal/features`
 - [ ] 5.3 Add `internal/features/trace_export_test.go` with a rule for each `trace-export` requirement and a scenario for
-  each of its scenarios, with doc comments in the words of the reference pages. Verify with
+  each of its scenarios, with doc comments in the words of the reference pages. Rules call `parallelRule(t)`, but for
+  those that set the process's environment, as `GivenTRACEPARENT` does, or rely on a default port, the collector's
+  4318 or the scrape's 9464, which run alone. The joined attempt's scenario holds the step with `GivenABarrier` until
+  `GivenTheBarrierOpensOnceTheOtherClientIsJoined`, rather than sleeping. Verify with
   `go test ./internal/features -run TestTraceExport_` as root with buildah, and that the start-up mistakes' scenarios
   run under `-short`
 - [ ] 5.4 Write `docs/design/observability.md`: the bridge, the hook points, ID derivation, sampling, links, and why the
@@ -125,7 +130,8 @@
   composition and the bytes counted for puts and reads
 - [ ] 6.6 Add Prometheus scrape steps to `steps_telemetry_test.go`, plain and OpenMetrics, and
   `internal/features/metrics_test.go` with a rule for each coordinator requirement of `operational-metrics` and its
-  scenarios. Verify with `go test ./internal/features -run TestMetrics_`
+  scenarios, parallel or alone as in 5.3. The lost worker's scenario keeps its step running with `GivenABarrier`.
+  Verify with `go test ./internal/features -run TestMetrics_`
 - [ ] 6.7 Document every metric, its unit, labels and meaning in `docs/design/observability.md`, and the Prometheus
   variables in `coordinator.md`. Verify that the doc lists exactly the instruments a test scrape shows, with a Go test
   that compares the two
@@ -134,7 +140,8 @@
 
 - [ ] 7.1 Read `cpu.stat`'s `usage_usec` and `memory.peak` after an attempt's subprocess exits and before its cgroup is
   removed, send them in `AttemptReport.Usage`, and have the pool set `cpu` and `memory peak` on the try's span. Verify
-  with a `worker_test.go` case whose step burns CPU, and a `coord` test that an older report without usage leaves them
+  with a `worker_test.go` case whose step burns CPU, its worker started with `testenv.CgroupRoot(t)` as its
+  `CgroupRoot`, and a `coord` test that an older report without usage leaves them
   out
 - [ ] 7.2 Have `inv.worker` call `telemetry.Setup` for the worker role, and count fenced attempts, event batches the
   coordinator refused and cgroups that `kill` couldn't empty. Verify with `worker` tests on a `ManualReader`, and the
