@@ -233,6 +233,11 @@ func TestNaiveAndNativeDiffsMakeTheSameImage(t *testing.T) {
 	}
 	got, err := os.ReadFile(out)
 	must(t, err)
+	// A kernel without metacopy, before Linux 4.19, refuses it, and the driver then drops metacopy=on and diffs
+	// natively, so naive diffs can't be had there.
+	if strings.HasPrefix(string(got), "native diff true\n") {
+		testenv.Unavailable(t, "diffing a layer naively", errors.New("the overlay driver doesn't take metacopy here"))
+	}
 	if want := "native diff false\n" + nativeImage; string(got) != want {
 		t.Errorf("building with naive diffs saved\n%s\nwant, as with native diffs,\n%s", got, want)
 	}
