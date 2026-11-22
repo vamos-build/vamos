@@ -36,6 +36,7 @@ const theApp = `
 // TestSave_ArchiveNamesTheTaggedImage specifies that --tag records an image name in the archive,
 // and that without it, the archive has no image name.
 func TestSave_ArchiveNamesTheTaggedImage(t *testing.T) {
+	parallelRule(t)
 	t.Run("A tagged archive names its image", func(t *testing.T) {
 		w := newSaveWorld(t)
 		w.WhenISave("app", tagged("app:test"))
@@ -58,6 +59,7 @@ func TestSave_ArchiveNamesTheTaggedImage(t *testing.T) {
 // TestSave_WritesAnArchive specifies that save writes an archive that docker load can import, at any path,
 // colons and all, even inside the project, whose globs never read the archive being written.
 func TestSave_WritesAnArchive(t *testing.T) {
+	parallelRule(t)
 	for _, example := range []struct {
 		name    string
 		options []option
@@ -106,6 +108,7 @@ func TestSave_WritesAnArchive(t *testing.T) {
 // TestSave_WriteIsADeprecatedName specifies that write is a deprecated earlier name for save
 // and still accepts the same arguments.
 func TestSave_WriteIsADeprecatedName(t *testing.T) {
+	parallelRule(t)
 	t.Run("write saves, and says it is deprecated", func(t *testing.T) {
 		w := newSaveWorld(t)
 		w.WhenIWrite("app")
@@ -118,6 +121,7 @@ func TestSave_WriteIsADeprecatedName(t *testing.T) {
 // TestSave_ExistingFileIsReplacedOnceTheImageIsComplete specifies that an existing output file is replaced
 // only after the new image is complete.
 func TestSave_ExistingFileIsReplacedOnceTheImageIsComplete(t *testing.T) {
+	parallelRule(t)
 	t.Run("An existing file is replaced, keeping its mode", func(t *testing.T) {
 		w := newSaveWorld(t)
 		w.GivenTheDestinationHolds(files{"app.tar": "an old image"})
@@ -142,6 +146,7 @@ func TestSave_ExistingFileIsReplacedOnceTheImageIsComplete(t *testing.T) {
 // TestSave_DestinationMustBeAFileInAFolder specifies that the output file's parent directory must already exist,
 // and that the output path must not be a directory.
 func TestSave_DestinationMustBeAFileInAFolder(t *testing.T) {
+	parallelRule(t)
 	for _, example := range []struct {
 		name    string
 		holds   files    // the files that the destination holds, before and after
@@ -184,6 +189,7 @@ func TestSave_DestinationMustBeAFileInAFolder(t *testing.T) {
 // TestSave_TasksImagesAreDiscarded specifies that only a task's selected output survives its temporary container,
 // so it has no image to save.
 func TestSave_TasksImagesAreDiscarded(t *testing.T) {
+	parallelRule(t)
 	t.Run("A task can't be saved", func(t *testing.T) {
 		w := newSaveMistakeWorld(t)
 		w.GivenTheBuildFileDeclares(`

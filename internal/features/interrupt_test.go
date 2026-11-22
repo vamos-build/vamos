@@ -18,6 +18,7 @@ func newInterruptWorld(t *testing.T) *world {
 // removes the container that the step ran in before it reports the interruption. The step runs to its end, unseen,
 // since buildah can't stop it.
 func TestInterrupt_StopsAfterTheRunningStep(t *testing.T) {
+	parallelRule(t)
 	t.Run("A save interrupted while a step runs saves nothing, and leaves no container",
 		func(t *testing.T) {
 			w := newInterruptWorld(t)
@@ -50,6 +51,7 @@ func newInterruptedLoadWorld(t *testing.T) *world {
 // configuring a target, or while its WORKSPACE file runs, stops promptly, and reports the interruption rather than a
 // mistake in the file.
 func TestInterrupt_StopsTheBuildFile(t *testing.T) {
+	parallelRule(t)
 	t.Run("A build interrupted while its BUILD file loads stops", func(t *testing.T) {
 		w := newInterruptedLoadWorld(t)
 		w.GivenTheBuildFileDeclares(`

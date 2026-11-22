@@ -29,6 +29,7 @@ func newModuleMistakeWorld(t *testing.T) *world {
 // targets when called by a BUILD file, that references inside those functions resolve relative to the calling BUILD
 // file's package, and that references in functions of ctx resolve relative to the target being configured.
 func TestModules_FunctionsDeclareTargetsForTheBuildFileThatCalls(t *testing.T) {
+	parallelRule(t)
 	t.Run("Loaded functions declare a task, and name a target, in each calling package", func(t *testing.T) {
 		w := newModuleWorld(t)
 		nonce := testenv.NewNonce()
@@ -89,6 +90,7 @@ func TestModules_FunctionsDeclareTargetsForTheBuildFileThatCalls(t *testing.T) {
 // TestModules_LabelsNameStarFilesInTheWorkspace specifies that a module's label starts with // and names a .star file
 // in the workspace, from which load() takes the names it gives.
 func TestModules_LabelsNameStarFilesInTheWorkspace(t *testing.T) {
+	parallelRule(t)
 	for _, example := range []struct {
 		name    string
 		load    string
@@ -145,6 +147,7 @@ func TestModules_LabelsNameStarFilesInTheWorkspace(t *testing.T) {
 // TestModules_MistakesAreReportedInTheModule specifies that a mistake in a .star file fails the BUILD file that loads
 // it, reported where it is in the .star file, and that a module that loads itself, through others, is an error.
 func TestModules_MistakesAreReportedInTheModule(t *testing.T) {
+	parallelRule(t)
 	for _, example := range []struct {
 		name    string
 		modules files
@@ -183,6 +186,7 @@ func TestModules_MistakesAreReportedInTheModule(t *testing.T) {
 // TestModules_DeclareNothingWhileLoading specifies that a module cannot declare targets at its top level while
 // loading, nor name a target by a label relative to a package, since it is loaded for every package alike.
 func TestModules_DeclareNothingWhileLoading(t *testing.T) {
+	parallelRule(t)
 	for _, example := range []struct {
 		name   string
 		module string // defs.star, which defines X
@@ -215,6 +219,7 @@ func TestModules_DeclareNothingWhileLoading(t *testing.T) {
 // TestModules_ArgumentsAreCheckedWhereTheyAreUsed specifies that the arguments that a module's dep() gives are checked
 // where a BUILD file uses it, against the target it names there.
 func TestModules_ArgumentsAreCheckedWhereTheyAreUsed(t *testing.T) {
+	parallelRule(t)
 	t.Run("A module's dep() of a parameter the target doesn't have fails where the BUILD file uses it",
 		func(t *testing.T) {
 			w := newModuleMistakeWorld(t)

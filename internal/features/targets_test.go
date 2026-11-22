@@ -24,6 +24,7 @@ func newEmptyTargetMistakeWorld(t *testing.T) *world {
 
 // TestTargets_NamesAreUniqueAndNonempty specifies that every target has a unique, nonempty name within its BUILD file.
 func TestTargets_NamesAreUniqueAndNonempty(t *testing.T) {
+	parallelRule(t)
 	for _, example := range []struct {
 		name  string
 		build string // after the pull of busybox, on line 2
@@ -69,6 +70,7 @@ func TestTargets_NamesAreUniqueAndNonempty(t *testing.T) {
 // TestTargets_NamesAreNotLabelsOrScratch specifies that names cannot contain : or /,
 // and that scratch is reserved for the empty image.
 func TestTargets_NamesAreNotLabelsOrScratch(t *testing.T) {
+	parallelRule(t)
 	for _, example := range []struct {
 		name  string
 		build string // after the pull of busybox, on line 2
@@ -104,6 +106,7 @@ func TestTargets_NamesAreNotLabelsOrScratch(t *testing.T) {
 // TestTargets_LocalDependenciesAreDeclaredFirst specifies that local dependencies are declared before the targets
 // that use them: a reference to any other name fails, naming the earlier targets it could be.
 func TestTargets_LocalDependenciesAreDeclaredFirst(t *testing.T) {
+	parallelRule(t)
 	for _, example := range []struct {
 		name    string
 		build   string // after the pull of busybox, on line 2
@@ -179,6 +182,7 @@ func TestTargets_LocalDependenciesAreDeclaredFirst(t *testing.T) {
 // TestTargets_KindsHaveTheirUses specifies what each kind of target can be used as:
 // only a pull or a layer can be a base, and only a glob or a task with output can be an add() source.
 func TestTargets_KindsHaveTheirUses(t *testing.T) {
+	parallelRule(t)
 	for _, example := range []struct {
 		name  string
 		build string // after the pull of busybox, on line 2
@@ -233,6 +237,7 @@ func TestTargets_KindsHaveTheirUses(t *testing.T) {
 // directory's BUILD file, or workspace labels: any other name fails, before anything runs,
 // suggesting the name that was meant where one is close, and otherwise naming the targets there are.
 func TestTargets_CommandsNameTheBuildFilesTargets(t *testing.T) {
+	parallelRule(t)
 	for _, example := range []struct {
 		name    string
 		targets []string // the first, and those after it
@@ -279,6 +284,7 @@ func TestTargets_CommandsNameTheBuildFilesTargets(t *testing.T) {
 // TestTargets_GlobsAreNotNamedByCommands specifies that globs provide input filesets to add(),
 // and cannot be named directly by a command.
 func TestTargets_GlobsAreNotNamedByCommands(t *testing.T) {
+	parallelRule(t)
 	t.Run("Saving a glob fails, saying its files are read by the targets that add them", func(t *testing.T) {
 		w := newTargetMistakeWorld(t)
 		w.GivenTheBuildFileDeclares(`glob(name="code", include=["app.sh"])`)
@@ -310,6 +316,7 @@ func newTargetWorld(t *testing.T) *world {
 // and that dependency cycles are errors, reported at the declaration of the target whose reference closes the cycle,
 // and the configuration that a function of ctx made it in.
 func TestTargets_CyclesAreErrors(t *testing.T) {
+	parallelRule(t)
 	t.Run("A function of ctx names a target declared after it", func(t *testing.T) {
 		w := newTargetWorld(t)
 		w.GivenTheBuildFileDeclares(`

@@ -63,6 +63,7 @@ const platformInTheEnvironment = `
 // TestPlatforms_TargetsTakeTheRequestedPlatform specifies that targets inherit the requested platform through their
 // dependencies, and that the command defaults to the host's platform unless --platform is given.
 func TestPlatforms_TargetsTakeTheRequestedPlatform(t *testing.T) {
+	parallelRule(t)
 	for _, example := range []struct {
 		name     string
 		options  []option
@@ -101,6 +102,7 @@ func TestPlatforms_TargetsTakeTheRequestedPlatform(t *testing.T) {
 // TestPlatforms_FunctionsOfCtxReadThePlatform specifies that functions of ctx read the target's platform, os, arch
 // and variant, and the platform executing build steps natively.
 func TestPlatforms_FunctionsOfCtxReadThePlatform(t *testing.T) {
+	parallelRule(t)
 	t.Run("By default, a layer reads this machine's platform, as the target's and the exec platform",
 		func(t *testing.T) {
 			w := newPlatformWorld(t)
@@ -150,6 +152,7 @@ func TestPlatforms_FunctionsOfCtxReadThePlatform(t *testing.T) {
 // such a task shares one result across platforms when its configured work is identical, but not when it reads the
 // target platform.
 func TestPlatforms_ExecPlatformRunsNativeTools(t *testing.T) {
+	parallelRule(t)
 	t.Run("Tasks on the exec platform run natively for either platform, and share their work if they can",
 		func(t *testing.T) {
 			w := newPlatformWorld(t)
@@ -203,6 +206,7 @@ func TestPlatforms_ExecPlatformRunsNativeTools(t *testing.T) {
 // TestPlatforms_SavingAnIndexSavesThisMachinesImage specifies that saving an index builds and saves only the image
 // for the host's platform.
 func TestPlatforms_SavingAnIndexSavesThisMachinesImage(t *testing.T) {
+	parallelRule(t)
 	for _, example := range []struct {
 		name      string
 		platforms []string
@@ -252,6 +256,7 @@ func TestPlatforms_SavingAnIndexSavesThisMachinesImage(t *testing.T) {
 // TestPlatforms_APlatformIsOsArchAndVariant specifies that a platform is os/arch or os/arch/variant,
 // such as linux/arm64 or linux/arm/v7, or EXEC_PLATFORM for the executor's.
 func TestPlatforms_APlatformIsOsArchAndVariant(t *testing.T) {
+	parallelRule(t)
 	for _, example := range []struct {
 		name     string
 		platform string
@@ -292,6 +297,7 @@ func TestPlatforms_APlatformIsOsArchAndVariant(t *testing.T) {
 // TestPlatforms_GlobsAreSharedAcrossPlatforms specifies that globs are shared across platforms and cannot read
 // ctx.platform, ctx.os, ctx.arch, or ctx.variant.
 func TestPlatforms_GlobsAreSharedAcrossPlatforms(t *testing.T) {
+	parallelRule(t)
 	for _, field := range []string{"platform", "os", "arch", "variant"} {
 		t.Run("A glob that reads ctx."+field+" fails", func(t *testing.T) {
 			w := newPlatformMistakeWorld(t)
@@ -311,6 +317,7 @@ func TestPlatforms_GlobsAreSharedAcrossPlatforms(t *testing.T) {
 // TestPlatforms_VariantsReachTheImage specifies that a platform's variant, as in linux/arm/v7, reaches functions of ctx
 // and the image built for it.
 func TestPlatforms_VariantsReachTheImage(t *testing.T) {
+	parallelRule(t)
 	t.Run("A layer saved for a variant is for it, and its functions read it", func(t *testing.T) {
 		w := newPlatformWorld(t)
 		nonce := testenv.NewNonce()
@@ -328,6 +335,7 @@ func TestPlatforms_VariantsReachTheImage(t *testing.T) {
 // os/arch or os/arch/variant, and that the exec platform is one the executor offers, which for the executor built
 // into vamos is this machine's, so that naming it builds as without the flag.
 func TestPlatforms_TheCommandLineGivesPlatforms(t *testing.T) {
+	parallelRule(t)
 	for _, example := range []struct {
 		name    string
 		options []option
@@ -380,6 +388,7 @@ func TestPlatforms_TheCommandLineGivesPlatforms(t *testing.T) {
 
 // TestPlatforms_ALayersBaseIsForItsPlatform specifies that a layer's base must have the same platform as the layer.
 func TestPlatforms_ALayersBaseIsForItsPlatform(t *testing.T) {
+	parallelRule(t)
 	t.Run("A layer on a base for another platform fails, saying the base must be for its platform", func(t *testing.T) {
 		w := newPlatformWorld(t)
 		w.GivenTheBuildFileDeclares(fmt.Sprintf(`layer(name="app", base=dep("busybox", platform=%q))`,
@@ -395,6 +404,7 @@ func TestPlatforms_ALayersBaseIsForItsPlatform(t *testing.T) {
 // architecture's programs, the kernel needs a registered emulator for that architecture,
 // and that otherwise the command fails, saying that exec format error means no emulator is registered.
 func TestPlatforms_AnotherPlatformsProgramsRunUnderEmulation(t *testing.T) {
+	parallelRule(t)
 	t.Run("A layer for another platform runs its programs under the emulator", func(t *testing.T) {
 		w := newPlatformWorld(t)
 		w.GivenThisMachineEmulates(anotherPlatform())

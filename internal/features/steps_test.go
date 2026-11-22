@@ -203,9 +203,17 @@ func (w *world) noteWhatTheStoresHold() {
 }
 
 // newWorld starts a scenario that needs no buildah, since it fails before anything is built.
+// A scenario of a rule that runs in parallel, as parallelRule makes it, runs in parallel with the rest from here, on
+// stores of its own; any other runs alone, on the suite's.
 func newWorld(t *testing.T) *world {
 	t.Helper()
-	return &world{t: t, stores: testenv.SuiteStores(t), files: files{}, modes: modes{}, links: links{}}
+	w := &world{t: t, files: files{}, modes: modes{}, links: links{}}
+	if runsInParallel(t) {
+		w.stores, w.ownStores = testenv.PrivateStores(t), true
+	} else {
+		w.stores = testenv.SuiteStores(t)
+	}
+	return w
 }
 
 // run runs the vamos command line with args, in the scenario's project, as main does.

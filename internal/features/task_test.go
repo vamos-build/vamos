@@ -32,6 +32,7 @@ func newTaskMistakeWorld(t *testing.T) *world {
 
 // TestTask_OutputIsSelectedBeneathSource specifies that a task's output is the files it selects beneath its source.
 func TestTask_OutputIsSelectedBeneathSource(t *testing.T) {
+	parallelRule(t)
 	t.Run("Only selected files are output, at their paths relative to the source", func(t *testing.T) {
 		w := newTaskWorld(t)
 		w.GivenTheBuildFileDeclares(`
@@ -151,6 +152,7 @@ func TestTask_OutputIsSelectedBeneathSource(t *testing.T) {
 
 // TestTask_ContainerIsDiscarded specifies that a task's container is discarded.
 func TestTask_ContainerIsDiscarded(t *testing.T) {
+	parallelRule(t)
 	t.Run("A layer that adds a task's output gets that output alone", func(t *testing.T) {
 		w := newTaskWorld(t)
 		w.GivenTheBuildFileDeclares(`
@@ -177,6 +179,7 @@ func TestTask_ContainerIsDiscarded(t *testing.T) {
 
 // TestTask_TakesImagesAndFiles specifies that a task takes images and files in.
 func TestTask_TakesImagesAndFiles(t *testing.T) {
+	parallelRule(t)
 	t.Run("A task runs with its base's working directory and environment", func(t *testing.T) {
 		w := newTaskWorld(t)
 		w.GivenTheBuildFileDeclares(`
@@ -225,6 +228,7 @@ func TestTask_TakesImagesAndFiles(t *testing.T) {
 
 // TestTask_WithoutOutputIsACheck specifies that a task without output is a check.
 func TestTask_WithoutOutputIsACheck(t *testing.T) {
+	parallelRule(t)
 	t.Run("A check runs, and is reused while its inputs are unchanged", func(t *testing.T) {
 		w := newTaskWorld(t)
 		tested := "tested " + testenv.NewNonce()
@@ -257,6 +261,7 @@ func TestTask_WithoutOutputIsACheck(t *testing.T) {
 
 // TestTask_UnselectableOutputFails specifies that a task whose output can't be selected fails, leaving nothing behind.
 func TestTask_UnselectableOutputFails(t *testing.T) {
+	parallelRule(t)
 	for _, example := range []struct {
 		name    string
 		command string // the task's one run(), as Starlark
@@ -350,6 +355,7 @@ func TestTask_UnselectableOutputFails(t *testing.T) {
 // TestTask_SourceAndIncludeGoTogether specifies that a task gives source and include together, or omits both
 // for a task that only runs checks, and that selection options require output to be declared.
 func TestTask_SourceAndIncludeGoTogether(t *testing.T) {
+	parallelRule(t)
 	for _, example := range []struct {
 		name  string
 		task  string // its arguments after name and base
@@ -390,6 +396,7 @@ func TestTask_SourceAndIncludeGoTogether(t *testing.T) {
 // TestTask_OutputPatternsStayBeneathAnAbsoluteSource specifies that a task's source is an absolute container
 // directory, and that its patterns, relative to source, cannot be empty or resolve outside it.
 func TestTask_OutputPatternsStayBeneathAnAbsoluteSource(t *testing.T) {
+	parallelRule(t)
 	for _, example := range []struct {
 		name  string
 		task  string // its arguments after name and base
@@ -429,6 +436,7 @@ func TestTask_OutputPatternsStayBeneathAnAbsoluteSource(t *testing.T) {
 
 // TestTask_OutputLimitsArePositive specifies that the limits of a task's output selection must be positive.
 func TestTask_OutputLimitsArePositive(t *testing.T) {
+	parallelRule(t)
 	for _, limit := range []string{"max_file_count", "max_file_size", "max_total_size"} {
 		t.Run("A "+limit+" of zero fails", func(t *testing.T) {
 			w := newTaskMistakeWorld(t)

@@ -697,9 +697,13 @@ func (w *world) GivenTheRegistryStops() {
 
 // GivenStoresOfTheScenariosOwn gives the scenario a container store and build cache of its own, for the rest of the
 // scenario, rather than the suite's, for a scenario that destroys what they hold, as prune does.
+// A scenario of a rule that runs in parallel has stores of its own already, which it keeps.
 // It stops the scenario if a command has run already, on the suite's stores.
 func (w *world) GivenStoresOfTheScenariosOwn() {
 	w.t.Helper()
+	if w.ownStores {
+		return
+	}
 	if w.ran {
 		w.t.Fatal("a command has run already, on the suite's stores")
 	}

@@ -44,6 +44,7 @@ const appOnTheTag = `
 
 // TestPull_FetchesItsImage specifies that a pull fetches the image for its configured platform.
 func TestPull_FetchesItsImage(t *testing.T) {
+	parallelRule(t)
 	t.Run("A pull fetches the image for this machine's platform by default", func(t *testing.T) {
 		w := newPullWorld(t)
 		w.WhenISave("busybox")
@@ -64,6 +65,7 @@ func TestPull_FetchesItsImage(t *testing.T) {
 // suggesting to check the name, and to log in if the image is private, and that one whose registry can't be reached
 // fails, saying why, as the executor resolves a pull without a pin, with --pins=resolve.
 func TestPull_FailureSaysWhy(t *testing.T) {
+	parallelRule(t)
 	t.Run("An image the registry won't give fails, suggesting to check the name", func(t *testing.T) {
 		// Docker Hub won't give an image it doesn't have, as it won't give a private one.
 		w := newPullWorld(t)
@@ -91,6 +93,7 @@ func TestPull_FailureSaysWhy(t *testing.T) {
 // TestPull_ImageIsARepositoryWithoutATagOrDigest specifies that a pull's image is a repository name,
 // without a tag or digest: an image's tag belongs in tag, rather than inside image.
 func TestPull_ImageIsARepositoryWithoutATagOrDigest(t *testing.T) {
+	parallelRule(t)
 	for _, example := range []struct {
 		name  string
 		pull  string // on line 2, after the pull of busybox
@@ -141,6 +144,7 @@ func TestPull_ImageIsARepositoryWithoutATagOrDigest(t *testing.T) {
 
 // TestPull_TakesNoParameters specifies that pull targets have no user parameters; only their platform configures them.
 func TestPull_TakesNoParameters(t *testing.T) {
+	parallelRule(t)
 	t.Run("A pull that declares parameters fails", func(t *testing.T) {
 		w := newPullMistakeWorld(t)
 		w.GivenTheBuildFileDeclares(`pull(name="app", image="busybox", params={"mode": "release"})`)
@@ -155,6 +159,7 @@ func TestPull_TakesNoParameters(t *testing.T) {
 // and that, without a pin, as --pins=resolve leaves it, a tag resolved before is reused, for every platform;
 // and that one that an update pinned is reused even after a prune.
 func TestPull_ResolvedTagsAreReused(t *testing.T) {
+	parallelRule(t)
 	t.Run("A pull selects its index's image for the platform", func(t *testing.T) {
 		w := newPullTagWorld(t)
 		w.WhenISave("app", pinning("resolve"))
@@ -237,6 +242,7 @@ func TestPull_ResolvedTagsAreReused(t *testing.T) {
 // TestPull_RebuildingResolvesNothing specifies that building a pull with --rebuild neither resolves its tag again
 // nor changes its pin, and says that vamos update refreshes a pull.
 func TestPull_RebuildingResolvesNothing(t *testing.T) {
+	parallelRule(t)
 	t.Run("Rebuilding a pinned pull points to update", func(t *testing.T) {
 		w := newPullTagWorld(t)
 		w.GivenTheLockfileHolds(baseOnFirst)
@@ -283,6 +289,7 @@ const baseOnFirst = `
 // digest, choosing its platform's image from it if it is an index, without asking what the tag names,
 // and that a pin its registry no longer has fails, saying to update it.
 func TestPull_PinnedPullsUseTheirPins(t *testing.T) {
+	parallelRule(t)
 	t.Run("A moved tag keeps the pinned image", func(t *testing.T) {
 		w := newPullTagWorld(t)
 		w.GivenTheLockfileHolds(baseOnFirst)
@@ -359,6 +366,7 @@ func TestPull_PinnedPullsUseTheirPins(t *testing.T) {
 // TestPull_ThePlatformMustMatch specifies that a pull of a tag that names an index selects the matching image,
 // which the index must have, and that a single-platform image must match the configured platform.
 func TestPull_ThePlatformMustMatch(t *testing.T) {
+	parallelRule(t)
 	t.Run("An index without the platform's image fails, naming those it has", func(t *testing.T) {
 		w := newBuildingWorld(t)
 		w.GivenARegistry()

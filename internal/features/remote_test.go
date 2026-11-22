@@ -81,6 +81,7 @@ func TestRemote_BuildsOnTheCoordinator(t *testing.T) {
 // over plain HTTP if the coordinator's registries.conf marks it insecure, whatever --tls-verify says, and
 // pushes, from the client or, with the worker's own settings, from the worker.
 func TestRemote_BuildsOnWorkers(t *testing.T) {
+	parallelRule(t)
 	t.Run("A build on a coordinator runs on its worker, and a second build reuses what it made", func(t *testing.T) {
 		w := newBuildingWorld(t)
 		w.GivenARegistry()
@@ -213,6 +214,7 @@ func TestRemote_InterruptedCoordinatorCancelsItsBuilds(t *testing.T) {
 // it offers it, or else this machine's, or else the only one; among several, none of them this machine's, the user
 // chooses. A coordinator that says nothing of which clients use, as older ones don't, is one that prefers none.
 func TestRemote_ChoosesTheExecutionPlatform(t *testing.T) {
+	parallelRule(t)
 	for _, example := range []struct {
 		name      string
 		offered   []string
@@ -318,6 +320,7 @@ func newRemoteGraphWorld(t *testing.T) *world {
 // saying why: a name that isn't a URL, a coordinator that runs other graph versions, one that can't be reached, and
 // a secret, which no coordinator may be sent.
 func TestRemote_CoordinatorThatCantBeUsedFails(t *testing.T) {
+	parallelRule(t)
 	for _, example := range []struct {
 		name        string
 		coordinator string

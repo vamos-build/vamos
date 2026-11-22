@@ -17,6 +17,7 @@ import (
 
 // TestDedent checks that a BUILD file indented with the Go that declares it loses only that indentation.
 func TestDedent(t *testing.T) {
+	parallelRule(t)
 	got := dedent(`
 		task(
 		    name="make",
@@ -41,6 +42,7 @@ func TestDedent(t *testing.T) {
 // TestMatchFiles checks the comparisons that the image and export steps make, since every scenario relies on them:
 // exactly and at least, of files and of links.
 func TestMatchFiles(t *testing.T) {
+	parallelRule(t)
 	entries := map[string]entry{
 		"a.txt":     {regular: true, mode: 0o644, content: "a\n"},
 		"sub":       {dir: true, mode: 0o755},
@@ -221,6 +223,7 @@ func TestMatchFiles(t *testing.T) {
 // whiteouts hide what layers below hold, but not what their own layer holds, before or after them;
 // a hard link whose target isn't a file before it is an error; and the image's root is left out.
 func TestReadImage(t *testing.T) {
+	parallelRule(t)
 	img, err := mutate.AppendLayers(empty.Image,
 		tarLayer(t,
 			tarEntry{hdr: &tar.Header{Name: "./", Typeflag: tar.TypeDir, Mode: 0o755}},
@@ -325,6 +328,7 @@ func tarLayer(t *testing.T, entries ...tarEntry) v1.Layer {
 // TestUnconfigured checks that a label loses only the configuration after its quoted name,
 // whatever the name holds.
 func TestUnconfigured(t *testing.T) {
+	parallelRule(t)
 	for label, want := range map[string]string{
 		layer("app"):                     `layer "app"`,
 		layer("app", `mode="debug"`):     `layer "app"`,
@@ -339,6 +343,7 @@ func TestUnconfigured(t *testing.T) {
 
 // TestMatchObservations checks that observations are read from whole lines of output, and matched exactly.
 func TestMatchObservations(t *testing.T) {
+	parallelRule(t)
 	output := "building\nobserved key owner=0:0\nnot observed x=1\nobserved token=matches\r\nobserved empty=\n"
 	if err := matchObservations(output, observations{"key owner": "0:0", "token": "matches", "empty": ""}); err != nil {
 		t.Errorf("matching = %v, want no error", err)

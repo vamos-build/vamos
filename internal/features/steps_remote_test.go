@@ -31,7 +31,6 @@ import (
 	"github.com/vamos-build/vamos/internal/run"
 	"github.com/vamos-build/vamos/internal/testenv"
 	"github.com/vamos-build/vamos/internal/tracing"
-	"github.com/vamos-build/vamos/internal/worker"
 	"go.podman.io/storage"
 )
 
@@ -376,7 +375,6 @@ func onTheCoordinator(url string) option {
 func (w *world) GivenACoordinatorWithAWorker(args ...string) {
 	w.t.Helper()
 	w.hasNoCoordinator()
-	w.t.Setenv(worker.ChildEnv, "1") // the worker runs this test binary as its attempts' process
 	workerStores := testenv.PrivateStores(w.t)
 	w.cgroupRoot = testenv.CgroupRoot(w.t) // before the servers' cleanup, so that it is removed once they have ended
 	ctx, cancel := context.WithCancel(context.Background())

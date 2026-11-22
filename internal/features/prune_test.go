@@ -31,6 +31,7 @@ func newPruneWorld(t *testing.T) *world {
 // TestPrune_RemovesCachedResults specifies that prune removes cached layer images and other build results, so that
 // targets run again, while keeping pulled images, and images that other names also name.
 func TestPrune_RemovesCachedResults(t *testing.T) {
+	parallelRule(t)
 	t.Run("A prune removes every cached result, and leaves other stores alone", func(t *testing.T) {
 		w := newPruneWorld(t)
 		w.GivenTheSuitesStoresHoldAResult()
@@ -94,6 +95,7 @@ func TestPrune_RemovesCachedResults(t *testing.T) {
 // TestPrune_WaitsForNoOtherVamos specifies that a prune is refused while another vamos is using the build cache,
 // removing nothing, and that a build is refused while a prune runs.
 func TestPrune_WaitsForNoOtherVamos(t *testing.T) {
+	parallelRule(t)
 	t.Run("A prune while another vamos builds is refused, and removes nothing", func(t *testing.T) {
 		w := newPruneWorld(t)
 		w.WhenIBuild("app")

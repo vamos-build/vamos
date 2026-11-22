@@ -37,6 +37,7 @@ const theLibPackage = `
 // wherever a target reference is accepted, such as base, add() and dep(), and that a referenced glob keeps paths
 // relative to its own BUILD directory.
 func TestWorkspaces_LabelsNameOtherPackagesTargets(t *testing.T) {
+	parallelRule(t)
 	t.Run("A layer is built on, and adds, another package's targets", func(t *testing.T) {
 		w := newWorkspaceWorld(t)
 		nonce := testenv.NewNonce()
@@ -88,6 +89,7 @@ func TestWorkspaces_LabelsNameOtherPackagesTargets(t *testing.T) {
 // TestWorkspaces_OnlyNeededTargetsLoad specifies that vamos loads only the packages and targets
 // that the requested targets need.
 func TestWorkspaces_OnlyNeededTargetsLoad(t *testing.T) {
+	parallelRule(t)
 	t.Run("Targets and packages nothing needs are neither run nor checked", func(t *testing.T) {
 		w := newWorkspaceWorld(t)
 		w.GivenThePackageDeclares("lib", testenv.PullBusybox)
@@ -111,6 +113,7 @@ func TestWorkspaces_OnlyNeededTargetsLoad(t *testing.T) {
 // in -C's directory and its ancestors, and that without one, -C's directory is the workspace root.
 // A WORKSPACE that can't be checked stops the search, rather than letting another directory become the root.
 func TestWorkspaces_RootIsTheNearestWorkspaceFile(t *testing.T) {
+	parallelRule(t)
 	t.Run("A WORKSPACE that can't be checked fails the command", func(t *testing.T) {
 		w := newWorkspaceMistakeWorld(t)
 		w.GivenThePackageDeclares("app", `layer(name="app", base="scratch")`)
@@ -165,6 +168,7 @@ func TestWorkspaces_RootIsTheNearestWorkspaceFile(t *testing.T) {
 // where the directory also holds a build directory, and that a directory named BUILD or build is never taken for a
 // BUILD file.
 func TestWorkspaces_BuildVmsIsABuildFile(t *testing.T) {
+	parallelRule(t)
 	t.Run("Packages with BUILD.vms files are built by label and from -C", func(t *testing.T) {
 		w := newWorkspaceWorld(t)
 		w.GivenTheProjectHolds(files{
@@ -224,6 +228,7 @@ func TestWorkspaces_BuildVmsIsABuildFile(t *testing.T) {
 // declared yet, which is an error saying where the first file stopped, and targets that name each other in a cycle
 // are an error.
 func TestWorkspaces_PackagesMayNameEachOthersTargets(t *testing.T) {
+	parallelRule(t)
 	for _, example := range []struct {
 		name     string
 		packages map[string]string // BUILD files, by package
@@ -339,6 +344,7 @@ func TestWorkspaces_PackagesMayNameEachOthersTargets(t *testing.T) {
 // names a target of a package beneath the workspace root, by a clean path to its directory, which is no symbolic link,
 // and the target's name: any other label fails as the BUILD file loads, saying why.
 func TestWorkspaces_LabelsNameTargetsOfPackagesWithinTheWorkspace(t *testing.T) {
+	parallelRule(t)
 	for _, example := range []struct {
 		name  string
 		app   string // the package app's BUILD file
@@ -487,6 +493,7 @@ func TestWorkspaces_LabelsNameTargetsOfPackagesWithinTheWorkspace(t *testing.T) 
 // TestWorkspaces_MistakesAreReportedWhereTheyAre specifies that a mistake in a BUILD file that loads because another
 // names one of its targets is reported where it is, as if that file were built itself.
 func TestWorkspaces_MistakesAreReportedWhereTheyAre(t *testing.T) {
+	parallelRule(t)
 	t.Run("A mistake in another package's BUILD file names that file alone", func(t *testing.T) {
 		w := newWorkspaceMistakeWorld(t)
 		w.GivenThePackageDeclares("lib", testenv.PullBusybox)
@@ -510,6 +517,7 @@ const anApp = `layer(name="app", base="scratch")`
 // that only the WORKSPACE file at the root of the workspace that holds -C is evaluated;
 // and that a WORKSPACE that isn't a regular file, such as a directory, marks the root without being evaluated.
 func TestWorkspaces_WorkspaceIsAStarlarkFileThatVamosEvaluates(t *testing.T) {
+	parallelRule(t)
 	t.Run("An empty WORKSPACE is valid", func(t *testing.T) {
 		w := newWorkspaceWorld(t)
 		w.GivenThePackageDeclares(".", anApp)
@@ -571,6 +579,7 @@ func TestWorkspaces_WorkspaceIsAStarlarkFileThatVamosEvaluates(t *testing.T) {
 // to give the workspace a symbolic name, which is given by keyword, and is a string,
 // and that WORKSPACE offers no other builtin of BUILD files, and no load(): calling one is a mistake.
 func TestWorkspaces_WorkspaceDeclaresTheNameWithWorkspace(t *testing.T) {
+	parallelRule(t)
 	t.Run("workspace() names the workspace", func(t *testing.T) {
 		w := newWorkspaceWorld(t)
 		w.GivenACoordinator()
@@ -636,6 +645,7 @@ func TestWorkspaces_WorkspaceDeclaresTheNameWithWorkspace(t *testing.T) {
 // and that a mistake in WORKSPACE, such as a name that breaks these rules, fails every command that opens the
 // workspace, naming the file, line and column, as a mistake in a BUILD file does.
 func TestWorkspaces_AWorkspaceNameFollowsTheRulesOfAModuleName(t *testing.T) {
+	parallelRule(t)
 	for _, name := range []string{"storefront", "com.acme.storefront", "my-app_2", "a"} {
 		t.Run("A valid name: "+name, func(t *testing.T) {
 			w := newWorkspaceWorld(t)
@@ -699,6 +709,7 @@ const anAppOfAFile = `
 // not the workspace's directory, its repository or the repository's remotes;
 // and that a workspace that doesn't call workspace() is unnamed.
 func TestWorkspaces_VamosDerivesNoWorkspaceName(t *testing.T) {
+	parallelRule(t)
 	t.Run("An undeclared name is sent as none", func(t *testing.T) {
 		w := newBuildingWorld(t)
 		w.GivenACoordinator()
@@ -715,6 +726,7 @@ func TestWorkspaces_VamosDerivesNoWorkspaceName(t *testing.T) {
 // executor, to build, push, publish or export, carries the name, or none for an unnamed workspace,
 // as metadata that changes nothing the executor does, and that a name is trusted as declared.
 func TestWorkspaces_TheNameTravelsWithEveryRequestToAnExecutor(t *testing.T) {
+	parallelRule(t)
 	t.Run("A push carries the name", func(t *testing.T) {
 		w := newWorkspaceWorld(t)
 		w.GivenARegistry()
@@ -781,6 +793,7 @@ func TestWorkspaces_TheNameTravelsWithEveryRequestToAnExecutor(t *testing.T) {
 // and that a glob that selects the WORKSPACE file builds on its contents as on any other file's, the name included,
 // so renaming the workspace rebuilds the targets that use that glob.
 func TestWorkspaces_TheNameNeverAffectsWhatIsBuiltOrCached(t *testing.T) {
+	parallelRule(t)
 	t.Run("Renaming a workspace reuses its cache", func(t *testing.T) {
 		w := newWorkspaceWorld(t)
 		w.GivenTheProjectHolds(files{
