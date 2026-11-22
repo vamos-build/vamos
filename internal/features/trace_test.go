@@ -551,16 +551,16 @@ func TestTrace_ACommandPrintsItsTrace(t *testing.T) {
 		w.GivenAProjectThatPullsBusybox()
 		w.GivenTheBuildFileDeclares(`
 			layer(name="app", base="busybox", steps=[env(NONCE="` + testenv.NewNonce() + `"),
-			    run(["sh", "-c", "echo started; sleep 30"])])
+			    run(["sh", "-c", "echo started; sleep 1"])])
 		`)
 		w.WhenIBuild("app", interruptedOnceItPrints("started"), traced())
 		w.ThenItIsInterrupted()
 		w.ThenItPrintsItsTrace()
-		w.ThenTheTraceSpanIsWithin("executor", `run(["sh", "-c", "echo started; sleep 30"])`, "executor",
+		w.ThenTheTraceSpanIsWithin("executor", `run(["sh", "-c", "echo started; sleep 1"])`, "executor",
 			`layer "app"`)
 		w.WhenIReadTheTrace("<printed trace>")
 		w.ThenItSucceeds()
-		w.ThenTheTraceSpanIsWithin("executor", `run(["sh", "-c", "echo started; sleep 30"])`, "executor",
+		w.ThenTheTraceSpanIsWithin("executor", `run(["sh", "-c", "echo started; sleep 1"])`, "executor",
 			`layer "app"`)
 	})
 }

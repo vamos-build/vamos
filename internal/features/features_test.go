@@ -20,12 +20,21 @@ package features
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/vamos-build/vamos/internal/testenv"
+	"github.com/vamos-build/vamos/internal/transfer"
 	"github.com/vamos-build/vamos/internal/worker"
+	"go.podman.io/common/pkg/retry"
 )
 
 func TestMain(m *testing.M) {
+	// Registry operations retry as often as containers.conf's default, 3 times, but without backing off from a
+	// second, which made a scenario whose registry never answers wait 7 seconds, and whatever the host's
+	// containers.conf says. Set before Main, since a worker's attempts run in this binary too.
+	transfer.RetryLimits = func() (*retry.Options, error) {
+		return &retry.Options{MaxRetry: 3, Delay: time.Millisecond}, nil
+	}
 	testenv.Main(m, worker.ChildFromEnv)
 }
 

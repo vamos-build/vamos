@@ -52,6 +52,56 @@ func TestWithoutSharedStores(t *testing.T) {
 	}
 }
 
+// TestWithMetacopy checks that metacopy is left out of every mount option to turn it off, dropping an option that
+// held only it, and is added to the mount options to turn it on, in an option of their own if there were none.
+func TestWithMetacopy(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		options []string
+		on      bool
+		want    []string
+	}{
+		{
+			name:    "Fedora's options, off",
+			options: []string{"overlay.mountopt=nodev,metacopy=on", "imagestore=/a"},
+			want:    []string{"overlay.mountopt=nodev", "imagestore=/a"},
+		},
+		{
+			name:    "only metacopy, off",
+			options: []string{" Overlay.MountOpt =metacopy=on", "mount_program=/usr/bin/fuse-overlayfs"},
+			want:    []string{"mount_program=/usr/bin/fuse-overlayfs"},
+		},
+		{
+			name:    "metacopy off already, off",
+			options: []string{"mountopt=metacopy=off,nodev"},
+			want:    []string{"mountopt=nodev"},
+		},
+		{
+			name:    "no mount options, off",
+			options: []string{"imagestore=/a"},
+			want:    []string{"imagestore=/a"},
+		},
+		{
+			name:    "metacopy off, on",
+			options: []string{"overlay.mountopt=metacopy=off,nodev"},
+			on:      true,
+			want:    []string{"overlay.mountopt=nodev,metacopy=on"},
+		},
+		{
+			name:    "no mount options, on",
+			options: []string{"imagestore=/a"},
+			on:      true,
+			want:    []string{"imagestore=/a", "overlay.mountopt=metacopy=on"},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := withMetacopy(tt.options, tt.on); !slices.Equal(got, tt.want) {
+				t.Errorf("withMetacopy(%q, %t) = %q, want %q", tt.options, tt.on, got, tt.want)
+			}
+		})
+	}
+}
+
 // TestRemoveMounted checks that removing stores with a layer still mounted, as a test that failed might leave them,
 // unmounts everything, the driver's own mounts too, before removing the directory.
 func TestRemoveMounted(t *testing.T) {

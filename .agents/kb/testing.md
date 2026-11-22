@@ -13,8 +13,8 @@ a `//nolint:<linter>` needs a comment saying why the finding is wrong there.
 govulncheck fails only for a known vulnerability that vamos's code can reach;
 fix one by updating the module, under the update-dependencies skill's policy.
 
-For timeout planning, previous devcontainer runs took under one second for the short suite
-and about 90 seconds for the full suite.
+For timeout planning, previous devcontainer runs with a warm Go build cache took about 15 seconds for the short suite
+and about two minutes for the full suite, nearly all of it `internal/features`, whose scenarios run one at a time.
 These are approximate timings, not deadlines: allow extra time for cold Go compilation, image pulls and emulation.
 
 Run the full suite before finishing changes to building, committing or destinations.

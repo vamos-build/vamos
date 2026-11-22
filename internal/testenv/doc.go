@@ -14,6 +14,9 @@
 // WalkImage and ImagePath in image.go read a saved image's flattened filesystem.
 // SuiteStores and PrivateStores in stores.go give tests container stores and build caches of their own,
 // so that no test touches the developer's; see RemoveSuiteStores for cleanup.
+// Their overlay driver diffs layers natively, without the metacopy of Fedora's default storage.conf,
+// whose naive diffs wait for the next whole second after every commit;
+// NaiveDiffEnv gives a test binary's stores metacopy, as TestNaiveAndNativeDiffsMakeTheSameImage in cli does.
 // Their UnnamedImages lists what a failed build may leave in the store.
 // RequireBuildah and RequireOwnership probe for what a test needs and skip it when that is missing,
 // or fail it when RequireIntegrationEnv says the suite must run whole;

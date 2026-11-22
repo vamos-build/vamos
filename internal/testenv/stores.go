@@ -241,7 +241,11 @@ var suiteMade atomic.Bool
 // a container's own overlay filesystem, as /tmp often is, can't hold an overlay store.
 // Where that can't be written, as without root, it is in the temporary directory, where non-building tests
 // can still use it.
-// The store takes the default driver and its options, so that it works as the developer's does.
+// The store takes the default driver and its options, so that it works as the developer's does,
+// but without overlay's metacopy, which Fedora's default storage.conf turns on, unless NaiveDiffEnv is set.
+// With metacopy, the overlay driver can't diff a layer natively, and diffs it naively instead,
+// which waits for the next whole second after every commit, since it compares the times of files only to the second:
+// that wait was most of the time the suite took.
 func newStores(name string) (*Stores, error) {
 	options, err := storage.DefaultStoreOptions()
 	if err != nil {
@@ -259,7 +263,53 @@ func newStores(name string) (*Stores, error) {
 	options.ImageStore = ""
 	options.TransientStore = false
 	options.GraphDriverOptions = withoutSharedStores(options.GraphDriverOptions)
+	if options.GraphDriverName == "overlay" {
+		options.GraphDriverOptions = withMetacopy(options.GraphDriverOptions, os.Getenv(NaiveDiffEnv) != "")
+	}
 	return &Stores{Dir: dir, Options: options}, nil
+}
+
+// NaiveDiffEnv is the environment variable that, when set, gives the overlay driver of the stores that tests make
+// metacopy, as Fedora's default storage.conf does, so that it diffs layers naively, comparing their files with their
+// parent layers', rather than natively, as it does without metacopy; another driver always diffs naively.
+// containers/storage settles which diff its overlay driver uses once per process, for the first overlay store it opens,
+// so the variable applies to a whole test binary, such as one that a test runs to build with naive diffs.
+const NaiveDiffEnv = "VAMOS_TEST_NAIVE_DIFF"
+
+// withMetacopy returns the driver options with overlay's metacopy turned on, in its mount options,
+// or with metacopy left out of every mount option, which leaves it off, dropping an option that holds nothing else.
+// A mount option is matched as withoutSharedStores matches a key, as in overlay.mountopt=nodev,metacopy=on.
+func withMetacopy(options []string, on bool) []string {
+	var kept []string
+	found := false
+	for _, o := range options {
+		key, value, _ := strings.Cut(o, "=")
+		name := strings.ToLower(strings.TrimSpace(key))
+		if _, n, ok := strings.Cut(name, "."); ok {
+			name = n
+		}
+		if name != "mountopt" {
+			kept = append(kept, o)
+			continue
+		}
+		found = true
+		var opts []string
+		for opt := range strings.SplitSeq(value, ",") {
+			if optName, _, _ := strings.Cut(opt, "="); strings.TrimSpace(optName) != "metacopy" {
+				opts = append(opts, opt)
+			}
+		}
+		if on {
+			opts = append(opts, "metacopy=on")
+		}
+		if len(opts) > 0 {
+			kept = append(kept, key+"="+strings.Join(opts, ","))
+		}
+	}
+	if on && !found {
+		kept = append(kept, "overlay.mountopt=metacopy=on")
+	}
+	return kept
 }
 
 // withoutSharedStores returns the driver options without stores that the store would share with others:
