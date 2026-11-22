@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -417,4 +418,70 @@ func (answeringClock) Capabilities(ctx context.Context) (api.Capabilities, error
 		return api.Capabilities{}, err
 	}
 	return api.Capabilities{Clock: time.Now()}, nil
+}
+
+// TestAssembleNamesExportedTrace checks that a job's top-level spans name the OpenTelemetry trace the job was exported
+// in, and whether it was sampled, when its manifest says it was, and that spans within them, the spans of a job not
+// exported, and those of a manifest stored before vamos exported, name none.
+func TestAssembleNamesExportedTrace(t *testing.T) {
+	a := newAssembly(t)
+	top := a.span("t1", "main", "build", 0, 60)
+	top.Parent = "client-1" // the client's span, which the job's top-level span is part of
+	inner := a.span("t2", "main", "load", 10, 20)
+	inner.Parent = "t1"
+	exported := a.job("j1", []tracing.Span{top, inner})
+	data, err := api.JobTrace{Spans: []tracing.Span{top, inner},
+		Exported: tracing.Exported{TraceID: "4bf92f3577b34da6a3ce929d0e0e4736", SpanID: "00f067aa0ba902b7",
+			Sampled: true}}.Encode(tracing.Lost{})
+	must(t, err)
+	b, err := a.m.PutBytes(t.Context(), data)
+	must(t, err)
+	exported.Manifest = &b
+
+	got := placed(t, assemble(t.Context(), a.m, api.CommandTrace{Jobs: []api.CommandJob{exported}}, tracing.Lost{}))
+	if s := got["build"]; s.Args["otel trace"] != "4bf92f3577b34da6a3ce929d0e0e4736" || s.Args["otel sampled"] != true {
+		t.Errorf("the job's top-level span says %v; want its OpenTelemetry trace, sampled", s.Args)
+	}
+	if s := got["load"]; s.Args["otel trace"] != nil {
+		t.Errorf("a span within the job's top-level one says %v; want no OpenTelemetry trace", s.Args)
+	}
+
+	// Another job's cache write, on the shared track, isn't the job's, and an unsampled trace says so.
+	joinedWrite := a.span("w2", `layer "app" (shared)`, "cache write", 30, 31, "attempt", "a9", tracing.Shared, true)
+	data, err = api.JobTrace{Spans: []tracing.Span{top, joinedWrite},
+		Exported: tracing.Exported{TraceID: "4bf92f3577b34da6a3ce929d0e0e4736", SpanID: "00f067aa0ba902b7"}}.Encode(
+		tracing.Lost{})
+	must(t, err)
+	b, err = a.m.PutBytes(t.Context(), data)
+	must(t, err)
+	got = placed(t, assemble(t.Context(), a.m, api.CommandTrace{Jobs: []api.CommandJob{{ID: "j4", Manifest: &b}}},
+		tracing.Lost{}))
+	if s := got["build"]; s.Args["otel sampled"] != false {
+		t.Errorf("the unsampled job's top-level span says %v; want otel sampled false", s.Args)
+	}
+	if s, ok := got["cache write"]; !ok || s.Args["otel trace"] != nil || s.Args["otel sampled"] != nil ||
+		s.Args[tracing.Shared] != nil {
+		t.Errorf("another job's cache write on the shared track says %v; want no OpenTelemetry trace", s.Args)
+	}
+
+	older := fmt.Sprintf(`{"version":%d,"kind":%q,"spans":[{"id":"t1","process":"executor","track":"main",`+
+		`"name":"build","start":%q,"end":%q}],"entries":[]}`, tracing.Version, api.KindJob,
+		top.Start.Format(time.RFC3339Nano), top.End.Format(time.RFC3339Nano))
+	b, err = a.m.PutBytes(t.Context(), []byte(older))
+	must(t, err)
+	data, err = api.JobTrace{Spans: []tracing.Span{top},
+		Exported: tracing.Exported{TraceID: strings.Repeat("Z", 1<<10), Sampled: true}}.Encode(tracing.Lost{})
+	must(t, err)
+	malformed, err := a.m.PutBytes(t.Context(), data)
+	must(t, err)
+	for name, job := range map[string]api.CommandJob{
+		"a job not exported":                      a.job("j2", []tracing.Span{top}),
+		"a manifest stored before vamos exported": {ID: "j3", Manifest: &b},
+		"a manifest whose trace ID isn't one":     {ID: "j5", Manifest: &malformed},
+	} {
+		got := placed(t, assemble(t.Context(), a.m, api.CommandTrace{Jobs: []api.CommandJob{job}}, tracing.Lost{}))
+		if s, ok := got["build"]; !ok || s.Args["otel trace"] != nil || s.Args["otel sampled"] != nil {
+			t.Errorf("%s: the top-level span says %v; want no OpenTelemetry trace", name, s.Args)
+		}
+	}
 }

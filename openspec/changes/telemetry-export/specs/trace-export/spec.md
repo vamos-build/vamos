@@ -91,13 +91,15 @@ of an attempt's trace that was cut short SHALL be absent, as it is from the stor
 
 A job's trace ID and its spans' IDs SHALL be derived from the coordinator's instance, the job and vamos's span IDs, so
 that a job resumed after a restart that kept the coordinator's state goes on in the same trace. The `--trace` file and
-`vamos trace` file SHALL name, on each job's spans, the trace ID the job was exported under, and whether it was sampled.
+`vamos trace` file SHALL name, on each job's top-level spans, the trace ID the job was exported under, and whether it
+was sampled, but for its copies of an attempt's cache write, which the attempt's own trace holds when it is kept.
 
 #### Scenario: The trace file names the exported trace
 
 - **GIVEN** a coordinator with a worker, exporting traces to an OTLP collector
 - **WHEN** I build `app` on the coordinator with `--trace trace.json`
-- **THEN** the spans of the build's job in `trace.json` name the trace ID of the trace that the collector received
+- **THEN** the top-level spans of the build's job in `trace.json` name the trace ID of the trace that the collector
+  received
 
 #### Scenario: A job that wasn't exported names no trace ID
 
@@ -109,9 +111,7 @@ that a job resumed after a restart that kept the coordinator's state goes on in 
 
 An attempt's spans SHALL be exported once, in the trace of the job that started it, under one span for the attempt,
 even if that job left the attempt running. Each job that joined the attempt SHALL link its target's span to that
-attempt span, unless the joiner's spans are exported before the attempt's are handed to export, as a joiner cancelled
-while the attempt runs on may be, or after the coordinator has forgotten the attempt, as it remembers a bounded number;
-such a joiner MAY lack the link.
+attempt span.
 
 #### Scenario: A joined attempt is linked, not repeated
 
@@ -121,6 +121,21 @@ such a joiner MAY lack the link.
 - **THEN** the steps of `app`'s attempt are in the trace of the build that started it alone
 - **AND** in the trace of the build that joined it, the span of `layer "app"` links to the attempt's span in the other
   trace
+
+### Requirement: A shared attempt's export may fall short when its starter's isn't kept or it is forgotten
+
+A joiner whose spans are exported before the attempt's are handed to export, as a joiner cancelled while the attempt
+runs on may be, or after the coordinator has forgotten the attempt, as it remembers a bounded number, MAY lack its
+link. If the starter's trace isn't kept, or the coordinator has forgotten the attempt, each sampled job the attempt
+served MAY export its own copy of the attempt's cache write, and a sampled job SHALL then hold one.
+
+#### Scenario: A joiner of an attempt whose starter's trace isn't kept keeps its cache write
+
+- **GIVEN** a coordinator with a worker, exporting traces to an OTLP collector
+- **AND** a build of `app` under an unsampled `TRACEPARENT`, and another of `app`, sampled, that joins its attempt
+- **WHEN** both have finished
+- **THEN** the collector received no span of the first build
+- **AND** the trace of the second build holds the attempt's cache write
 
 ### Requirement: Arrows become span links
 

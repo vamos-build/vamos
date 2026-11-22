@@ -58,16 +58,16 @@
 - [x] 3.1 Add `tracing.Exported`, `WithExported` and `ExportedOf`, and the `role` argument's constants (`target`,
   `wait`, `try`), to `tracing` without imports. Update `internal/tracing/doc.go`, and verify with unit tests and
   `TestImportRules`
-- [ ] 3.2 Add `sched.SpanSink` and call it from `Sharing.attempt` (`AttemptStarted` as the attempt starts, `Attempt`
-  beside `saveTrace`) and from `RunJob` (`Job` beside `JobTrace.Save`) with the same trimmed spans that are stored. Add
-  `AttemptTrace.Exported`. Verify with `sched` tests using a fake sink: its spans equal the stored document's, one cut
-  short by `LimitTraces` included, an attempt whose starter left is still passed under the starter's context, and a joiner's `Traced` gets the attempt's
-  `Exported`
-- [ ] 3.3 Have the scheduler set `role` `target`, `kind`, `outcome`, `target` (`graph.Node.Target`), `attempt`, and
+- [x] 3.2 Add `sched.SpanSink` and call it from `Sharing.attempt` (`Attempt` beside `saveTrace`, before any job is
+  told of the attempt's end) and from `RunJob` (`Job` beside `JobTrace.Save`) with the same trimmed spans that are
+  stored. Verify with `sched` tests using a fake sink: its spans equal the stored document's, one cut short by
+  `LimitTraces` included, an attempt whose starter left is still passed under the starter's context, a joiner is told
+  of the attempt's end only after the sink, and a trace that can't be stored is passed all the same
+- [x] 3.3 Have the scheduler set `role` `target`, `kind`, `outcome`, `target` (`graph.Node.Target`), `attempt`, and
   `lost` with its reason, on layers', tasks' and pulls' spans. Verify with `scheduler_trace_test.go` cases for a hit, a
   miss, a join, a lost result and a failure, and check that the `build-traces` scenarios still pass with
   `go test ./internal/features -run TestTrace_`
-- [ ] 3.4 Add `api.JobTrace.Exported`, set by `JobTrace.Save` from `tracing.ExportedOf`, and have CLI assembly write
+- [x] 3.4 Add `api.JobTrace.Exported`, set by `JobTrace.Save` from `tracing.ExportedOf`, and have CLI assembly write
   `otel trace` and `otel sampled` on each job's top-level spans when it is set. Verify with `cli` trace assembly tests
   for a manifest with and without it, and an older manifest, and update `internal/api/doc.go` and `internal/sched/doc.go`
 
@@ -103,7 +103,9 @@
   each of its scenarios, with doc comments in the words of the reference pages. Rules call `parallelRule(t)`, but for
   those that set the process's environment, as `GivenTRACEPARENT` does, or rely on a default port, the collector's
   4318 or the scrape's 9464, which run alone. The joined attempt's scenario holds the step with `GivenABarrier` until
-  `GivenTheBarrierOpensOnceTheOtherClientIsJoined`, rather than sleeping. Verify with
+  `GivenTheBarrierOpensOnceTheOtherClientIsJoined`, rather than sleeping; a case holds the barrier until the starter is
+  cancelled and the joiner alone keeps the attempt, then checks that the attempt's cache write is exported once, under
+  the attempt's span, and that the joiner's target span links to that span. Verify with
   `go test ./internal/features -run TestTraceExport_` as root with buildah, and that the start-up mistakes' scenarios
   run under `-short`
 - [ ] 5.4 Write `docs/design/observability.md`: the bridge, the hook points, ID derivation, sampling, links, and why the

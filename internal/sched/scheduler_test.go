@@ -457,8 +457,33 @@ func TestSchedulerRegenerates(t *testing.T) {
 	}
 	// Nothing reads the files until a target runs: the layer is rebuilt, and finds them.
 	ev = &recordedEvents{}
-	_, err = schedule(g, m, m, f, ev, true, time.Time{}).Run(t.Context())
+	ctx, trace := ForJob(t.Context())
+	_, err = schedule(g, m, m, f, ev, true, time.Time{}).Run(ctx)
 	testenv.Must(t, err)
+	_, spans, err := trace.Save(ctx, m)
+	testenv.Must(t, err)
+	regenerated := 0
+	for _, s := range spans {
+		if s.Name == `task "one"` && s.Args["status"] != "cached" {
+			regenerated++
+			if s.Args["lost"] != lostCorrupt {
+				t.Errorf("the regenerated task's span says %v; want it lost, corrupt", s.Args)
+			}
+		}
+	}
+	if regenerated == 0 {
+		t.Error("no span of task one says it was built again")
+	}
+	outcomes := map[any]int{}
+	for _, s := range spans {
+		if s.Name == `layer "app"` {
+			outcomes[s.Args["outcome"]]++
+		}
+	}
+	if outcomes[outcomeRetried] == 0 || outcomes[outcomeFailed] != 0 {
+		t.Errorf("the layer's spans' outcomes = %v; want it retried as its inputs were made again, never failed",
+			outcomes)
+	}
 	var statuses []string
 	for _, s := range ev.statuses {
 		parts := strings.SplitN(s, ":", 3)
@@ -488,10 +513,23 @@ func TestSchedulerRegenerates(t *testing.T) {
 		}
 		return nil
 	}
-	_, err = schedule(g, m, m, f, &recordedEvents{}, true, time.Time{}).Run(t.Context())
+	ctx, trace = ForJob(t.Context())
+	_, err = schedule(g, m, m, f, &recordedEvents{}, true, time.Time{}).Run(ctx)
 	if err == nil || !strings.Contains(err.Error(), `layer "app": add("two", "/data") failed: blob `) ||
 		strings.Contains(err.Error(), "captured and submitted again") {
 		t.Errorf("run = %v, want the layer's failure, without advice meant for a glob's files", err)
+	}
+	_, spans, err = trace.Save(ctx, m)
+	testenv.Must(t, err)
+	var layerOutcomes []any
+	for _, s := range spans {
+		if s.Name == `layer "app"` {
+			layerOutcomes = append(layerOutcomes, s.Args["outcome"])
+		}
+	}
+	if !slices.Equal(layerOutcomes, []any{outcomeRetried, outcomeFailed}) {
+		t.Errorf("the layer's spans' outcomes = %v; want retried, then failed, as its input was made again already",
+			layerOutcomes)
 	}
 }
 
@@ -1426,7 +1464,7 @@ func BenchmarkSchedulerCachedJob(b *testing.B) {
 		if _, err := New(g, backend, &recordedEvents{}, Options{Bound: 8, Workspace: "com.acme"}).Run(ctx); err != nil {
 			b.Fatal(err)
 		}
-		if _, err := trace.Save(ctx, cache.NewMemory()); err != nil { // not kept, as no iteration's is read
+		if _, _, err := trace.Save(ctx, cache.NewMemory()); err != nil { // not kept, as no iteration's is read
 			b.Fatal(err)
 		}
 	}

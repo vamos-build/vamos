@@ -115,7 +115,7 @@ func runNamed(t *testing.T, g *graph.Graph, m *cache.Memory, records cache.Recor
 	ctx, trace := ForJob(t.Context())
 	b := Backend{Content: m, Records: records, Checker: r, Runner: NewSharing(r, m, records)}
 	_, err := New(g, b, &recordedEvents{}, Options{Bound: 1, Workspace: workspace}).Run(ctx)
-	saved, serr := trace.Save(ctx, m)
+	saved, _, serr := trace.Save(ctx, m)
 	testenv.Must(t, serr)
 	data, rerr := m.Read(t.Context(), *saved, tracing.MaxTraceSize)
 	testenv.Must(t, rerr)
@@ -232,7 +232,7 @@ func TestSchedulerHistoryWorkspaces(t *testing.T) {
 			g := historyGraph(t, two, "gen")
 			_, err := New(g, backend, &recordedEvents{}, Options{Bound: 1, Workspace: workspace}).Run(ctx)
 			testenv.Must(t, err)
-			saved, err := trace.Save(ctx, m)
+			saved, _, err := trace.Save(ctx, m)
 			testenv.Must(t, err)
 			data, err := m.Read(t.Context(), *saved, tracing.MaxTraceSize)
 			testenv.Must(t, err)

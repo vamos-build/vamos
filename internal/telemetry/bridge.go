@@ -322,19 +322,8 @@ func jobOf(ctx context.Context) *job {
 	return j
 }
 
-// AttemptStarted returns how the attempt id, which the job of ctx starts, is exported, as its span's trace and span
-// IDs; the target spans of jobs that join it link to it once Attempt has queued its snapshot.
-// It returns the zero value if the job isn't exported.
-func (b *Bridge) AttemptStarted(ctx context.Context, id string) tracing.Exported {
-	j := jobOf(ctx)
-	if b == nil || j == nil || b.tracer == nil {
-		return tracing.Exported{}
-	}
-	sc := j.spanContext(attemptSpanIDOf(id))
-	return tracing.Exported{TraceID: sc.TraceID().String(), SpanID: sc.SpanID().String(), Sampled: j.sampled}
-}
-
-// Attempt exports the spans of the attempt id, which ran from start to end, into the trace of the job of ctx,
+// Attempt exports the spans of the attempt id, whose span the target spans of jobs that join it link to once its
+// snapshot is queued, which ran from start to end, into the trace of the job of ctx,
 // later, on the bridge's goroutine, which reads spans then, so the caller doesn't change them;
 // which started it, even if that job has since left it:
 // under a span of the attempt's own, itself under the span that the attempt's work is part of, its starter's target.
@@ -386,16 +375,38 @@ func (b *Bridge) Job(ctx context.Context, spans []tracing.Span, start, end time.
 // What the snapshot's own spans produced, a span using it links to first, wherever it lies in the snapshot,
 // and the bridge then remembers it for the snapshots exported later.
 func (b *Bridge) export(j *job, top trace.SpanID, spans []tracing.Span) {
+	// Copies of spans an attempt's export holds, such as its cache write, are neither indexed nor exported, so that
+	// nothing points at a span this snapshot doesn't make, unless the attempt wasn't exported, as one whose starter's
+	// trace isn't kept isn't, which leaves the copies to every job that keeps its own.
+	skip := func(s tracing.Span) bool {
+		if s.Args[tracing.Shared] != true {
+			return false
+		}
+		id, _ := s.Args["attempt"].(string)
+		b.mu.Lock()
+		_, exported := b.attempts.get(id)
+		b.mu.Unlock()
+		return exported
+	}
+	// The spans skipped, by place, as two targets' copies of one attempt's cache write share an ID.
+	skipped := map[int]bool{}
 	ids := make(map[string]trace.SpanID, len(spans)) // the derived ID of each span in the snapshot
 	produced := map[string]trace.SpanContext{}
-	for _, s := range spans {
+	for i, s := range spans {
+		if _, seen := ids[s.ID]; skip(s) || seen && s.Args[tracing.Shared] == true {
+			skipped[i] = true
+			continue
+		}
 		ids[s.ID] = spanIDOf(b.instance, j.info.ID, s.ID)
 		if s.Produces != "" {
 			produced[s.Produces] = j.spanContext(ids[s.ID])
 			b.produced.put(s.Produces, produced[s.Produces]) // in the snapshot's order, which the lru's follows
 		}
 	}
-	for _, s := range spans {
+	for i, s := range spans {
+		if skipped[i] {
+			continue
+		}
 		parent := top
 		if id, ok := ids[s.Parent]; ok && s.Parent != "" {
 			parent = id
@@ -504,9 +515,8 @@ func attributesOf(s tracing.Span) []attribute.KeyValue {
 		}
 	}
 	for _, k := range slices.Sorted(maps.Keys(s.Args)) {
-		if k == "error" || slices.ContainsFunc(renamed, func(r struct{ arg, attribute string }) bool {
-			return r.arg == k
-		}) {
+		isRenamed := slices.ContainsFunc(renamed, func(r struct{ arg, attribute string }) bool { return r.arg == k })
+		if k == "error" || k == tracing.Shared || isRenamed {
 			continue
 		}
 		attrs = append(attrs, attributeOf("vamos.arg."+strings.ReplaceAll(k, " ", "_"), s.Args[k]))

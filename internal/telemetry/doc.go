@@ -33,8 +33,8 @@
 // before it returns, so that an address in use fails it.
 // A coordinator then gives each job's context to Bridge.StartJob as the job starts,
 // which puts its record and its tracing.Exported in the context, which the attempts it starts inherit.
-// The sched hooks call AttemptStarted as an attempt starts, Attempt as its runner returns, and Job as the job ends,
-// each with the snapshot it stores.
+// The sched hooks call Attempt as an attempt's runner returns, and Job as the job ends, each with the snapshot it
+// stores.
 // Export happens in the background: a failure doesn't reach the job, but the process's error handler,
 // which HandleErrors installs once, and which reports each distinct one at most once a minute.
 // A Setup that fails stops what it had started.

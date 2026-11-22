@@ -27,6 +27,10 @@ func ExportedOf(ctx context.Context) Exported {
 // metrics, rather than its display name, which may change.
 const Role = "role"
 
+// Shared is the argument, true, of a span a job holds a copy of, of an attempt that served it, such as the attempt's
+// cache write, which every job the attempt served holds; an exporter exports it once, with the attempt's.
+const Shared = "shared"
+
 // The values of a span's Role argument.
 const (
 	// RoleTarget is a target's span, a layer's, task's or pull's, which says whether it hit, missed or joined.

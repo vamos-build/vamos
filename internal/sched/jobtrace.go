@@ -67,41 +67,92 @@ func (t *JobTrace) Record(e api.TraceEntry) {
 	t.entries = append(t.entries, e)
 }
 
-// Save stores the job's manifest, its spans with each node's entry, in store, under ctx without its cancellation and
-// within traceSaveTimeout, so that a cancelled job's manifest is stored too, and returns its blob;
-// nil, with why, if it couldn't be stored, which leaves the job's outcome as it is.
+// Save stores the job's manifest, its spans with each node's entry and how ctx says its trace is exported, in store,
+// under ctx without its cancellation and within traceSaveTimeout, so that a cancelled job's manifest is stored too,
+// and returns its blob, nil, with why, if it couldn't be stored, which leaves the job's outcome as it is,
+// and the spans the manifest holds, trimmed to fit it, even if it couldn't be stored, but none if it couldn't be made.
 // The job's spans must have ended: it is called last, before the job returns its outcome.
-func (t *JobTrace) Save(ctx context.Context, store api.BlobPutter) (*cache.Blob, error) {
+func (t *JobTrace) Save(ctx context.Context, store api.BlobPutter) (*cache.Blob, []tracing.Span, error) {
 	spans, lost := t.recorder.Snapshot()
 	t.mu.Lock()
 	entries := slices.Clone(t.entries)
 	t.mu.Unlock()
+	manifest, err := api.JobTrace{Spans: spans, Entries: entries, Exported: tracing.ExportedOf(ctx)}.Trimmed(lost)
+	if err != nil { // with no spans, rather than ones the manifest might not have held
+		return nil, nil, fmt.Errorf("encoding the job's trace: %w", err)
+	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), traceSaveTimeout)
 	defer cancel()
-	b, err := api.JobTrace{Spans: spans, Entries: entries}.Save(ctx, store, lost)
+	b, err := manifest.Put(ctx, store)
 	if err != nil {
-		return nil, err
+		return nil, manifest.Spans, err
 	}
-	return &b, nil
+	return &b, manifest.Spans, nil
+}
+
+// SpanSink is told each snapshot of spans that sched stores, a job's or an attempt's, trimmed as it is stored, under
+// the context of the job that recorded it, or that started the attempt, even if that job has since left it.
+// It must not change the spans, and may read them after it returns.
+// A coordinator's exports them; nil, as an executor's that exports nothing, is told nothing.
+// Its methods are called on the paths of jobs and attempts, which wait for them, from several goroutines at once, and
+// with contexts that may have been cancelled: a sink that exports hands the spans off rather than sending them.
+type SpanSink interface {
+	// Attempt is told the spans of the attempt id, which ran from start until its result was recorded, at end,
+	// whether or not its trace could be stored, though none of the runner's if it couldn't be made, followed by the
+	// span of its cache write, if any, which its trace can't hold; and before any job it serves is told of its end.
+	Attempt(ctx context.Context, id string, spans []tracing.Span, start, end time.Time)
+	// Job is told the spans of the job, which ran from start to end and ended as outcome says, succeeded, failed or
+	// cancelled, as RunJob returns, whether or not its manifest could be stored, though none if it couldn't be made.
+	// Those marked tracing.Shared are copies of an attempt's, such as its cache write, which Attempt was told of.
+	Job(ctx context.Context, spans []tracing.Span, start, end time.Time, outcome string)
+}
+
+// The outcomes SpanSink.Job is told.
+const (
+	JobSucceeded = "succeeded"
+	JobFailed    = "failed"
+	JobCancelled = "cancelled"
+)
+
+// outcomeOf returns how a job whose context is ctx ended with o, as SpanSink.Job is told: cancelled if it didn't
+// succeed and its context has ended, as its target spans say, whatever error it failed with, and failed otherwise.
+func outcomeOf(ctx context.Context, o api.Outcome) string {
+	switch {
+	case o.Failure == nil && !o.Cancelled:
+		return JobSucceeded
+	case ctx.Err() != nil:
+		return JobCancelled
+	default:
+		return JobFailed
+	}
 }
 
 // RunJob runs work, a job's, recording its trace, always, and stores the job's manifest once work returns, before
 // the job does, naming it in the outcome; a manifest that can't be stored, or a content store that can't be opened,
 // leaves the outcome naming none, and otherwise as it is, and is reported to warn, if it isn't nil.
-func RunJob(ctx context.Context, content func() (cache.ContentStore, error), warn func(error),
+// It tells sink, if it isn't nil, of the spans the manifest holds, beside storing it.
+func RunJob(ctx context.Context, content func() (cache.ContentStore, error), warn func(error), sink SpanSink,
 	work func(context.Context) api.Outcome) api.Outcome {
 	ctx, trace := ForJob(ctx)
+	start := time.Now()
 	outcome := work(ctx)
+	ended := outcomeOf(ctx, outcome) // as work returned, whatever befalls the job as its manifest is stored
 	var store api.BlobPutter
 	if opened, err := content(); err != nil {
 		store = refusing{err}
 	} else {
 		store = opened
 	}
-	var err error
-	outcome.Trace, err = trace.Save(ctx, store)
+	var (
+		spans []tracing.Span
+		err   error
+	)
+	outcome.Trace, spans, err = trace.Save(ctx, store)
 	if err != nil && warn != nil {
 		warn(fmt.Errorf("storing the job's trace: %w", err))
+	}
+	if sink != nil {
+		sink.Job(ctx, spans, start, time.Now(), ended) // as RunJob returns, its manifest stored
 	}
 	return outcome
 }

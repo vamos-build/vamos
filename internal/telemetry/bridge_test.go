@@ -220,7 +220,6 @@ func TestBridgeOuterTrace(t *testing.T) {
 		t.Errorf("the job's tracestate = %q, want ci=pipeline", state)
 	}
 	// Only the outer span is remote; the job's own attempt is under the job's span, which this process made.
-	b.AttemptStarted(ctx, "att-1")
 	b.Attempt(ctx, "att-1", []tracing.Span{{ID: "s-1", Name: "step", Start: at(0), End: at(1)}}, at(0), at(1))
 	for name, s := range byName(t, b, exporter) {
 		if name != "build" && (!s.Parent.IsValid() || s.Parent.IsRemote()) {
@@ -248,9 +247,6 @@ func TestBridgeDroppedTrace(t *testing.T) {
 	if e := tracing.ExportedOf(ctx); e.TraceID != "4bf92f3577b34da6a3ce929d0e0e4736" || e.Sampled {
 		t.Errorf("ExportedOf the job's context = %+v, want the outer trace, not sampled", e)
 	}
-	if e := b.AttemptStarted(ctx, "att-1"); e.Sampled {
-		t.Errorf("AttemptStarted = %+v, want not sampled", e)
-	}
 	spans := []tracing.Span{{ID: "s-1", Name: "step", Start: at(0), End: at(1)}}
 	b.Attempt(ctx, "att-1", spans, at(0), at(1))
 	b.Job(ctx, spans, at(0), at(2), "succeeded")
@@ -269,11 +265,7 @@ func TestBridgeAttempt(t *testing.T) {
 	defer target.End()
 	attemptCtx := tracing.WithRecorderAt(context.WithoutCancel(ctx), tracing.NewRecorder("vamos", nil))
 
-	exported := b.AttemptStarted(attemptCtx, "att-1")
 	wantTrace, wantAttempt := traceIDOf("i", "job-1"), attemptSpanIDOf("att-1")
-	if exported != (tracing.Exported{TraceID: wantTrace.String(), SpanID: wantAttempt.String(), Sampled: true}) {
-		t.Errorf("AttemptStarted = %+v, want trace %s, span %s, sampled", exported, wantTrace, wantAttempt)
-	}
 	b.Attempt(attemptCtx, "att-1", []tracing.Span{
 		{ID: "a-1", Parent: target.ID(), Process: "executor", Name: "run", Start: at(10), End: at(20)},
 	}, at(5), at(25))
@@ -318,7 +310,6 @@ func TestBridgeLinks(t *testing.T) {
 	dropped := b.StartJob(context.Background(), JobInfo{ID: "job-3", Kind: "build",
 		Parent: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00"})
 
-	b.AttemptStarted(starter, "att-1")
 	b.Attempt(starter, "att-1", []tracing.Span{
 		{ID: "a-1", Name: "commit base", Start: at(1), End: at(2), Produces: "image:base"},
 	}, at(0), at(3))
@@ -437,9 +428,6 @@ func TestBridgeDropsWholeSnapshots(t *testing.T) {
 	job1 := b.StartJob(context.Background(), JobInfo{ID: "job-1", Kind: "build", Parent: outer})
 	job2 := b.StartJob(context.Background(), JobInfo{ID: "job-2", Kind: "push", Parent: outer})
 	job3 := b.StartJob(context.Background(), JobInfo{ID: "job-3", Kind: "export"})
-	b.AttemptStarted(job1, "att-a")
-	b.AttemptStarted(job1, "att-c")
-	b.AttemptStarted(job1, "att-e") // still running when job-1 is cut, so its snapshot will be dropped
 	b.Attempt(job1, "att-a", two("a"), at(0), at(2))
 	<-exporter.entered                               // the converter takes a, and waits in its first export
 	b.Attempt(job1, "att-b", two("b"), at(0), at(2)) // waits
@@ -449,8 +437,6 @@ func TestBridgeDropsWholeSnapshots(t *testing.T) {
 		t.Fatal(err)
 	}
 	b.Job(job1, two("j"), at(0), at(3), "succeeded") // job-1's: dropped, though nothing waits
-	b.AttemptStarted(job1, "att-d")                  // whose snapshot will be dropped, as job-1's are
-	b.AttemptStarted(job2, "att-f")                  // still running as job-3's span is converted, so not linked
 	b.Job(job2, two("k"), at(0), at(3), "succeeded") // another job's of the same outer trace: sent
 	if err := b.flush(t.Context()); err != nil {
 		t.Fatal(err)
@@ -680,5 +666,32 @@ func TestBoundedMarksWhatItCuts(t *testing.T) {
 				t.Errorf("bounded(%s) marked truncated: %t, want %t", c.name, truncated, c.want)
 			}
 		})
+	}
+}
+
+// TestBridgeSkipsSharedCopies checks that a job's copy of an attempt's span, such as its cache write, isn't exported
+// again when the attempt was, and is, without its mark, when it wasn't, as when its starter's trace isn't kept.
+func TestBridgeSkipsSharedCopies(t *testing.T) {
+	b, exporter := newTestBridge(t, nil)
+	starter := b.StartJob(context.Background(), JobInfo{ID: "job-0", Kind: "build"})
+	b.Attempt(starter, "att-x", nil, at(0), at(1))
+	ctx := b.StartJob(context.Background(), JobInfo{ID: "job-1", Kind: "build"})
+	copyOf := func(id, attempt string) tracing.Span {
+		return tracing.Span{ID: id, Name: "cache write of " + attempt, Start: at(0), End: at(1),
+			Args: map[string]any{tracing.Shared: true, "attempt": attempt}}
+	}
+	// Two targets of the job joined att-y, so the job holds two copies of its cache write, which it exports once.
+	b.Job(ctx, []tracing.Span{{ID: "s-1", Name: "own", Start: at(0), End: at(1)}, copyOf("s-2", "att-x"),
+		copyOf("s-3", "att-y"), copyOf("s-3", "att-y")}, at(0), at(2), "succeeded")
+	got := byName(t, b, exporter)
+	if _, ok := got["cache write of att-x"]; ok {
+		t.Error("the copy of a span of an exported attempt was exported again")
+	}
+	y, ok := got["cache write of att-y"]
+	if !ok {
+		t.Fatal("the copy of a span of an attempt that wasn't exported wasn't exported either")
+	}
+	if _, marked := attrsOf(y)["vamos.arg.shared"]; marked {
+		t.Errorf("the exported copy says %v; want no mark", y.Attributes)
 	}
 }

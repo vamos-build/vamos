@@ -61,6 +61,16 @@
 // through the cache, before it returns its outcome; Sharing records each attempt's spans apart and stores them as the
 // attempt's trace before it publishes, so that a result names the trace of the run that made it, and tells every job
 // that waits for the attempt of it through Traced, a job that leaves the attempt running of its ID alone.
+// A SpanSink, which RunJob and WithSpanSink take, is told the same trimmed spans that are stored, under the context
+// of the job that recorded them, or that started the attempt even if it left: an attempt's, with its cache write, once
+// its result is recorded and before any job is told of its end, so that a joiner's link, made by the attempt's ID,
+// finds it; and a job's as RunJob returns, ended as it was when its work returned, cancelled if its context had ended.
+// Every job's copy of an attempt's cache write is marked tracing.Shared, as the attempt's export holds it.
+// sched never imports OpenTelemetry.
+// Each pull's, layer's and task's span says it is a target, through tracing.Role, with its kind, configured target,
+// outcome (hit, miss, joined, failed, cancelled, as its job's context says, or retried, as when its input is made
+// again), the attempt that served it, and why a cached result was lost, from a bounded set; its status text is its
+// status argument.
 // In a named workspace, each layer and task keeps a history, named by HistoryName from the workspace and its
 // graph.Node.Target: a miss reads it once and attribute, a pure function, finds the cause, forced, lost, new,
 // own-inputs, upstream or dependency, against the nearest of its entries of the current ActionVersion; the entry is
@@ -72,7 +82,7 @@
 //
 // scheduler.go owns dispatch, keys, epochs, cached resolves, index assembly, tag pinning and the emulation check;
 // share.go owns attempts and the record writes; jobs.go owns events, retention and the bound on open jobs;
-// action.go owns the keyed payload; jobtrace.go owns ForJob, JobTrace, Traced and the manifest's save;
+// action.go owns the keyed payload; jobtrace.go owns ForJob, JobTrace, Traced, SpanSink and the manifest's save;
 // history.go owns target history, its entries, attribute and the order of causes;
 // events.go carries statuses, output and a client's spans to events; failure.go crosses a Runner's error as data,
 // AttemptFailure, and back; destination.go parses push destinations for both executors.

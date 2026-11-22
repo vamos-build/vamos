@@ -2,13 +2,16 @@ package cli
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"math"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -310,13 +313,26 @@ func readAll(ctx context.Context, content cache.ContentStore, blobs []cache.Blob
 	return data, errs
 }
 
+// isTraceID reports whether id is a valid OpenTelemetry trace ID, as a manifest names it, in lower-case hex and not
+// all zeros, so that a manifest read from a store anyone can write to adds nothing larger or invalid to every
+// top-level span.
+func isTraceID(id string) bool {
+	if len(id) != 32 || strings.ToLower(id) != id || strings.Trim(id, "0") == "" {
+		return false
+	}
+	_, err := hex.DecodeString(id)
+	return err == nil
+}
+
 // assemble returns the spans of doc, a command's trace, as a trace file shows them: the client's spans, with an
 // instant for those its recorder refused, as lost says, placed on the executor's clock by the offset doc measured;
-// each job's own spans, from its manifest; and the spans of each attempt a job took the trace of, once, by the
-// attempt's ID: as recorded, under its target, if the job that started it took the trace, and otherwise on the
-// target's shared track, part of no span, in the first job in doc's order that took it, whose cache write of it alone
-// is kept. A part of the trace that can't be read, or that no job took, is an instant saying so, where it would have
-// been. Hits' attempt traces aren't placed: they ran at another time, and the hit's span names its trace.
+// each job's own spans, from its manifest, its top-level ones naming, as "otel trace" and "otel sampled", the
+// OpenTelemetry trace the job was exported in, if it was; and the spans of each attempt a job took the trace of,
+// once, by the attempt's ID: as recorded, under its target, if the job that started it took the trace, and
+// otherwise on the target's shared track, part of no span, in the first job in doc's order that took it, whose cache
+// write of it alone is kept. A part of the trace that can't be read, or that no job took, is an instant saying so,
+// where it would have been. Hits' attempt traces aren't placed: they ran at another time, and the hit's span names
+// its trace.
 func assemble(ctx context.Context, content cache.ContentStore, doc api.CommandTrace,
 	lost tracing.Lost) []tracing.Span {
 	client := tracing.Shift(tracing.Trim(doc.Spans, lost, math.MaxInt),
@@ -390,16 +406,36 @@ func assemble(ctx context.Context, content cache.ContentStore, doc api.CommandTr
 		}
 	}
 
-	// Each job's own spans, but the cache writes of attempts another job places.
+	// Each job's own spans, but the cache writes of attempts another job places, its top-level ones naming the trace
+	// it was exported in, if it was.
 	for i, m := range manifests {
 		if m == nil {
 			continue
+		}
+		var own map[string]bool // the job's own spans, if it was exported, which its top-level ones aren't part of
+		if isTraceID(m.Exported.TraceID) {
+			own = make(map[string]bool, len(m.Spans))
+			for _, s := range m.Spans {
+				own[s.ID] = true
+			}
 		}
 		for _, s := range m.Spans {
 			if id, ok := s.Args["attempt"].(string); ok && s.Name == "cache write" {
 				if p, ok := placed[id]; ok && p.job >= 0 && p.job != i {
 					continue
 				}
+			}
+			// Not the copies of an attempt's spans, such as its cache write, which the attempt's export holds; their
+			// mark, which only an exporter reads, is left out of the file, where shared means another job's.
+			if s.Args[tracing.Shared] == true {
+				s.Args = maps.Clone(s.Args)
+				delete(s.Args, tracing.Shared)
+			} else if own != nil && !own[s.Parent] {
+				s.Args = maps.Clone(s.Args)
+				if s.Args == nil {
+					s.Args = map[string]any{}
+				}
+				s.Args["otel trace"], s.Args["otel sampled"] = m.Exported.TraceID, m.Exported.Sampled
 			}
 			spans = append(spans, s)
 		}
@@ -439,7 +475,7 @@ func assemble(ctx context.Context, content cache.ContentStore, doc api.CommandTr
 				if track == "" {
 					track = s.Track
 				}
-				s.Track, s.Parent = track+" (shared)", ""
+				s.Track, s.Parent = track+" (shared)", "" // as sched's sharedTrack names it
 			}
 			spans = append(spans, s)
 		}

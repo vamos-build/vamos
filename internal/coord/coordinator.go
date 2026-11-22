@@ -461,7 +461,7 @@ func (c *Coordinator) build(g api.GraphRequest, native []string) func(ctx contex
 func (c *Coordinator) traced(ctx context.Context, work func(context.Context) api.Outcome) api.Outcome {
 	id := jobOf(ctx)
 	return sched.RunJob(ctx, func() (cache.ContentStore, error) { return c.content, nil },
-		func(err error) { c.cfg.Warn(fmt.Errorf("the job %s: %w", id, err)) }, work)
+		func(err error) { c.cfg.Warn(fmt.Errorf("the job %s: %w", id, err)) }, nil, work)
 }
 
 // begin starts a job as spec says, which runs work, with r its record, which the journal writes once the job is

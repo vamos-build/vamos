@@ -90,7 +90,7 @@ func TestTrace_ShowsTheBuild(t *testing.T) {
 			w.ThenTheTraceSpanSaysAtLeast("executor", "collect output", traceArgs{"files": 1, "bytes": 5})
 			w.ThenTheTraceSpanIsOnTrack("executor", `layer "app"`, `layer "app"`)
 			w.ThenTheTraceSpanSaysAtLeast("executor", `layer "app"`,
-				traceArgs{"outcome": "building", "image ID": "<image>"})
+				traceArgs{"status": "building", "image ID": "<image>"})
 			w.ThenTheTraceSpanHolds("executor", `layer "app"`, "cache lookup", "start", `add("gen", "/data")`,
 				`env(NONCE="*`, `workdir("/data")`, `run(["cat", "all.txt"])`, "commit", "cache write")
 			w.ThenTheTraceSpanHolds("executor", `add("gen", "/data")`, "checkout", "copy")
@@ -131,7 +131,7 @@ func TestTrace_ShowsTheBuild(t *testing.T) {
 			w.ThenItSucceeds()
 			w.ThenTheImageIsTheOneSavedFirst()
 			w.ThenTheTraceSpanSaysAtLeast("executor", `layer "app"`,
-				traceArgs{"outcome": "cached", "image ID": "<image>"})
+				traceArgs{"status": "cached", "image ID": "<image>"})
 			w.ThenTheTraceSpanHolds("executor", `layer "app"`, "cache lookup")
 			w.ThenTheTraceArrowsAre()
 		})
@@ -759,7 +759,7 @@ func TestTrace_AnAttemptsTraceIsKeptWithItsResult(t *testing.T) {
 		w.WhenIBuild("app", traced())
 		w.ThenItSucceeds()
 		w.ThenTheTargetsWere(statuses{layer("app"): reused})
-		w.ThenTheTraceSpanSaysAtLeast("executor", `layer "app"`, traceArgs{"outcome": "cached", "made": "*",
+		w.ThenTheTraceSpanSaysAtLeast("executor", `layer "app"`, traceArgs{"status": "cached", "made": "*",
 			"took": "*s", "saved": "*s", "attempt trace": "sha256:*"})
 		w.ThenTheHitTookAtLeast(`layer "app"`, 2*time.Second)
 		w.WhenIReadTheTrace(`<attempt trace of layer "app">`)
@@ -821,7 +821,7 @@ func TestTrace_ATraceIsCappedInSize(t *testing.T) {
 		w.ThenItWarnsNothing()
 		w.WhenIReadTheTrace("<printed trace>", onTheCoordinator("<coordinator>"))
 		w.ThenItSucceeds()
-		w.ThenTheTraceSpanSaysAtLeast("executor", `task "steps"`, traceArgs{"outcome": "building"})
+		w.ThenTheTraceSpanSaysAtLeast("executor", `task "steps"`, traceArgs{"status": "building"})
 		w.ThenTheTraceSpanIsWithin("executor", `env(STEP="1")`, "executor", `task "steps"`)
 		w.ThenTheTraceHasNoSpan("executor", `env(STEP="40")`)
 		w.ThenTheTraceSpanSaysAtLeast("executor", "trace truncated", traceArgs{"dropped": aCount})
