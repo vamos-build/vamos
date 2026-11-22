@@ -267,13 +267,14 @@ func (f *DeniedFs) denied(op, path string) error {
 	return nil
 }
 
-// CgroupRoot returns a cgroup root for the workers of this test binary, apart from every other's, which is removed
-// when the test ends if no attempt's cgroup is left in it: a worker kills the attempts whose cgroups it finds in its
-// root as it starts, as leftovers of one that crashed, so test binaries that `go test` runs at once mustn't share one.
-// Each call in a binary returns the same root, so tests that start workers mustn't run in parallel.
+// CgroupRoot returns a cgroup root for the workers of this test, apart from every other's, which is removed when the
+// test ends if no attempt's cgroup is left in it: a worker kills the attempts whose cgroups it finds in its root as it
+// starts, as leftovers of one that crashed, so tests that run at once, in this binary or in others that `go test`
+// runs at once, mustn't share one. Each call in a test returns the same root, so that a worker that starts again in
+// it finds the leftovers of the one before.
 func CgroupRoot(t *testing.T) string {
 	t.Helper()
-	root := fmt.Sprintf("/sys/fs/cgroup/vamos-test-%d", os.Getpid())
+	root := fmt.Sprintf("/sys/fs/cgroup/vamos-test-%d-%s", os.Getpid(), storesName(t.Name()))
 	t.Cleanup(func() {
 		if err := os.Remove(root); err != nil && !errors.Is(err, os.ErrNotExist) {
 			t.Logf("removing the test's cgroup root: %v", err)

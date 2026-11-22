@@ -14,6 +14,8 @@
 // WalkImage and ImagePath in image.go read a saved image's flattened filesystem.
 // SuiteStores and PrivateStores in stores.go give tests container stores and build caches of their own,
 // so that no test touches the developer's; see RemoveSuiteStores for cleanup.
+// PrivateStores copies in the overlay driver's checks of the filesystem that the suite's store made,
+// so that tests running in parallel don't each fork the binary to check it, as seedDriverChecks says.
 // Their overlay driver diffs layers natively, without the metacopy of Fedora's default storage.conf,
 // whose naive diffs wait for the next whole second after every commit;
 // NaiveDiffEnv gives a test binary's stores metacopy, as TestNaiveAndNativeDiffsMakeTheSameImage in cli does.
@@ -24,7 +26,9 @@
 // Tests in several packages use EditedFs to edit sources during a read, and DeniedFs to refuse to check a file.
 // Give each test its own EditedFs, since it keeps a count of opens to decide when to edit.
 // A test that starts a worker gives it CgroupRoot, as worker.Config's or cli.Config's CgroupRoot,
-// or its start may kill the attempts of a worker in another package's tests that `go test` runs at once.
+// or its start may kill the attempts of a worker in another test that runs at once, in its binary or another.
+// InsecureRegistry and MirroredRegistry add a test's registries to the registries.conf that Main shares with the
+// binary's tests for the whole run, so that tests running in parallel never change the environment.
 // Main mirrors Docker Hub for pulls by digest, in hub.go, keeping what it fetches in the user's cache folder,
 // or HubCacheEnv's, for later runs, so that pinned pulls of busybox don't spend Docker Hub's pull allowance,
 // in a registries.conf read after the environment's, unless that configures Docker Hub itself.

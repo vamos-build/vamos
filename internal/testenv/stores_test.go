@@ -102,6 +102,38 @@ func TestWithMetacopy(t *testing.T) {
 	}
 }
 
+// TestPrivateStoresStartWithTheDriversChecks checks that a test's store starts with the checks of the filesystem that
+// the overlay driver made for the suite's, and makes none of its own as it opens: one it lacked would be recorded.
+func TestPrivateStoresStartWithTheDriversChecks(t *testing.T) {
+	RequireBuildah(t)
+	suite := SuiteStores(t)
+	if suite.Options.GraphDriverName != "overlay" {
+		t.Skipf("the store's driver is %s, which records no checks", suite.Options.GraphDriverName)
+	}
+	checks := func(s *Stores) []string {
+		t.Helper()
+		entries, err := os.ReadDir(filepath.Join(s.Options.RunRoot, "overlay"))
+		Must(t, err)
+		var names []string
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		return names
+	}
+	want := checks(suite)
+	if len(want) == 0 {
+		t.Fatal("the suite's store recorded no checks")
+	}
+	s := PrivateStores(t)
+	if got := checks(s); !slices.Equal(got, want) {
+		t.Errorf("a test's store starts with the checks %q, want the suite's, %q", got, want)
+	}
+	Must(t, s.WithStore(func(storage.Store) error { return nil }))
+	if got := checks(s); !slices.Equal(got, want) {
+		t.Errorf("a test's store has the checks %q once opened, want only the suite's, %q", got, want)
+	}
+}
+
 // TestRemoveMounted checks that removing stores with a layer still mounted, as a test that failed might leave them,
 // unmounts everything, the driver's own mounts too, before removing the directory.
 func TestRemoveMounted(t *testing.T) {

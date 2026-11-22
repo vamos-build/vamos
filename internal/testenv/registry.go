@@ -4,35 +4,180 @@ import (
 	"bytes"
 	"cmp"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/BurntSushi/toml"
 	"go.podman.io/image/v5/pkg/sysregistriesv2"
 )
 
-// InsecureRegistry marks the registry at host, "host:port", insecure in a registries.conf of the test's own,
-// so that an executor, which takes its registry settings from its environment, reaches it over plain HTTP.
-// The client's own registry access needs --tls-verify=false still.
-// Tests that call it can't run in parallel, since the environment is shared.
+// InsecureRegistry marks the registry at host, "host:port", insecure in the registries.conf that containers/image
+// reads after every other, so that an executor, which takes its registry settings from its environment, reaches it
+// over plain HTTP, until the test ends. The client's own registry access needs --tls-verify=false still.
+// In a test binary that Main runs, the entry goes in the binary's own registries.conf, which the tests share, so
+// tests that call it may run in parallel; elsewhere it goes in one of the test's own, which the environment names,
+// so they can't.
 func InsecureRegistry(t *testing.T, host string) {
 	t.Helper()
-	writeRegistriesConf(t, map[string]any{"location": host, "insecure": true})
+	addRegistry(t, map[string]any{"location": host, "insecure": true})
 }
 
 // MirroredRegistry marks the registries at host and at mirror insecure, as InsecureRegistry does, and makes mirror a
 // mirror of host, which pulls of host's images try first.
 func MirroredRegistry(t *testing.T, host, mirror string) {
 	t.Helper()
-	writeRegistriesConf(t, map[string]any{"location": host, "insecure": true,
+	addRegistry(t, map[string]any{"location": host, "insecure": true,
 		"mirror": []map[string]any{{"location": mirror, "insecure": true}}})
 }
 
 // overrideEnv names the registries.conf that containers/image reads after every other, whose entries replace theirs
 // for the same prefix, so that a test's settings add to the environment's rather than replace them.
 const overrideEnv = "CONTAINERS_REGISTRIES_CONF_OVERRIDE"
+
+// addRegistry adds entry, a [[registry]] table, to the binary's shared registries.conf, if Main made one, until the
+// test ends, or else to one of the test's own.
+func addRegistry(t *testing.T, entry map[string]any) {
+	t.Helper()
+	if !sharedConf.add(t, entry) {
+		writeRegistriesConf(t, entry)
+	}
+}
+
+// sharedConf is the registries.conf of a test binary that Main runs, which the environment names as overrideEnv
+// for the whole run, so that tests running in parallel never change the environment, and which each test's
+// registries are added to and removed from.
+var sharedConf registriesConf
+
+// registriesConf is a registries.conf whose [[registry]] tables tests add while they run.
+type registriesConf struct {
+	mu      sync.Mutex
+	path    string                     // the file, or "" if there is none
+	base    []byte                     // what it holds but for the tests' tables
+	entries map[string][]registryEntry // the tests' tables, by prefix, the last of each in effect
+	added   int                        // how many tables tests have added, which numbers each
+}
+
+// registryEntry is a [[registry]] table that a test added, numbered in the order they were added.
+type registryEntry struct {
+	t     *testing.T
+	table map[string]any
+	n     int
+}
+
+// share makes the environment name, as overrideEnv, a registries.conf of the binary's own, holding what the one it
+// named before holds, if it named one, and returns what names that one again and removes it, for the end of the run.
+func (c *registriesConf) share() (stop func(), err error) {
+	previous, named := os.LookupEnv(overrideEnv)
+	var base []byte
+	if previous != "" {
+		if base, err = os.ReadFile(previous); err != nil {
+			return nil, err
+		}
+	}
+	dir, err := os.MkdirTemp("", "vamos-test-registries-")
+	if err != nil {
+		return nil, err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.path, c.base, c.entries = filepath.Join(dir, "registries.conf"), base, map[string][]registryEntry{}
+	if err = c.write(); err == nil {
+		err = os.Setenv(overrideEnv, c.path)
+	}
+	if err == nil {
+		sysregistriesv2.InvalidateCache()
+		_, err = sysregistriesv2.GetRegistries(nil)
+	}
+	restore := func() {
+		if named {
+			_ = os.Setenv(overrideEnv, previous)
+		} else {
+			_ = os.Unsetenv(overrideEnv)
+		}
+		sysregistriesv2.InvalidateCache()
+		os.RemoveAll(dir)
+	}
+	if err != nil {
+		c.path = ""
+		restore()
+		return nil, err
+	}
+	return func() {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		c.path = ""
+		restore()
+	}, nil
+}
+
+// add adds entry to the file until the test ends, in place of any that the test, or a test it is a subtest of, added
+// for the same prefix before, which it restores then, and reports whether there is a file to add it to. It fails the
+// test if another test that is running has an entry for the prefix.
+func (c *registriesConf) add(t *testing.T, entry map[string]any) bool {
+	t.Helper()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.path == "" {
+		return false
+	}
+	prefix := registryPrefix(entry)
+	for _, e := range c.entries[prefix] {
+		if e.t.Name() != t.Name() && !strings.HasPrefix(t.Name(), e.t.Name()+"/") {
+			t.Fatalf("%s is in the registries.conf of %s, which is running", prefix, e.t.Name())
+		}
+	}
+	c.added++
+	added := registryEntry{t: t, table: entry, n: c.added}
+	c.entries[prefix] = append(c.entries[prefix], added)
+	if err := c.write(); err != nil {
+		t.Fatalf("adding %v to %s: %v", entry, c.path, err)
+	}
+	if _, err := sysregistriesv2.GetRegistries(nil); err != nil {
+		t.Fatalf("adding %v to %s: %v", entry, c.path, err)
+	}
+	t.Cleanup(func() {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		c.entries[prefix] = slices.DeleteFunc(c.entries[prefix], func(e registryEntry) bool { return e.n == added.n })
+		if len(c.entries[prefix]) == 0 {
+			delete(c.entries, prefix)
+		}
+		if c.path != "" {
+			if err := c.write(); err != nil {
+				t.Errorf("removing %v from %s: %v", entry, c.path, err)
+			}
+		}
+	})
+	return true
+}
+
+// write writes the file, its base with the tests' tables, replacing it whole, so that a reader that a running test
+// starts never sees part of it, and makes containers/image read it again; c.mu is held.
+func (c *registriesConf) write() error {
+	text := c.base
+	for _, prefix := range slices.Sorted(maps.Keys(c.entries)) {
+		added := c.entries[prefix]
+		var err error
+		if text, err = registriesConfWith(text, added[len(added)-1].table); err != nil {
+			return err
+		}
+	}
+	tmp := c.path + ".new"
+	if err := os.WriteFile(tmp, text, 0o644); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, c.path); err != nil {
+		return err
+	}
+	// containers/image caches registries.conf without noticing that the file changed.
+	sysregistriesv2.InvalidateCache()
+	return nil
+}
 
 // writeRegistriesConf writes a registries.conf of the test's own, read as overrideEnv says, holding what the one it
 // replaces holds, the Docker Hub mirror's entry or an override file of the environment's, with entry, a [[registry]]

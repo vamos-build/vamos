@@ -184,12 +184,19 @@ func SuiteStores(t *testing.T) *Stores {
 	return s
 }
 
-// PrivateStores returns stores for the test alone, removed once it ends.
+// PrivateStores returns stores for the test alone, removed once it ends, whose run root starts with the overlay
+// driver's checks of the filesystem that the suite's store recorded, as seedDriverChecks says.
 func PrivateStores(t *testing.T) *Stores {
 	t.Helper()
 	s, err := newStores(storesName(t.Name()))
 	if err != nil {
 		t.Fatal(err)
+	}
+	if s.Options.GraphDriverName == "overlay" {
+		if err := seedDriverChecks(s.Options.RunRoot); err != nil {
+			os.RemoveAll(s.Dir)
+			t.Fatalf("copying the overlay driver's checks of the filesystem: %v", err)
+		}
 	}
 	t.Cleanup(func() {
 		if err := s.remove(); err != nil {
@@ -268,6 +275,56 @@ func newStores(name string) (*Stores, error) {
 	}
 	return &Stores{Dir: dir, Options: options}, nil
 }
+
+// seedDriverChecks copies into runRoot the overlay driver's checks of the filesystem, which it records in its run root
+// and reads before checking again: whether overlay works there, with metacopy, with native diffs, and with idmapped
+// lower directories. A store's checks are the same for every test's, since each is on the same filesystem with the
+// same options, so the suite's store makes them once, and each test's store starts with them, as a store that has
+// been opened before does, rather than making them again. A check makes mounts, and the check of idmapped lower
+// directories forks this process, without starting a program, into a user namespace until it ends: the fork holds
+// every file this process has open, and so every lock on one, such as a build cache's, that another test, running in
+// parallel, would then find held after it closed it. Where the suite's store can't be opened, as without root,
+// nothing is copied, and a store checks the filesystem itself.
+func seedDriverChecks(runRoot string) error {
+	from := driverChecks()
+	if from == "" {
+		return nil
+	}
+	entries, err := os.ReadDir(from)
+	if err != nil {
+		return err
+	}
+	to := filepath.Join(runRoot, "overlay")
+	if err := os.MkdirAll(to, 0o700); err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if !e.Type().IsRegular() {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(from, e.Name()))
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(to, e.Name()), data, 0o644); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// driverChecks returns the folder of the overlay driver's checks of the filesystem in the run root of the suite's
+// store, having opened the store, so that it made them, or "" if it can't be opened.
+var driverChecks = sync.OnceValue(func() string {
+	s, err := suiteStores()
+	if err != nil {
+		return ""
+	}
+	if err := s.WithStore(func(storage.Store) error { return nil }); err != nil {
+		return ""
+	}
+	return filepath.Join(s.Options.RunRoot, "overlay")
+})
 
 // NaiveDiffEnv is the environment variable that, when set, gives the overlay driver of the stores that tests make
 // metacopy, as Fedora's default storage.conf does, so that it diffs layers naively, comparing their files with their
