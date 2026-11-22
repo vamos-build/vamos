@@ -168,7 +168,8 @@ func (w *world) ThenTheTraceSpanIsWithin(process, name, outerProcess, outer stri
 	w.t.Helper()
 	s, o := w.span(process, name), w.span(outerProcess, outer)
 	if !s.within(o) {
-		w.t.Errorf("%q isn't within %q", s.Name, o.Name)
+		w.t.Errorf("%q, from %.0fµs to %.0fµs, isn't within %q, from %.0fµs to %.0fµs", s.Name, s.TS, s.end, o.Name,
+			o.TS, o.end)
 	}
 	if s.process == o.process && s.track == o.track {
 		for p := s.parent; ; p = p.parent {

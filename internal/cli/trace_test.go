@@ -12,6 +12,8 @@ import (
 
 	"github.com/vamos-build/vamos/internal/api"
 	"github.com/vamos-build/vamos/internal/cache"
+	"github.com/vamos-build/vamos/internal/run"
+	"github.com/vamos-build/vamos/internal/testenv"
 	"github.com/vamos-build/vamos/internal/tracing"
 
 	"github.com/opencontainers/go-digest"
@@ -236,6 +238,19 @@ func TestAssembleGaps(t *testing.T) {
 	var buf bytes.Buffer
 	if err := tracing.WriteChrome(&buf, spans); err != nil {
 		t.Errorf("the assembled trace can't be written: %v", err)
+	}
+}
+
+// TestMeasureLocalClock checks that the local executor's clock, which is this process's, is at no offset, exactly,
+// rather than at one measured, which a sample's round trip makes uncertain.
+func TestMeasureLocalClock(t *testing.T) {
+	local, err := run.NewLocal(testenv.PrivateStores(t).Options)
+	must(t, err)
+	session := &traceSession{recorder: tracing.NewRecorder(clientProcess, nil), path: "trace.json"}
+	session.measure(t.Context(), local, func(err error) { t.Errorf("warned: %v", err) })
+	doc, _ := session.document()
+	if doc.OffsetUnknown || doc.Offset != (tracing.Offset{}) {
+		t.Errorf("the offset is %+v, unknown %t; want none, exactly", doc.Offset, doc.OffsetUnknown)
 	}
 }
 
