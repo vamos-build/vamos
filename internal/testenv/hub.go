@@ -173,7 +173,11 @@ func (h *hubMirror) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		registryError(w, cmp.Or(unknown, "NAME_UNKNOWN"), "the mirror serves only manifests and blobs by digest")
 		return
 	}
-	path := filepath.Join(h.dir, kind, d.Algorithm().String()+"-"+d.Encoded())
+	path, err := h.within(kind, d)
+	if err != nil {
+		registryError(w, unknown, err.Error())
+		return
+	}
 	f, mediaType, err := h.open(path, kind)
 	if err != nil { // missing, or unreadable, as a lost media type leaves a manifest, which fetching makes good
 		if f, mediaType, err = h.fill(r, repo, kind, d, path); err != nil {
@@ -207,7 +211,11 @@ func (h *hubMirror) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // and then find it, rather than each fetching it from Docker Hub; the lock is released before the content is sent,
 // and one that can't be taken leaves the mirror to fetch without it.
 func (h *hubMirror) fill(r *http.Request, repo, kind string, d digest.Digest, path string) (*os.File, string, error) {
-	unlock, err := lockFile(r.Context(), filepath.Join(h.dir, "locks", d.Algorithm().String()+"-"+d.Encoded()))
+	lock, err := h.within("locks", d)
+	if err != nil {
+		return nil, "", err
+	}
+	unlock, err := lockFile(r.Context(), lock)
 	if err == nil {
 		defer unlock()
 	} else if r.Context().Err() != nil {
@@ -226,10 +234,22 @@ func (h *hubMirror) fill(r *http.Request, repo, kind string, d digest.Digest, pa
 	return f, mediaType, nil
 }
 
+// within returns the path of the file for d in dir's folder kind. A digest that digest.Parse accepted names a
+// registered algorithm and hexadecimal, so the path is always there, as the check that it is says too.
+func (h *hubMirror) within(kind string, d digest.Digest) (string, error) {
+	folder := filepath.Clean(filepath.Join(h.dir, kind)) + string(os.PathSeparator)
+	path := filepath.Clean(filepath.Join(folder, d.Algorithm().String()+"-"+d.Encoded()))
+	if !strings.HasPrefix(path, folder) {
+		return "", fmt.Errorf("%s names no file in %s", d, folder)
+	}
+	return path, nil
+}
+
 // lockFile takes an exclusive lock on the file at path, made if need be, waiting for any other's until ctx ends, and
 // returns a function that releases it.
 func lockFile(ctx context.Context, path string) (unlock func(), err error) {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDONLY, 0o644) // which flock needs no more than, and never writes
+
 	if err != nil {
 		return nil, err
 	}
