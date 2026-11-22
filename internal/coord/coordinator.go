@@ -129,10 +129,14 @@ type Coordinator struct {
 	pool     *pool
 	sharing  *sched.Sharing
 	bridge   *telemetry.Bridge // exports the jobs' traces; nil for none
-	checker  *checker
-	stop     context.CancelFunc
-	started  time.Time // when this instance started, since a prune is refused for a lease after it
-	journal  *journal  // the jobs on disk; nil without Config.State
+	// cancels are those of the jobs running, which Close calls itself before it closes the pool; nil once it has.
+	cancelsMu sync.Mutex
+	cancels   map[*context.CancelFunc]struct{}
+	closed    bool // Close has cancelled the jobs: one that starts now is cancelled at once
+	checker   *checker
+	stop      context.CancelFunc
+	started   time.Time // when this instance started, since a prune is refused for a lease after it
+	journal   *journal  // the jobs on disk; nil without Config.State
 }
 
 var (
@@ -303,7 +307,7 @@ func (c *Coordinator) resume(r *record) error {
 		return fmt.Errorf("recording that it resumed: %w", err)
 	}
 	c.reportOuterTrace(r.ID, problem) // once the repair is recorded, whether or not the build then starts
-	_, err = reserved.Start(c.build(&build, native))
+	_, err = reserved.Start(c.build(&build, native, restarts))
 	return err
 }
 
@@ -346,6 +350,7 @@ func (c *Coordinator) RetainEvents(n int) {
 // so that the next run resumes it rather than finding it ended by the shutdown.
 func (c *Coordinator) Close() error {
 	c.journal.close()
+	c.cancelJobs()
 	c.stop()
 	c.pool.close()
 	c.jobs.Stop()
@@ -462,18 +467,19 @@ func (c *Coordinator) Submit(ctx context.Context, req api.Request) (api.JobID, e
 			"it offers %v", platforms.Format(platforms.Normalize(g.Platform)), c.platformNames())
 	}
 	native := c.platformNames()
-	return c.begin(ctx, record{Build: g, Native: native}, sched.Spec{Build: true}, c.build(g, native))
+	return c.begin(ctx, record{Build: g, Native: native}, sched.Spec{Build: true}, c.build(g, native, 0))
 }
 
 // build returns the work of a build of g, whose actions run natively on the platforms native names, as they were
 // offered when it was submitted and as its record has them, and on those offered later, as offer says.
-// It reads request as it starts, as begin leaves it, its outer trace checked.
-func (c *Coordinator) build(request *api.GraphRequest, native []string) func(ctx context.Context,
+// It reads request as it starts, as begin leaves it, its outer trace checked; run is which run of the build it is, 0
+// for its first, and its restarts for a resumption.
+func (c *Coordinator) build(request *api.GraphRequest, native []string, run int64) func(ctx context.Context,
 	ev sched.Events) api.Outcome {
 	return func(ctx context.Context, ev sched.Events) api.Outcome {
 		g := *request
 		return c.traced(ctx, telemetry.JobInfo{Kind: "build", Workspace: g.Workspace, Parent: g.Parent,
-			State: g.State}, func(ctx context.Context) api.Outcome {
+			State: g.State, Run: run}, func(ctx context.Context) api.Outcome {
 			// The generation is checked once the build is open, since no prune starts then: checked before, a prune
 			// could run between the check and the build's start.
 			if err := c.checkGeneration(ctx, g.Generation); err != nil {
@@ -510,6 +516,38 @@ func (c *Coordinator) reportOuterTrace(id api.JobID, problem error) {
 	}
 }
 
+// cancelOnClose registers cancel, a job's, for Close to call before it closes the pool, or calls it now if Close has,
+// and returns what unregisters it.
+func (c *Coordinator) cancelOnClose(cancel *context.CancelFunc) func() {
+	c.cancelsMu.Lock()
+	defer c.cancelsMu.Unlock()
+	if c.closed {
+		(*cancel)()
+		return func() {}
+	}
+	if c.cancels == nil {
+		c.cancels = map[*context.CancelFunc]struct{}{}
+	}
+	c.cancels[cancel] = struct{}{}
+	return func() {
+		c.cancelsMu.Lock()
+		defer c.cancelsMu.Unlock()
+		delete(c.cancels, cancel)
+	}
+}
+
+// cancelJobs cancels every job running, synchronously, so that each sees its context end before the pool closes; a
+// prune, which exports no trace, isn't one of them, and is cancelled by the jobs' own stop, after the pool closes.
+func (c *Coordinator) cancelJobs() {
+	c.cancelsMu.Lock()
+	defer c.cancelsMu.Unlock()
+	c.closed = true
+	for cancel := range c.cancels {
+		(*cancel)()
+	}
+	c.cancels = nil
+}
+
 // traced runs work, a job's, as sched.RunJob does, storing its manifest in the coordinator's content store, and
 // reporting a manifest that can't be stored to Warn; and exports its trace, as info describes the job, with the
 // coordinator's bridge, if it has one, so that a job resumed after a restart joins the outer trace it was submitted
@@ -523,6 +561,12 @@ func (c *Coordinator) traced(ctx context.Context, info telemetry.JobInfo,
 	if c.bridge != nil {
 		sink = c.bridge
 	}
+	// A job's context ends as Close begins, before the pool does, so that a job cut short by the coordinator's
+	// shutdown is cancelled, as its spans and its outcome then say, rather than failed on the pool's shutdown; one
+	// whose work returned failed before Close began is failed still, as RunJob decides as the work returns.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	defer c.cancelOnClose(&cancel)()
 	return sched.RunJob(ctx, func() (cache.ContentStore, error) { return c.content, nil },
 		func(err error) { c.cfg.Warn(fmt.Errorf("the job %s: %w", id, err)) }, sink, work)
 }

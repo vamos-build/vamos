@@ -466,7 +466,7 @@ func TestSetupIgnoresTheProcessEnvironment(t *testing.T) {
 		got[r.path] = r
 	}
 	const protobuf = "application/x-protobuf"
-	want := map[string]request{"/v1/traces": {path: "/v1/traces", contentType: protobuf, jobAttributes: 3},
+	want := map[string]request{"/v1/traces": {path: "/v1/traces", contentType: protobuf, jobAttributes: 4},
 		"/metrics": {path: "/metrics", team: "metrics", contentType: protobuf, count: 1}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("the collector received %+v, want %+v", got, want)

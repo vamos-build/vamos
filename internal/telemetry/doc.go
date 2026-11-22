@@ -9,7 +9,8 @@
 // same spans, truncation included.
 // Exported spans are made through the SDK with IDs and times that this package chooses:
 // a span's context carries the IDs that chosenIDs gives it once, and its start and end are vamos's.
-// Every ID is derived from the coordinator's instance, the job, and vamos's span or attempt IDs, never drawn at random,
+// Every ID is derived from the coordinator's instance, the job, its run after the first, and vamos's span or attempt
+// IDs, never drawn at random,
 // so that a job resumed after a restart that kept the coordinator's state goes on in the same trace,
 // and a joiner links to an attempt's span without asking its starter;
 // a trace joined through a traceparent keeps the outer trace's ID.

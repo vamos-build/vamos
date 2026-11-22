@@ -17,7 +17,9 @@ import (
 	"github.com/vamos-build/vamos/internal/api"
 	"github.com/vamos-build/vamos/internal/cache"
 	"github.com/vamos-build/vamos/internal/remote"
+	"github.com/vamos-build/vamos/internal/sched"
 	"github.com/vamos-build/vamos/internal/telemetry"
+	"github.com/vamos-build/vamos/internal/tracing"
 )
 
 // outerTraceparent is a W3C traceparent, sampled, that the tests' jobs join.
@@ -91,6 +93,23 @@ type exportedSpan struct {
 	Name        string
 	SpanContext struct{ TraceID, SpanID, TraceState string }
 	Parent      struct{ TraceID, SpanID string }
+	Links       []struct {
+		SpanContext struct{ TraceID, SpanID string }
+	}
+	Attributes []struct {
+		Key   string
+		Value struct{ Value any }
+	}
+}
+
+// attr returns the value of the attribute key of s, or nil.
+func (s exportedSpan) attr(key string) any {
+	for _, a := range s.Attributes {
+		if a.Key == key {
+			return a.Value.Value
+		}
+	}
+	return nil
 }
 
 // spans shuts down every bridge made and returns the spans that of the coordinator started nth exported.
@@ -150,16 +169,34 @@ func TestRestartJoinsOuterTrace(t *testing.T) {
 		t.Fatalf("the resumed build failed: %+v", outcome.Failure)
 	}
 	r.stop()
+	// The run the restart cancelled exports its job span too, of an ID of its own, in the same trace.
+	var cancelled []exportedSpan
+	for _, s := range e.spans(0) {
+		if s.Name == "build" && s.attr("vamos.job") != nil {
+			cancelled = append(cancelled, s)
+		}
+	}
+	if len(cancelled) != 1 || cancelled[0].SpanContext.TraceID != outerTrace ||
+		cancelled[0].Parent.SpanID != outerSpan || cancelled[0].attr("vamos.job.outcome") != "cancelled" ||
+		cancelled[0].attr("vamos.job.run") != float64(0) {
+		t.Errorf("the cancelled run exported the job spans %+v; want one, in %s under %s, cancelled, of run 0",
+			cancelled, outerTrace, outerSpan)
+	}
 	builds := 0
 	for _, s := range e.spans(1) { // the resumed run's, exported by the coordinator started again
 		if s.Name != "build" {
 			continue
 		}
 		builds++
+		if len(cancelled) == 1 && s.SpanContext.SpanID == cancelled[0].SpanContext.SpanID {
+			t.Errorf("the resumed run's job span has the cancelled run's ID, %s; want one of its own",
+				s.SpanContext.SpanID)
+		}
 		if s.SpanContext.TraceID != outerTrace || s.Parent.SpanID != outerSpan ||
-			s.SpanContext.TraceState != "ci=pipeline" {
-			t.Errorf("the job's span is in %s under %s, with tracestate %q; want in %s under %s, with ci=pipeline",
-				s.SpanContext.TraceID, s.Parent.SpanID, s.SpanContext.TraceState, outerTrace, outerSpan)
+			s.SpanContext.TraceState != "ci=pipeline" || s.attr("vamos.job.run") != float64(1) {
+			t.Errorf("the job's span is in %s under %s, with tracestate %q, of run %v; want in %s under %s, with "+
+				"ci=pipeline, of run 1", s.SpanContext.TraceID, s.Parent.SpanID, s.SpanContext.TraceState,
+				s.attr("vamos.job.run"), outerTrace, outerSpan)
 		}
 	}
 	if builds != 1 {
@@ -357,14 +394,16 @@ func TestResumedMalformedTraceparentReported(t *testing.T) {
 	if parent := journaledParent(t, state, id); parent != "" {
 		t.Errorf("the journal still keeps the traceparent %q; want it repaired as the build resumed", parent)
 	}
-	// Each resumption ran from the repaired request, its job's span the root of a trace of its own: the first's, as
-	// its coordinator stopped, and the second's, as the build ended.
+	// Each resumption ran from the repaired request, its job's span the root of the job's one trace, of an ID of its
+	// own: the first's, as its coordinator stopped, and the second's, as the build ended.
+	var traces, ids []string
 	for nth := 1; nth <= 2; nth++ {
 		roots := 0
 		for _, s := range e.spans(nth) {
 			if s.Name != "build" {
 				continue
 			}
+			traces, ids = append(traces, s.SpanContext.TraceID), append(ids, s.SpanContext.SpanID)
 			if s.Parent.SpanID != "0000000000000000" {
 				t.Errorf("resumption %d exported a job span under %s; want none under an outer span", nth,
 					s.Parent.SpanID)
@@ -374,6 +413,10 @@ func TestResumedMalformedTraceparentReported(t *testing.T) {
 		if roots != 1 {
 			t.Errorf("resumption %d exported %d job spans; want 1", nth, roots)
 		}
+	}
+	if len(traces) == 2 && (traces[0] != traces[1] || ids[0] == ids[1]) {
+		t.Errorf("the resumptions' job spans are %s/%s and %s/%s; want one trace, and spans of their own", traces[0],
+			ids[0], traces[1], ids[1])
 	}
 }
 
@@ -467,5 +510,170 @@ func TestMetricsOnlyIgnoresOuterTrace(t *testing.T) {
 	defer mu.Unlock()
 	if slices.ContainsFunc(warnings, func(w string) bool { return strings.Contains(w, "traceparent") }) {
 		t.Errorf("warnings = %q; want none of the traceparent", warnings)
+	}
+}
+
+// exportingHandler runs attempts as fakeRun does, and a publication's and a push's as their tests' workers do,
+// relaying a worker's span for task "one" through w, once w is set.
+func exportingHandler(f *fixture, w **fakeWorker) func(a *remote.Assignment, killed func() bool) remote.AttemptReport {
+	return func(a *remote.Assignment, killed func() bool) remote.AttemptReport {
+		if a.Push != nil {
+			switch a.Push.Mode {
+			case remote.ModeUpload:
+				return remote.AttemptReport{Uploaded: uploaded(a.Push.Repository)}
+			case remote.ModeTag:
+				return remote.AttemptReport{Tagged: tagged(a.Push.Tag)}
+			}
+		}
+		r := a.Request
+		if r != nil && r.Action.Kind == sched.KindTask && r.Action.Steps[0].Argv[0] == "one" && *w != nil {
+			now := time.Now()
+			span := tracing.Span{ID: "w-1", Process: "worker", Track: "t", Name: "worker step", Start: now, End: now}
+			if err := (*w).client.Events(context.Background(), a.Attempt,
+				remote.AttemptEvents{Spans: []tracing.Span{span}}); err != nil {
+				return remote.AttemptReport{Failure: failure(err.Error())}
+			}
+		}
+		return fakeRun(f, nil)(a, killed)
+	}
+}
+
+// TestExportsEachJob checks that a coordinator exports each job, a build, a push and a publication, as a trace of its
+// own under the outer span it joined, with its attempts' spans, a worker's among them, under their attempts' spans.
+func TestExportsEachJob(t *testing.T) {
+	e := newExporting(t)
+	f := newFixture(t, Config{Telemetry: e.telemetry})
+	var w *fakeWorker
+	w = newWorker(t, f, amd64, 4, exportingHandler(f, &w))
+	w.start()
+	ctx := t.Context()
+
+	req := testGraph(t, f, "each job")
+	req.Parent = outerTraceparent
+	built, _ := runJob(t, f.c, req)
+	if built.Failure != nil {
+		t.Fatalf("the build failed: %+v", built.Failure)
+	}
+	push := api.PushRequest{Result: built.Results[0], Destination: "example.com/team/app:v1", Parent: outerTraceparent}
+	id, err := f.c.Submit(ctx, api.Request{Push: &push})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.c.Watch(ctx, id, 0, func(api.Event) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	publication := aPublication
+	publication.Parent = outerTraceparent
+	if published := publishJob(t, f.c, publication); published.Failure != nil {
+		t.Fatalf("the publication failed: %+v", published.Failure)
+	}
+
+	spans := e.spans(0)
+	byID := map[string]exportedSpan{}
+	for _, s := range spans {
+		byID[s.SpanContext.SpanID] = s
+	}
+	jobs := map[string]string{} // each job's span's ID, by kind
+	for _, s := range spans {
+		if s.attr("vamos.job") == nil { // not a job's span, as the publication's own "publish" span within it isn't
+			continue
+		}
+		switch s.Name {
+		case "build", "push", "publish":
+			jobs[s.Name] = s.SpanContext.SpanID
+			if s.SpanContext.TraceID != outerTrace || s.Parent.SpanID != outerSpan {
+				t.Errorf("the %s job's span is in %s under %s; want in %s under %s", s.Name, s.SpanContext.TraceID,
+					s.Parent.SpanID, outerTrace, outerSpan)
+			}
+		}
+	}
+	if len(jobs) != 3 {
+		t.Fatalf("exported the job spans of %v; want a build's, a push's and a publication's", jobs)
+	}
+	var step *exportedSpan
+	for i, s := range spans {
+		if s.Name == "worker step" {
+			step = &spans[i]
+		}
+	}
+	if step == nil {
+		t.Fatal("the worker's span wasn't exported")
+	}
+	attempt, ok := byID[step.Parent.SpanID]
+	if !ok || attempt.Name != "attempt" || step.SpanContext.TraceID != outerTrace {
+		t.Errorf("the worker's span is in %s under %q; want in %s under its attempt's span", step.SpanContext.TraceID,
+			attempt.Name, outerTrace)
+	}
+}
+
+// TestExportsSharedAttemptOnce checks that an attempt two builds share is exported once, in the trace of the build
+// that started it, and that the other build's target span links to it, in the other trace.
+func TestExportsSharedAttemptOnce(t *testing.T) {
+	e := newExporting(t)
+	f := newFixture(t, Config{Telemetry: e.telemetry})
+	startWorker(t, f, amd64, 4, fakeRun(f, func(a *remote.Assignment, killed func() bool) error {
+		if a.Request.Action.Kind == sched.KindLayer { // until the other build joins it
+			waitFor(t, func() bool { return f.c.sharing.AttachedTo(a.Request.Action.Key()) >= 2 })
+		}
+		return nil
+	}))
+	ctx := t.Context()
+	req := testGraph(t, f, "shared")
+	var ids []api.JobID
+	for range 2 {
+		id, err := f.c.Submit(ctx, api.Request{Graph: &req})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, id)
+	}
+	for _, id := range ids {
+		if err := f.c.Watch(ctx, id, 0, func(api.Event) error { return nil }); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	spans := e.spans(0)
+	attempts := map[any]int{}
+	byID := map[string]exportedSpan{}
+	for _, s := range spans {
+		byID[s.SpanContext.SpanID] = s
+		if s.Name == "attempt" {
+			attempts[s.attr("vamos.attempt")]++
+		}
+	}
+	for id, n := range attempts {
+		if n != 1 {
+			t.Errorf("the attempt %v was exported %d times; want once", id, n)
+		}
+	}
+	joined := 0
+	for _, s := range spans {
+		for _, l := range s.Links {
+			if a, ok := byID[l.SpanContext.SpanID]; ok && a.Name == "attempt" &&
+				l.SpanContext.TraceID == a.SpanContext.TraceID && l.SpanContext.TraceID != s.SpanContext.TraceID {
+				joined++
+			}
+		}
+	}
+	if joined == 0 {
+		t.Error("no span links to an attempt in another trace; want the joining build's target span to")
+	}
+}
+
+// TestPoolShutdownCancelsACancelledJob checks that an attempt of a job that Close cancelled, which reaches the pool
+// once it has closed, ends as the job's cancellation, not as the pool's shutdown, which would fail the job.
+func TestPoolShutdownCancelsACancelledJob(t *testing.T) {
+	p := newPool(Config{}.withDefaults(), "i", func() (uint64, error) { return 0, nil })
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	p.close()
+	_, err := p.attempt(ctx, nil, &remote.PushWork{Mode: remote.ModePush}, sched.OutputFunc(func(byte, []byte) {}))
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("the attempt of a cancelled job, at a closed pool, = %v; want %v", err, context.Canceled)
+	}
+	if _, err := p.attempt(t.Context(), nil, &remote.PushWork{Mode: remote.ModePush},
+		sched.OutputFunc(func(byte, []byte) {})); !errors.Is(err, errPoolClosed) {
+		t.Errorf("the attempt of a live job, at a closed pool, = %v; want %v", err, errPoolClosed)
 	}
 }

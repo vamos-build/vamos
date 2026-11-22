@@ -15,7 +15,7 @@ func TestSampler(t *testing.T) {
 	outer, _ := trace.TraceIDFromHex("4bf92f3577b34da6a3ce929d0e0e4736")
 	sampledParent := trace.NewSpanContext(trace.SpanContextConfig{
 		TraceID:    outer,
-		SpanID:     jobSpanIDOf("i", "outer"),
+		SpanID:     jobSpanIDOf("i", "outer", 0),
 		TraceFlags: trace.FlagsSampled,
 		Remote:     true,
 	})

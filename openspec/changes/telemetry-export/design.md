@@ -123,7 +123,8 @@ nothing, has no `Exported`, and its spans get no such arguments.
 
 - Trace ID: the outer `traceparent`'s trace ID if the job has one, else the first 16 bytes of
   SHA-256(`"vamos/trace\0"` ‖ instance ‖ `\0` ‖ job ID).
-- The job's span: the first 8 bytes of SHA-256(`"vamos/job\0"` ‖ instance ‖ `\0` ‖ job ID). Its parent is the outer
+- The job's span: the first 8 bytes of SHA-256(`"vamos/job\0"` ‖ instance ‖ `\0` ‖ job ID), with `\0` ‖ run after it
+  for a run after the first, as a resumed build's. Its parent is the outer
   span, if any.
 - An attempt's span: SHA-256(`"vamos/attempt\0"` ‖ attempt ID), since attempt IDs are 128 random bits.
 - Every other span: SHA-256(`"vamos/span\0"` ‖ instance ‖ `\0` ‖ job ID ‖ `\0` ‖ vamos span ID), with the starter's job
@@ -135,10 +136,13 @@ The trace ID depends only on the instance and job, so a job resumed after a rest
 same trace. Its second run's spans have new vamos IDs, since recorders' prefixes are random, and so new span IDs. A
 derived all-zero ID, which OpenTelemetry treats as invalid, is replaced by flipping its last bit.
 
+Each run of a job has its own job span, derived from the run as well, but for the first run's, in the job's one trace,
+so that a run cut short by a restart and the run that resumed it don't export two spans of one ID.
+
 The job's and the attempt's spans are synthetic. vamos has no single span for either. The job's span runs from the
-job's start to `RunJob`'s return, and is exported last, in `Job`. The attempt's span runs from the attempt's start
-until its result is recorded, so that it holds its cache write, and is exported in `Attempt`; the result's provenance
-still times the runner alone.
+job's start to `RunJob`'s return, and is exported in `Job`, with the job's own spans, after its attempts'. The
+attempt's span runs from the attempt's start until its result is recorded, so that it holds its cache write, and is
+exported in `Attempt`; the result's provenance still times the runner alone.
 
 *Alternative:* random IDs, mapped as spans are converted. Rejected: a resumed job would start a new trace, and a joiner
 would need the starter's map.
@@ -183,7 +187,7 @@ aren't made at all. Their metrics are still counted, without exemplars.
 
 | vamos | exported |
 | --- | --- |
-| the job's span | `vamos.job`, `vamos.job.kind` (`build`, `push`, `publish`, `export`), `vamos.workspace` |
+| the job's span | `vamos.job`, `vamos.job.kind` (`build`, `push`, `publish`), `vamos.job.run` (0, then 1 for each resumption), `vamos.workspace` |
 | every span | `vamos.process`, `vamos.track`, and `vamos.workspace` for a named workspace |
 | target span | `vamos.target` (`graph.Node.Target`, which `sched` now sets as a `target` argument), `vamos.miss.cause`, `vamos.miss.added`/`removed`/`changed` as string slices, `vamos.attempt` |
 | any other argument | `vamos.arg.<key>`, with spaces as `_`; numbers, booleans and strings as themselves, and other values as JSON |

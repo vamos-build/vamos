@@ -92,20 +92,20 @@
 
 ## 5. Exporting a coordinator's traces
 
-- [ ] 5.1 Add `coord.Config.Telemetry` (a function of the coordinator's instance that returns a bridge, or nil for none,
+- [x] 5.1 Add `coord.Config.Telemetry` (a function of the coordinator's instance that returns a bridge, or nil for none,
   since `New` reads the instance from the state it resumes jobs from), wrap each job's context with `Bridge.StartJob` in
   `Coordinator.traced`, give `Sharing` the bridge as its `SpanSink` (done with 4.3, which needs them), and have
   `inv.coordinator` call `telemetry.HandleErrors(inv.warn)` and `telemetry.Setup`, and shut it down after the API stops,
   but not with `--local`. Verify with `coord` tests with fake workers: one trace per job, a build's, a push's and a
   publication's, each under the outer span it joined, worker spans within it, a shared attempt exported once with the
   joiner's link, and a resumed job in the same trace after a restart
-- [ ] 5.2 Add `internal/features/steps_telemetry_test.go`: `GivenAnOTLPCollector`, an in-process OTLP/HTTP receiver that
+- [x] 5.2 Add `internal/features/steps_telemetry_test.go`: `GivenAnOTLPCollector`, an in-process OTLP/HTTP receiver that
   decodes `go.opentelemetry.io/proto/otlp`, a coordinator option for its environment, passed to `telemetry.Setup` as
   its `getenv` rather than set in the process's, so that rules using it can run in parallel, `GivenTRACEPARENT`, which
   sets the process's environment through `GivenTheEnvironmentSets`, and Then steps for traces, spans, parents, links
   and attributes. List the file in `.agents/kb/testing.md`, and verify that it
   compiles with `go vet ./internal/features`
-- [ ] 5.3 Add `internal/features/trace_export_test.go` with a rule for each `trace-export` requirement and a scenario for
+- [x] 5.3 Add `internal/features/trace_export_test.go` with a rule for each `trace-export` requirement and a scenario for
   each of its scenarios, with doc comments in the words of the reference pages. Rules call `parallelRule(t)`, but for
   those that set the process's environment, as `GivenTRACEPARENT` does, or rely on a default port, the collector's
   4318 or the scrape's 9464, which run alone. The joined attempt's scenario holds the step with `GivenABarrier` until
@@ -114,7 +114,7 @@
   the attempt's span, and that the joiner's target span links to that span. Verify with
   `go test ./internal/features -run TestTraceExport_` as root with buildah, and that the start-up mistakes' scenarios
   run under `-short`
-- [ ] 5.4 Write `docs/design/observability.md`: the bridge, the hook points, ID derivation, sampling, links, and why the
+- [x] 5.4 Write `docs/design/observability.md`: the bridge, the hook points, ID derivation, sampling, links, and why the
   client isn't exported. Link it from `docs/design/README.md` and `remote-execution.md`, add the environment variables
   to `docs/user/reference/cli/coordinator.md`, update `internal/coord/doc.go`, and add the route to `AGENTS.md`. Verify
   the link check and `go doc ./internal/coord`
@@ -164,10 +164,12 @@
 
 ## 8. Helm chart
 
-- [ ] 8.1 Add the `telemetry` values, the coordinator's and workers' `OTEL_*` environment from them, the headers Secret,
-  and with Prometheus on, the coordinator's `containerPort`, Service port named `metrics` and optional scrape
-  annotations. Verify with `helm lint --strict remote/helm/vamos` and `helm template ... | kubeconform -strict -summary`
-  for the defaults, an OTLP endpoint, and Prometheus on, and check that the defaults render no `OTEL_` variable
+- [ ] 8.1 Size the coordinator's `terminationGracePeriodSeconds` from a value, defaulting past the API's drain and
+  telemetry's ten-second shutdown, so that the last jobs' spans are sent before the pod is killed. Add the `telemetry`
+  values, the coordinator's and workers' `OTEL_*` environment from them, the headers Secret, and with Prometheus on, the
+  coordinator's `containerPort`, Service port named `metrics` and optional scrape annotations. Verify with `helm lint
+  --strict remote/helm/vamos` and `helm template ... | kubeconform -strict -summary` for the defaults, an OTLP endpoint,
+  and Prometheus on, and check that the defaults render no `OTEL_` variable
 - [ ] 8.2 Run the chart's Kubernetes smoke checks on kind with Prometheus on, scrape the coordinator's `metrics` port
   through the Service after a build, and add that scrape to `.agents/kb/smoke-checks.md`. Document the values in
   `values.yaml`'s comments and `.agents/kb/remote-environment.md`

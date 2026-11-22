@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"math/rand/v2"
+	"strconv"
 	"sync/atomic"
 
 	"go.opentelemetry.io/otel/trace"
@@ -107,8 +108,14 @@ func traceIDOf(instance, job string) trace.TraceID {
 }
 
 // jobSpanIDOf returns the ID of the job's own span.
-func jobSpanIDOf(instance, job string) trace.SpanID {
-	return spanIDFrom(hashOf("vamos/job", instance, job))
+// Each run of a job, its first 0 and each resumption after a restart one more, has a span of its own, all in the
+// job's one trace, so that a run cut short by a restart and the run that resumed it are two spans, not two of one ID;
+// a first run's ID is derived without the run, as before resumptions had spans of their own.
+func jobSpanIDOf(instance, job string, run int64) trace.SpanID {
+	if run == 0 {
+		return spanIDFrom(hashOf("vamos/job", instance, job))
+	}
+	return spanIDFrom(hashOf("vamos/job", instance, job, strconv.FormatInt(run, 10)))
 }
 
 // attemptSpanIDOf returns the ID of an attempt's span; attempt IDs are 128 random bits, unique across instances.

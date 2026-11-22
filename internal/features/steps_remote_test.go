@@ -1035,7 +1035,7 @@ func (w *world) serve(ctx context.Context, store *storage.StoreOptions, args ...
 	}
 	s := &server{name: "vamos " + args[0], ended: make(chan struct{})}
 	cmd := cli.NewRootCommand(cli.Config{Fs: afero.NewMemMapFs(), Store: store, // which reads no project
-		CgroupRoot: w.cgroupRoot})
+		CgroupRoot: w.cgroupRoot, Getenv: w.telemetryGetenv})
 	cmd.SetOut(s)
 	cmd.SetErr(s)
 	cmd.SetArgs(args)

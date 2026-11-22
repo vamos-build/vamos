@@ -84,6 +84,10 @@
 // a platform neither configured as emulated nor emulated by a registered worker fails the target at once,
 // and the pool starts or retries an emulated attempt only while a build that permits emulation needs it,
 // which sched.Permitted tells it.
+// A coordinator given Config.Telemetry exports its jobs' traces: New calls it with the instance, once it has read
+// the state and before it resumes a job, and each job's context then carries the bridge's record of the job, which
+// sched tells of the spans it stores. A request's outer trace, its traceparent and tracestate, is checked as begin
+// journals it, and as resume resumes it, and dropped, reported if traces are exported, if it isn't one.
 //
 // # Changes
 //

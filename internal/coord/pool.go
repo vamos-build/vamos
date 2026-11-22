@@ -234,6 +234,9 @@ func (p *pool) attempt(ctx context.Context, req *sched.Request, push *remote.Pus
 		p.mu.Lock()
 		if p.closed {
 			p.mu.Unlock()
+			if ctx.Err() != nil { // Close cancelled the job before the pool closed: it is cancelled, not failed
+				return nil, ctx.Err()
+			}
 			return nil, errPoolClosed
 		}
 		p.attempts[at.id] = at
@@ -245,6 +248,12 @@ func (p *pool) attempt(ctx context.Context, req *sched.Request, push *remote.Pus
 		}
 		if at.err == nil {
 			return at.report, nil
+		}
+		// The pool's shutdown, which comes after Close has cancelled the jobs, ends the attempt as the job's
+		// cancellation, should await have seen the attempt end first, so that a push or tagging still says its write
+		// may have happened.
+		if errors.Is(at.err, errPoolClosed) && ctx.Err() != nil {
+			return nil, ctx.Err()
 		}
 		if !at.lost || try >= retries {
 			switch {

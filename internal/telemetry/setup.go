@@ -67,7 +67,7 @@ const shutdownTimeout = 10 * time.Second
 
 // HandleErrors makes warn, rate-limited, the process's report of what OpenTelemetry fails to export,
 // which happens apart from any build, so that the process's log alone tells of it.
-// OpenTelemetry's error handler is the process's, not a Setup's, so a command calls this once, as it starts.
+// OpenTelemetry's error handler is the process's, not a Setup's, so a command calls this, once it has started.
 func HandleErrors(warn func(string)) {
 	otel.SetErrorHandler(newErrorHandler(warn, time.Now))
 }

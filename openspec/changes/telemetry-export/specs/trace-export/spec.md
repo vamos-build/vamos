@@ -55,8 +55,9 @@ and SHALL then say so in its log.
 
 ### Requirement: Each job is one trace
 
-Each job a coordinator runs, a build, a push, a publication or an export, SHALL be exported as one trace, under one span
-for the job that holds its other spans, unless it joined an outer trace. The trace SHALL hold the coordinator's spans of
+Each job a coordinator runs, a build, a push or a publication, SHALL be exported as one trace, under a span
+for the job that holds its other spans, unless it joined an outer trace; a build resumed after a restart has a span of
+its own for each run, in the same trace. The trace SHALL hold the coordinator's spans of
 the job, and the spans of the attempts it started, its workers' among them. The client's own spans SHALL NOT be exported.
 
 #### Scenario: A build's trace holds its target and its worker's steps
@@ -264,7 +265,8 @@ named workspace, `vamos.target` on a target's span, and on a target that missed,
 - **AND** a workspace named `com.acme.storefront` that has built `app` on the coordinator, whose source `a.txt` changed
   since
 - **WHEN** I build `app` on the coordinator
-- **THEN** the exported span of `layer "app"` has `vamos.workspace` `com.acme.storefront`, `vamos.target` `//:app`,
+- **THEN** the exported span of `layer "app"` has `vamos.workspace` `com.acme.storefront`, `vamos.target` `//:app`
+  with its platform, as the target's configuration names it,
   `vamos.miss.cause` `own-inputs` and `vamos.miss.changed` `a.txt`
 
 #### Scenario: An unnamed workspace's spans carry no workspace

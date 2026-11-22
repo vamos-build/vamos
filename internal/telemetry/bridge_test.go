@@ -81,7 +81,7 @@ func TestBridgeJob(t *testing.T) {
 	ctx := b.StartJob(context.Background(), JobInfo{ID: "job-1", Kind: "build",
 		Workspace: "com.acme.storefront"})
 	exported := tracing.ExportedOf(ctx)
-	wantTrace, wantJob := traceIDOf("i", "job-1"), jobSpanIDOf("i", "job-1")
+	wantTrace, wantJob := traceIDOf("i", "job-1"), jobSpanIDOf("i", "job-1", 0)
 	if exported != (tracing.Exported{TraceID: wantTrace.String(), SpanID: wantJob.String(), Sampled: true}) {
 		t.Errorf("ExportedOf the job's context = %+v, want trace %s, span %s, sampled", exported, wantTrace, wantJob)
 	}
@@ -153,6 +153,7 @@ func TestBridgeJob(t *testing.T) {
 			"vamos.job":         attribute.StringValue("job-1"),
 			"vamos.job.kind":    attribute.StringValue("build"),
 			"vamos.job.outcome": attribute.StringValue("failed"),
+			"vamos.job.run":     attribute.Int64Value(0),
 		}},
 		{name: "the layer", span: layer, want: map[attribute.Key]attribute.Value{
 			"vamos.workspace":         attribute.StringValue("com.acme.storefront"),

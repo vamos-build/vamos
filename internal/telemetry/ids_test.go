@@ -173,7 +173,7 @@ func TestChosenIDsAreGivenOnce(t *testing.T) {
 func TestDerivedIDs(t *testing.T) {
 	for _, c := range []struct{ name, got, want string }{
 		{name: "the trace", got: traceIDOf("i", "job-1").String(), want: "5abf51f38d408ffc105f18970efc990a"},
-		{name: "the job's span", got: jobSpanIDOf("i", "job-1").String(), want: "1a775e1f4f0ef4be"},
+		{name: "the job's span", got: jobSpanIDOf("i", "job-1", 0).String(), want: "1a775e1f4f0ef4be"},
 		{name: "the attempt's span", got: attemptSpanIDOf("a").String(), want: "e144f3fda09fdd9d"},
 		{name: "a span", got: spanIDOf("i", "job-1", "s-1").String(), want: "d6559762fb6ab6ea"},
 	} {
@@ -196,8 +196,9 @@ func TestDerivedIDs(t *testing.T) {
 	}
 	spans := map[trace.SpanID]string{}
 	for name, sid := range map[string]trace.SpanID{
-		"the job's span":                     jobSpanIDOf("i", "job-1"),
-		"another job's span":                 jobSpanIDOf("i", "job-2"),
+		"the job's span":                     jobSpanIDOf("i", "job-1", 0),
+		"another job's span":                 jobSpanIDOf("i", "job-2", 0),
+		"the job's resumed run's span":       jobSpanIDOf("i", "job-1", 1),
 		"an attempt's span":                  attemptSpanIDOf("attempt-1"),
 		"another attempt's span":             attemptSpanIDOf("attempt-2"),
 		"a span of the job":                  spanIDOf("i", "job-1", "s-1"),

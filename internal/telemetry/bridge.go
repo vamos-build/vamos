@@ -275,6 +275,9 @@ type JobInfo struct {
 	// Parent and State are the W3C traceparent and tracestate of the trace the job joins, or "" for none;
 	// a Parent that isn't valid is taken as none.
 	Parent, State string
+	// Run is which run of the job this is: 0 for its first, and one more for each resumption after a restart, each
+	// of which has a job span of its own in the job's one trace.
+	Run int64
 }
 
 // job is the bridge's record of a job, which the job's context carries, and the attempts it starts inherit.
@@ -297,7 +300,7 @@ func (b *Bridge) StartJob(ctx context.Context, info JobInfo) context.Context {
 	if b == nil {
 		return ctx
 	}
-	j := &job{info: info, span: jobSpanIDOf(b.instance, info.ID)}
+	j := &job{info: info, span: jobSpanIDOf(b.instance, info.ID, info.Run)}
 	if info.Parent != "" {
 		j.parent = outerSpanContext(info.Parent, info.State)
 	}
@@ -358,7 +361,8 @@ func (b *Bridge) Job(ctx context.Context, spans []tracing.Span, start, end time.
 	attrs := append(j.common(),
 		attribute.String("vamos.job", j.info.ID),
 		attribute.String("vamos.job.kind", j.info.Kind),
-		attribute.String("vamos.job.outcome", outcome))
+		attribute.String("vamos.job.outcome", outcome),
+		attribute.Int64("vamos.job.run", j.info.Run))
 	status := codes.Unset
 	if outcome == "failed" {
 		status = codes.Error

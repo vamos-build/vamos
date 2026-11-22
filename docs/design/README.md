@@ -30,7 +30,10 @@ The design documents build progressively on one another:
 7. [Remote execution](remote-execution.md):
    Describes distributed builds across coordinator and worker pools, HTTP transport,
    attempt leasing and worker fencing, and Kubernetes deployment.
-8. [Releases](releases.md):
+8. [Observability](observability.md):
+   Explains how a coordinator exports each job's trace over OpenTelemetry, from the spans it stores,
+   how IDs are derived, sampling, links, and what isn't exported.
+9. [Releases](releases.md):
    Documents the multi-platform build pipeline, packaging invariants, glibc portability requirements,
    and the installer script.
 
