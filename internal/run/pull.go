@@ -278,7 +278,7 @@ func (pl *puller) fetch(ctx context.Context, ref reference.Named, platform imgsp
 		return nil, err
 	}
 	defer policyContext.Destroy()
-	retries, err := transfer.Retries()
+	retries, err := transfer.ReadRetries()
 	if err != nil {
 		return nil, err
 	}
@@ -386,16 +386,16 @@ func (pl *puller) recordedManifest(ctx context.Context, ref reference.NamedTagge
 	return data, nil
 }
 
-// manifestTimeout limits fetching a manifest, which is small,
+// manifestTimeout limits fetching a manifest, which is small, retries and all,
 // so that a registry that stops answering is reported rather than waited for.
 const manifestTimeout = time.Minute
 
-// manifest fetches the manifest that ref names from its registry.
-func (pl *puller) manifest(ctx context.Context, ref reference.Named) (_ []byte, _ string, err error) {
+// manifest fetches the manifest that ref names from its registry, retrying a failure that may not happen again, as
+// transfer.ReadRetries says and fetch does: with the tag's record not cached, as in a fresh build cache, a pinned pull
+// asks the registry for its index, and one connection reset would otherwise fail a build whose image is stored.
+func (pl *puller) manifest(ctx context.Context, ref reference.Named) (data []byte, mimeType string, err error) {
 	ctx, span := tracing.Start(ctx, "resolve "+reference.FamiliarString(ref), "registry", reference.Domain(ref))
 	defer func() { span.EndWith(err) }()
-	ctx, cancel := context.WithTimeout(ctx, manifestTimeout)
-	defer cancel()
 	if ref, err = pl.mirror(ref); err != nil {
 		return nil, "", err
 	}
@@ -403,16 +403,26 @@ func (pl *puller) manifest(ctx context.Context, ref reference.Named) (_ []byte, 
 	if err != nil {
 		return nil, "", err
 	}
-	src, err := imageRef.NewImageSource(ctx, pl.systemContext)
+	retries, err := transfer.ReadRetries()
 	if err != nil {
 		return nil, "", err
 	}
-	defer src.Close()
-	data, mimeType, err := src.GetManifest(ctx, nil)
-	if err == nil {
-		span.Set("media type", mimeType, "digest", digest.FromBytes(data).String())
+	ctx, cancel := context.WithTimeout(ctx, manifestTimeout)
+	defer cancel()
+	err = retry.IfNecessary(ctx, func() error {
+		src, err := imageRef.NewImageSource(ctx, pl.systemContext)
+		if err != nil {
+			return err
+		}
+		defer src.Close()
+		data, mimeType, err = src.GetManifest(ctx, nil)
+		return err
+	}, retries)
+	if err != nil {
+		return nil, "", err
 	}
-	return data, mimeType, err
+	span.Set("media type", mimeType, "digest", digest.FromBytes(data).String())
+	return data, mimeType, nil
 }
 
 // chooseInstance returns the digest of the image for platform in the index data.

@@ -172,14 +172,28 @@ func (o *outage) recovered() {
 	}
 }
 
+// onceKey marks a context whose calls try the coordinator once, as Once says.
+type onceKey struct{}
+
+// Once returns ctx for calls that try the coordinator once, returning a transport failure rather than retrying it
+// through the grace period: for a call whose answer is worth only as much as it is prompt, such as a sample of the
+// coordinator's clock, which a retried answer would skew, and which a coordinator that has ended would otherwise hold
+// for as long as its caller allows. It applies to the calls that retry through the grace period one request at a
+// time, such as Capabilities, not to Watch or a blob's streamed body, which resume where they were. It ends only this
+// client's retries: Go's transport may still send a GET again on a reused connection that closed before it answered.
+func Once(ctx context.Context) context.Context {
+	return context.WithValue(ctx, onceKey{}, true)
+}
+
 // retrying runs attempt, which makes one request and handles its answer, again on each transport failure,
-// with backoff, until it gets an answer or the grace period has passed since the first failure.
+// with backoff, until it gets an answer or the grace period has passed since the first failure, unless ctx is Once's.
 // It warns once when the connection drops and once when it is back.
 func (c *Client) retrying(ctx context.Context, what string, attempt func() error) error {
 	o := outage{c: c, what: what}
+	once := ctx.Value(onceKey{}) != nil
 	for {
 		err := attempt()
-		if err == nil || !isTransport(err) {
+		if err == nil || !isTransport(err) || once {
 			if err == nil {
 				o.recovered()
 			}

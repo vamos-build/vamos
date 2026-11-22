@@ -312,6 +312,8 @@ sequenceDiagram
 
 No span crosses as an event: the client reads the stored traces once its jobs end.
 Its `cli.traceSession` measures the executor's clock against its own through `api.Capabilities.Clock`, bounded,
+each sample without the client's retries, since a retried one is skewed and a coordinator that has gone would hold
+the command,
 and stores the offset in the command trace, by which assembly places the client's spans among the executor's.
 
 Recording costs every build something now, so `tracing.Enabled` guards no longer spare an executor anything:

@@ -36,6 +36,9 @@
 // message that says so, and one that answers that the job expired, having held it unwatched for the grace period,
 // says that instead.
 // Cancel, Release, Result and Prune retry transport failures the same way; what they ask is idempotent.
+// Under Once's context, a call that retries one request at a time, such as Capabilities or a batch of reads, makes no
+// retries of its own, for an answer worth only as much as it is prompt, a clock's; Watch and a blob's streamed body
+// resume as ever, and Go's transport may still send a GET again on a reused connection that closed.
 // A blob being read resumes from where it was cut, and its drop is over once content arrives again.
 //
 // # Changes

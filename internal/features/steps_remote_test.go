@@ -389,6 +389,20 @@ func (w *world) GivenACoordinatorWithAWorker(args ...string) {
 			}
 		}
 	})
+	// A failed scenario shows what they printed, before they are stopped, since a build's failure, or a server's
+	// own, may be told there alone, as a registry's error that the worker met is.
+	w.t.Cleanup(func() {
+		if !w.t.Failed() {
+			return
+		}
+		var started []*server
+		for _, s := range []*server{coordinator, registered} {
+			if s != nil {
+				started = append(started, s)
+			}
+		}
+		w.t.Logf("%s", outputsOf(started))
+	})
 	coordinator = w.serve(ctx, &w.stores.Options, append([]string{"coordinator", "--listen", "127.0.0.1:0",
 		"--cache-dir", w.t.TempDir(), "--cache-repository", w.atRegistry("<registry>/vamos-cache"), "--lease",
 		workerLease.String()}, w.allAtPlaceholders(args)...)...)

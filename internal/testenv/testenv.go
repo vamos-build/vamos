@@ -1,7 +1,6 @@
 package testenv
 
 import (
-	"cmp"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -41,16 +40,14 @@ const BusyboxLock = `{
 `
 
 // withBusyboxPin returns files, with BusyboxLock as its lockfile if a BUILD file among them pulls busybox, as
-// PullBusybox does, and none is a lockfile: at the workspace's root, beside its WORKSPACE file, or else beside that
-// BUILD file.
+// PullBusybox does, and none is a lockfile: at the root of that BUILD file's workspace, beside the nearest WORKSPACE
+// file at or above it, or else beside that BUILD file.
 func withBusyboxPin(files map[string]string) map[string]string {
-	var pulling, workspace string
+	var pulling string
 	for _, name := range slices.Sorted(maps.Keys(files)) {
 		switch base := filepath.Base(name); {
 		case base == "vamos.lock":
 			return files
-		case base == "WORKSPACE" && (workspace == "" || len(name) < len(workspace)):
-			workspace = name
 		case pulling == "" && (base == "BUILD" || base == "BUILD.vms") && strings.Contains(files[name], PullBusybox):
 			pulling = name
 		}
@@ -58,7 +55,16 @@ func withBusyboxPin(files map[string]string) map[string]string {
 	if pulling == "" {
 		return files
 	}
-	root := filepath.Dir(cmp.Or(workspace, pulling))
+	root := filepath.Dir(pulling)
+	for dir := root; ; dir = filepath.Dir(dir) {
+		if _, ok := files[filepath.Join(dir, "WORKSPACE")]; ok {
+			root = dir
+			break
+		}
+		if dir == "." || dir == "/" {
+			break
+		}
+	}
 	pinned := maps.Clone(files)
 	pinned[filepath.Join(root, "vamos.lock")] = BusyboxLock
 	return pinned

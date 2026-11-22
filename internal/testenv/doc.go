@@ -22,6 +22,9 @@
 // Give each test its own EditedFs, since it keeps a count of opens to decide when to edit.
 // A test that starts a worker gives it CgroupRoot, as worker.Config's or cli.Config's CgroupRoot,
 // or its start may kill the attempts of a worker in another package's tests that `go test` runs at once.
+// Main mirrors Docker Hub for pulls by digest, in hub.go, keeping what it fetches in the user's cache folder,
+// or HubCacheEnv's, for later runs, so that pinned pulls of busybox don't spend Docker Hub's pull allowance,
+// in a registries.conf read after the environment's, unless that configures Docker Hub itself.
 // InsecureRegistry in registry.go lets an executor reach a test's registry over plain HTTP,
 // and FakeDocker in docker.go serves what loading an image into Docker uses.
 // Unsetenv unsets an environment variable for the rest of a test.

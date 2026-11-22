@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1276,5 +1277,45 @@ func TestTraceCrosses(t *testing.T) {
 		if _, err := c.Trace(t.Context(), id); !errors.Is(err, want) {
 			t.Errorf("Trace of %s = %v; want %v", id, err, want)
 		}
+	}
+}
+
+// TestOnceDoesNotRetry checks that a call under Once's context returns a dropped connection at once, as a sample of
+// the coordinator's clock needs, while the same call without it retries until the coordinator answers again.
+func TestOnceDoesNotRetry(t *testing.T) {
+	ex := newFakeExecutor(1)
+	var drops atomic.Int64 // capability requests still to drop
+	s := &Server{Executor: ex, Content: cache.NewMemory(), Middleware: func(h http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == pathCapabilities && drops.Add(-1) >= 0 {
+				conn, _, err := http.NewResponseController(w).Hijack()
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				conn.Close()
+				return
+			}
+			h.ServeHTTP(w, r)
+		})
+	}}
+	server := httptest.NewServer(s.Handler())
+	t.Cleanup(server.Close)
+	c, err := NewClient(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Capabilities(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	// Go's client sends a GET again itself, once, on a connection closed with no answer: so two drops for one.
+	drops.Store(2)
+	if _, err := c.Capabilities(Once(t.Context())); !isTransport(err) {
+		t.Errorf("Capabilities under Once, its connection dropped = %v, want the transport failure", err)
+	}
+	drops.Store(2)
+	if _, err := c.Capabilities(t.Context()); err != nil {
+		t.Errorf("Capabilities, its connection dropped = %v, want it retried until answered", err)
 	}
 }

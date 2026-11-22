@@ -6,6 +6,7 @@ import (
 	"errors"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -238,6 +239,76 @@ func TestAssembleGaps(t *testing.T) {
 	}
 }
 
+// TestMeasureClockBoundedAfterLateFailure checks that a measurement taken again after a failure stays within the
+// first's bound, so that a failure before it, and then a stall, cost no more than the bound.
+func TestMeasureClockBoundedAfterLateFailure(t *testing.T) {
+	old := clockTimeout
+	clockTimeout = 500 * time.Millisecond
+	t.Cleanup(func() { clockTimeout = old })
+	session := &traceSession{recorder: tracing.NewRecorder(clientProcess, nil)}
+	clock := &resetThenStallClock{t: t, after: 50 * time.Millisecond}
+	session.measure(t.Context(), clock, func(error) {})
+	if len(clock.deadlines) != 2 {
+		t.Fatalf("the clock was asked %d times, want twice: once more after the failure", len(clock.deadlines))
+	}
+	if first, second := clock.deadlines[0], clock.deadlines[1]; second.After(first.Add(5 * time.Millisecond)) {
+		t.Errorf("the second measurement's deadline is %v after the first's; want it within the first's bound",
+			second.Sub(first))
+	}
+	if doc, _ := session.document(); !doc.OffsetUnknown {
+		t.Error("the offset is known; want it unknown, the executor having never answered")
+	}
+}
+
+// resetThenStallClock is an executor whose first answer about the time fails after after, and whose later ones
+// never come, until the call's context ends. It keeps each call's deadline.
+type resetThenStallClock struct {
+	api.Executor
+	t         *testing.T
+	after     time.Duration
+	deadlines []time.Time
+}
+
+func (c *resetThenStallClock) Capabilities(ctx context.Context) (api.Capabilities, error) {
+	deadline, ok := ctx.Deadline()
+	if !ok { // which a stall would never end
+		c.t.Error("the clock was asked for the time with no deadline")
+		return api.Capabilities{}, errors.New("asked for the time with no deadline")
+	}
+	c.deadlines = append(c.deadlines, deadline)
+	if len(c.deadlines) == 1 {
+		time.Sleep(c.after)
+		return api.Capabilities{}, syscall.ECONNRESET
+	}
+	return stalledClock{}.Capabilities(ctx)
+}
+
+// TestMeasureClockFailingTwice checks that a measurement that fails at once, and fails again, otherwise, warns of
+// both causes, in one warning.
+func TestMeasureClockFailingTwice(t *testing.T) {
+	session := &traceSession{recorder: tracing.NewRecorder(clientProcess, nil)}
+	causes := []error{syscall.ECONNRESET, syscall.ECONNREFUSED}
+	clock := failingClock{causes: &causes}
+	var warned []error
+	session.measure(t.Context(), clock, func(err error) { warned = append(warned, err) })
+	if len(warned) != 1 || !errors.Is(warned[0], syscall.ECONNRESET) || !errors.Is(warned[0], syscall.ECONNREFUSED) ||
+		strings.Contains(warned[0].Error(), "\n") {
+		t.Errorf("warned %q; want one warning, on one line, of both the reset and the refusal", warned)
+	}
+}
+
+// failingClock is an executor whose answers about the time fail, each with the next of causes.
+type failingClock struct {
+	api.Executor
+	causes *[]error
+}
+
+func (c failingClock) Capabilities(context.Context) (api.Capabilities, error) {
+	err := (*c.causes)[0]
+	*c.causes = (*c.causes)[1:]
+	return api.Capabilities{}, err
+}
+
 // stalledClock is an executor that never answers what time it is, until the call's context ends.
 type stalledClock struct{ api.Executor }
 
@@ -284,6 +355,42 @@ func TestMeasureClockAfterInterrupt(t *testing.T) {
 	if doc, _ := session.document(); doc.OffsetUnknown {
 		t.Error("the offset is unknown, as if the interrupt ended its measurement")
 	}
+}
+
+// TestMeasureClockAfterQuickFailure checks that a clock measurement that fails before its bound, as on a reused
+// connection that was reset, is taken again, timed afresh, so that the failure neither leaves the offset unknown nor
+// skews it by the time the failure took.
+func TestMeasureClockAfterQuickFailure(t *testing.T) {
+	const ahead = 10 * time.Second
+	session := &traceSession{recorder: tracing.NewRecorder(clientProcess, nil)}
+	session.measure(t.Context(), &resetOnceClock{ahead: ahead, after: 200 * time.Millisecond}, func(err error) {
+		t.Errorf("warned %v; want the clock measured", err)
+	})
+	doc, _ := session.document()
+	if doc.OffsetUnknown {
+		t.Fatal("the offset is unknown, as if one quick failure ended its measurement")
+	}
+	if skew := doc.Offset.Offset - ahead; skew < -90*time.Millisecond || skew > 90*time.Millisecond {
+		t.Errorf("the offset is %v, %v off the executor's %v; want the failed attempt's time left out",
+			doc.Offset.Offset, skew, ahead)
+	}
+}
+
+// resetOnceClock is an executor whose clock is ahead by ahead, and whose first answer about it fails after after, as
+// a connection reset does.
+type resetOnceClock struct {
+	api.Executor
+	ahead, after time.Duration
+	reset        bool
+}
+
+func (c *resetOnceClock) Capabilities(ctx context.Context) (api.Capabilities, error) {
+	if !c.reset {
+		c.reset = true
+		time.Sleep(c.after)
+		return api.Capabilities{}, syscall.ECONNRESET
+	}
+	return api.Capabilities{Clock: time.Now().Add(c.ahead)}, nil
 }
 
 // answeringClock is an executor that says what time it is, unless the call's context has ended.
