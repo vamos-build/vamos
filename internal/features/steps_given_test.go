@@ -578,19 +578,20 @@ func (w *world) atHeldDigests(s string) string {
 // heldDigestPlaceholder is <digest of label>, which atHeldDigests replaces.
 var heldDigestPlaceholder = regexp.MustCompile(`<digest of ([^>]+)>`)
 
-// GivenTheRegistryHoldsBusybox pushes busybox, as the suite's stores pulled it, to the image name image, in which
-// <registry> stands for the scenario's registry: a runnable image, which a scenario on stores of its own pulls from
+// GivenTheRegistryHoldsBusybox pushes busybox to the image name image, in which <registry> stands for the scenario's
+// registry, having pulled it, through the Docker Hub mirror where testenv.Main runs one, into stores of its own,
+// which neither this scenario nor any other uses: a runnable image, which a scenario on stores of its own pulls from
 // its own registry, rather than Docker Hub, whose pulls are limited, so that its steps can run commands.
 func (w *world) GivenTheRegistryHoldsBusybox(image string) {
 	w.t.Helper()
 	fsys := testenv.Project(w.t, files{"BUILD": testenv.PullBusybox + `layer(name="runnable", base="busybox")` + "\n"})
-	cmd := cli.NewRootCommand(cli.Config{Fs: fsys, Store: &testenv.SuiteStores(w.t).Options})
+	cmd := cli.NewRootCommand(cli.Config{Fs: fsys, Store: &testenv.PrivateStores(w.t).Options})
 	cmd.SetArgs([]string{"-C", testenv.ProjectDir, "push", "runnable", w.atRegistry(image)})
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
 	if err := cmd.ExecuteContext(w.t.Context()); err != nil {
-		w.t.Fatalf("pushing busybox from the suite's stores to %s: %v\n%s", image, err, out.String())
+		w.t.Fatalf("pushing busybox to %s: %v\n%s", image, err, out.String())
 	}
 }
 

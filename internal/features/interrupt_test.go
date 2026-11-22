@@ -22,11 +22,15 @@ func TestInterrupt_StopsAfterTheRunningStep(t *testing.T) {
 	t.Run("A save interrupted while a step runs saves nothing, and leaves no container",
 		func(t *testing.T) {
 			w := newInterruptWorld(t)
+			w.GivenABarrier()
+			w.GivenTheBarrierOpensOnceTheCommandIsInterrupted()
 			w.GivenTheBuildFileDeclares(`
-				layer(name="app", base="busybox", steps=[run(["sh", "-c", "echo started; sleep 1"])])
+				layer(name="app", base="busybox",
+				      steps=[run(["sh", "-c", "echo started; wget -q -O /dev/null <barrier>"])])
 			`)
 			w.WhenISave("app", interruptedOnceItPrints("started"))
 			w.ThenItIsInterrupted()
+			w.ThenTheBarrierOpened()
 			w.ThenNothingIsSaved()
 			w.ThenTheCommandLeavesNoContainer()
 		})

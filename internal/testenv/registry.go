@@ -3,6 +3,7 @@ package testenv
 import (
 	"bytes"
 	"cmp"
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -39,8 +40,8 @@ func MirroredRegistry(t *testing.T, host, mirror string) {
 // for the same prefix, so that a test's settings add to the environment's rather than replace them.
 const overrideEnv = "CONTAINERS_REGISTRIES_CONF_OVERRIDE"
 
-// addRegistry adds entry, a [[registry]] table, to the binary's shared registries.conf, if Main made one, until the
-// test ends, or else to one of the test's own.
+// addRegistry adds entry, a [[registry]] table, to the binary's shared registries.conf, if Main made one and the
+// environment still names it, until the test ends, or else to one of the test's own.
 func addRegistry(t *testing.T, entry map[string]any) {
 	t.Helper()
 	if !sharedConf.add(t, entry) {
@@ -60,6 +61,9 @@ type registriesConf struct {
 	base    []byte                     // what it holds but for the tests' tables
 	entries map[string][]registryEntry // the tests' tables, by prefix, the last of each in effect
 	added   int                        // how many tables tests have added, which numbers each
+	err     error                      // why Main couldn't share a file, which fails each test that adds a table
+	named   string                     // what the environment named as overrideEnv as Main tried
+	wasSet  bool                       // whether overrideEnv was set then, if to nothing
 }
 
 // registryEntry is a [[registry]] table that a test added, numbered in the order they were added.
@@ -71,8 +75,16 @@ type registryEntry struct {
 
 // share makes the environment name, as overrideEnv, a registries.conf of the binary's own, holding what the one it
 // named before holds, if it named one, and returns what names that one again and removes it, for the end of the run.
+// If it can't, add fails each test that adds a table, saying why.
 func (c *registriesConf) share() (stop func(), err error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	previous, named := os.LookupEnv(overrideEnv)
+	defer func() {
+		if err != nil {
+			c.path, c.err, c.named, c.wasSet = "", err, previous, named
+		}
+	}()
 	var base []byte
 	if previous != "" {
 		if base, err = os.ReadFile(previous); err != nil {
@@ -83,8 +95,6 @@ func (c *registriesConf) share() (stop func(), err error) {
 	if err != nil {
 		return nil, err
 	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
 	c.path, c.base, c.entries = filepath.Join(dir, "registries.conf"), base, map[string][]registryEntry{}
 	if err = c.write(); err == nil {
 		err = os.Setenv(overrideEnv, c.path)
@@ -103,7 +113,6 @@ func (c *registriesConf) share() (stop func(), err error) {
 		os.RemoveAll(dir)
 	}
 	if err != nil {
-		c.path = ""
 		restore()
 		return nil, err
 	}
@@ -116,13 +125,21 @@ func (c *registriesConf) share() (stop func(), err error) {
 }
 
 // add adds entry to the file until the test ends, in place of any that the test, or a test it is a subtest of, added
-// for the same prefix before, which it restores then, and reports whether there is a file to add it to. It fails the
-// test if another test that is running has an entry for the prefix.
+// for the same prefix before, which it restores then, and reports whether there is a file to add it to: there isn't
+// once the environment names another, as a test that sets overrideEnv itself makes it. It fails the test if Main
+// couldn't share a file, unless the test named one itself, if another test that is running has an entry for the
+// prefix, or if containers/image can't read the file with the entry, which it then removes again, so that other tests
+// read the file as it was.
 func (c *registriesConf) add(t *testing.T, entry map[string]any) bool {
 	t.Helper()
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.path == "" {
+	if now, set := os.LookupEnv(overrideEnv); c.err != nil && now == c.named && set == c.wasSet {
+		// A file of the test's own would need t.Setenv, which panics in a parallel test; one that set the
+		// environment itself, as only a serial test can, still gets one.
+		t.Fatalf("Main couldn't share a registries.conf with the tests: %v", c.err)
+	}
+	if c.path == "" || os.Getenv(overrideEnv) != c.path {
 		return false
 	}
 	prefix := registryPrefix(entry)
@@ -134,19 +151,18 @@ func (c *registriesConf) add(t *testing.T, entry map[string]any) bool {
 	c.added++
 	added := registryEntry{t: t, table: entry, n: c.added}
 	c.entries[prefix] = append(c.entries[prefix], added)
-	if err := c.write(); err != nil {
-		t.Fatalf("adding %v to %s: %v", entry, c.path, err)
+	err := c.write()
+	if err == nil {
+		_, err = sysregistriesv2.GetRegistries(nil)
 	}
-	if _, err := sysregistriesv2.GetRegistries(nil); err != nil {
-		t.Fatalf("adding %v to %s: %v", entry, c.path, err)
+	if err != nil {
+		c.drop(prefix, added.n)
+		t.Fatalf("adding %v to %s: %v", entry, c.path, errors.Join(err, c.write()))
 	}
 	t.Cleanup(func() {
 		c.mu.Lock()
 		defer c.mu.Unlock()
-		c.entries[prefix] = slices.DeleteFunc(c.entries[prefix], func(e registryEntry) bool { return e.n == added.n })
-		if len(c.entries[prefix]) == 0 {
-			delete(c.entries, prefix)
-		}
+		c.drop(prefix, added.n)
 		if c.path != "" {
 			if err := c.write(); err != nil {
 				t.Errorf("removing %v from %s: %v", entry, c.path, err)
@@ -154,6 +170,14 @@ func (c *registriesConf) add(t *testing.T, entry map[string]any) bool {
 		}
 	})
 	return true
+}
+
+// drop removes the entry numbered n for prefix; c.mu is held.
+func (c *registriesConf) drop(prefix string, n int) {
+	c.entries[prefix] = slices.DeleteFunc(c.entries[prefix], func(e registryEntry) bool { return e.n == n })
+	if len(c.entries[prefix]) == 0 {
+		delete(c.entries, prefix)
+	}
 }
 
 // write writes the file, its base with the tests' tables, replacing it whole, so that a reader that a running test

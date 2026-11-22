@@ -58,8 +58,8 @@ func TestSave_ArchiveNamesTheTaggedImage(t *testing.T) {
 
 // TestSave_WritesAnArchive specifies that save writes an archive that docker load can import, at any path,
 // colons and all, even inside the project, whose globs never read the archive being written.
+// It runs alone, since one scenario sets the process's umask.
 func TestSave_WritesAnArchive(t *testing.T) {
-	parallelRule(t)
 	for _, example := range []struct {
 		name    string
 		options []option
@@ -95,7 +95,7 @@ func TestSave_WritesAnArchive(t *testing.T) {
 	})
 
 	t.Run("A new archive is readable by all, as the umask allows", func(t *testing.T) {
-		// The umask is the process's, so this would be unsafe for scenarios in parallel, which they aren't.
+		// The umask is the process's, so the rule doesn't run in parallel.
 		umask := syscall.Umask(0o022)
 		t.Cleanup(func() { syscall.Umask(umask) })
 		w := newSaveWorld(t)

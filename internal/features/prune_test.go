@@ -34,7 +34,7 @@ func TestPrune_RemovesCachedResults(t *testing.T) {
 	parallelRule(t)
 	t.Run("A prune removes every cached result, and leaves other stores alone", func(t *testing.T) {
 		w := newPruneWorld(t)
-		w.GivenTheSuitesStoresHoldAResult()
+		w.GivenOtherStoresHoldAResult()
 		w.WhenIBuild("app")
 		w.ThenItSucceeds()
 		w.WhenIPrune()
@@ -42,7 +42,7 @@ func TestPrune_RemovesCachedResults(t *testing.T) {
 		w.ThenTheOutputDoesNotInclude("Removed 0 images")
 		w.ThenItLastReports("Removed ")
 		w.ThenTheBuildCacheHoldsNothing()
-		w.ThenTheSuitesStoresHoldWhatTheyDid()
+		w.ThenTheOtherStoresHoldWhatTheyDid()
 	})
 
 	t.Run("A prune whose report can't be written still prunes, and fails with the write's failure",

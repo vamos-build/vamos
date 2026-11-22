@@ -36,8 +36,7 @@ func Main(m *testing.M, children ...func() bool) {
 	}
 	stopSharing, err := sharedConf.share()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "testenv: tests' registries go in registries.conf files of their own, so tests that "+
-			"start registries can't run in parallel: %v\n", err)
+		fmt.Fprintf(os.Stderr, "testenv: not sharing a registries.conf, so tests that add a registry fail: %v\n", err)
 		stopSharing = func() {}
 	}
 	code := m.Run()

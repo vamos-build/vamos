@@ -3,6 +3,7 @@ package testenv
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log"
 	"net/http"
@@ -198,6 +199,16 @@ registry = [{location = "registry:5000", insecure = true}]
 	})
 }
 
+// TestUnsharedRegistriesConfOfTheTestsOwn checks that, where Main couldn't share a registries.conf, a test that set the
+// override itself, to nothing where it was unset, is left to make a file of its own, rather than failed.
+func TestUnsharedRegistriesConfOfTheTestsOwn(t *testing.T) {
+	t.Setenv(overrideEnv, "") // restored once the test ends
+	c := &registriesConf{err: errors.New("no shared file"), wasSet: false}
+	if c.add(t, map[string]any{"location": "own:5000"}) {
+		t.Error("add added a table to a file that was never shared")
+	}
+}
+
 // TestSharedRegistriesConf checks that the binary's own registries.conf keeps what the override file it replaces says,
 // that tests' registries are in it while the tests run, and removed as each ends, a subtest's entry replacing its
 // test's for the same prefix until then, without the environment changing, so that tests running in parallel can add
@@ -217,6 +228,12 @@ func TestSharedRegistriesConf(t *testing.T) {
 	var c registriesConf
 	stop, err := c.share()
 	Must(t, err)
+	stopped := false
+	t.Cleanup(func() { // if the test stops before it does
+		if !stopped {
+			stop()
+		}
+	})
 	shared := os.Getenv(overrideEnv)
 	if shared == own || shared == "" {
 		t.Fatalf("%s = %q, want a file of the binary's own", overrideEnv, shared)
@@ -255,6 +272,7 @@ func TestSharedRegistriesConf(t *testing.T) {
 		t.Errorf("%s = %q after the tests, want it unchanged, %q", overrideEnv, got, shared)
 	}
 
+	stopped = true
 	stop()
 	if got := os.Getenv(overrideEnv); got != own {
 		t.Errorf("%s = %q once stopped, want the replaced file again, %q", overrideEnv, got, own)

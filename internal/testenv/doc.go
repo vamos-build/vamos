@@ -16,8 +16,10 @@
 // so that no test touches the developer's; see RemoveSuiteStores for cleanup.
 // PrivateStores copies in the overlay driver's checks of the filesystem that the suite's store made,
 // so that tests running in parallel don't each fork the binary to check it, as seedDriverChecks says.
-// Their overlay driver diffs layers natively, without the metacopy of Fedora's default storage.conf,
-// whose naive diffs wait for the next whole second after every commit;
+// Their overlay driver has metacopy off, unlike Fedora's default storage.conf, so that it diffs layers natively where
+// the kernel lets it, rather than naively, which waits for the next whole second after every commit;
+// it still diffs naively with a mount program such as fuse-overlayfs, or a kernel that doesn't take metacopy=off
+// and turns it on by default;
 // NaiveDiffEnv gives a test binary's stores metacopy, as TestNaiveAndNativeDiffsMakeTheSameImage in cli does.
 // Their UnnamedImages lists what a failed build may leave in the store.
 // RequireBuildah and RequireOwnership probe for what a test needs and skip it when that is missing,

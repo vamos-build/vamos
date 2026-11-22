@@ -3,6 +3,7 @@ package testenv
 import (
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"io/fs"
 	"maps"
 	"math/rand/v2"
@@ -274,7 +275,10 @@ func (f *DeniedFs) denied(op, path string) error {
 // it finds the leftovers of the one before.
 func CgroupRoot(t *testing.T) string {
 	t.Helper()
-	root := fmt.Sprintf("/sys/fs/cgroup/vamos-test-%d-%s", os.Getpid(), storesName(t.Name()))
+	// storesName maps some names to the same, such as a/b and a-b, so a hash of the name tells them apart.
+	h := fnv.New32a()
+	h.Write([]byte(t.Name()))
+	root := fmt.Sprintf("/sys/fs/cgroup/vamos-test-%d-%s-%08x", os.Getpid(), storesName(t.Name()), h.Sum32())
 	t.Cleanup(func() {
 		if err := os.Remove(root); err != nil && !errors.Is(err, os.ErrNotExist) {
 			t.Logf("removing the test's cgroup root: %v", err)

@@ -246,6 +246,7 @@ func TestAssembleGaps(t *testing.T) {
 func TestMeasureLocalClock(t *testing.T) {
 	local, err := run.NewLocal(testenv.PrivateStores(t).Options)
 	must(t, err)
+	t.Cleanup(func() { local.Close() })
 	session := &traceSession{recorder: tracing.NewRecorder(clientProcess, nil), path: "trace.json"}
 	session.measure(t.Context(), local, func(err error) { t.Errorf("warned: %v", err) })
 	doc, _ := session.document()

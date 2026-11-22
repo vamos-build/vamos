@@ -137,6 +137,7 @@ type world struct {
 	interruptOn  string          // what the command running prints that an option or step interrupts it on
 	interruptIn  time.Duration   // how long interruptedAfter lets the command running run
 	interruptBy  time.Duration   // how long a step lets the command running run, if what it waits for never comes
+	interrupted  atomic.Bool     // whether interruptedOnceItPrints interrupted a command, on what it printed
 	printedCue   bool            // whether the last command printed what it was interrupted on, before any deadline
 	containers   map[string]bool // the containers in the store when the scenario started, if it builds
 	took         time.Duration   // how long the last command ran
@@ -154,7 +155,8 @@ type world struct {
 	ran          bool              // whether any command has run
 	ownStores    bool              // whether the scenario's stores are its own, rather than the suite's
 	other        func()            // releases what another vamos holds of the build cache, if one does
-	suiteBefore  cached            // what the suite's stores held once GivenTheSuitesStoresHoldAResult built there
+	apart        *testenv.Stores   // the stores of GivenOtherStoresHoldAResult, apart from the scenario's
+	apartBefore  cached            // what they held once it built there
 	alsoNamed    map[string]string // the images that GivenACachedLayerIsAlsoNamed named, by name
 	cachedBefore cached            // what its own stores held as the last command began, alone
 	cachedAfter  cached            // and as it ended
@@ -253,6 +255,7 @@ func (w *world) execute(fsys afero.Fs, args []string) {
 	w.image, w.index, w.archive, w.entries, w.exported, w.sentAs = nil, nil, "", nil, "", ""
 	w.loadRan, w.trace = false, nil
 	w.tracePath, w.traceTo = w.traceTo, ""
+	w.interrupted.Store(false) // for this command alone
 	cmd := cli.NewRootCommand(w.commandConfig(fsys))
 	var stdout, stderr, tried bytes.Buffer
 	var cue *interrupter
@@ -269,7 +272,7 @@ func (w *world) execute(fsys afero.Fs, args []string) {
 	case w.outputClosed:
 		cmd.SetOut(closedOutput{&tried})
 	case w.interruptOn != "":
-		cue = &interrupter{out: &stdout, text: []byte(w.interruptOn), ctx: ctx, cancel: cancel}
+		cue = &interrupter{out: &stdout, text: []byte(w.interruptOn), ctx: ctx, cancel: cancel, fired: &w.interrupted}
 		cmd.SetOut(cue)
 	case w.outputTTY:
 		var err error
@@ -331,7 +334,7 @@ func (w *world) execute(fsys afero.Fs, args []string) {
 	// The project keeps the lockfiles that the command wrote, as a project on disk would, for the next command.
 	w.lockfiles = w.lockfilesIn(fsys)
 	maps.Copy(w.files, w.lockfiles)
-	w.printedCue = cue != nil && cue.fired
+	w.printedCue = cue != nil && cue.done
 	w.outputClosed = false // for this command alone
 }
 

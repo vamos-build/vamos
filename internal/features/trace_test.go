@@ -557,18 +557,21 @@ func TestTrace_ACommandPrintsItsTrace(t *testing.T) {
 	t.Run("An interrupted build prints its trace, which holds what ran", func(t *testing.T) {
 		w := newTraceWorld(t)
 		w.GivenAProjectThatPullsBusybox()
+		w.GivenABarrier()
+		w.GivenTheBarrierOpensOnceTheCommandIsInterrupted()
 		w.GivenTheBuildFileDeclares(`
 			layer(name="app", base="busybox", steps=[env(NONCE="` + testenv.NewNonce() + `"),
-			    run(["sh", "-c", "echo started; sleep 1"])])
+			    run(["sh", "-c", "echo started; wget -q -O /dev/null <barrier>"])])
 		`)
 		w.WhenIBuild("app", interruptedOnceItPrints("started"), traced())
 		w.ThenItIsInterrupted()
+		w.ThenTheBarrierOpened()
 		w.ThenItPrintsItsTrace()
-		w.ThenTheTraceSpanIsWithin("executor", `run(["sh", "-c", "echo started; sleep 1"])`, "executor",
+		w.ThenTheTraceSpanIsWithin("executor", `run(["sh", "-c", "echo started; wget *`, "executor",
 			`layer "app"`)
 		w.WhenIReadTheTrace("<printed trace>")
 		w.ThenItSucceeds()
-		w.ThenTheTraceSpanIsWithin("executor", `run(["sh", "-c", "echo started; sleep 1"])`, "executor",
+		w.ThenTheTraceSpanIsWithin("executor", `run(["sh", "-c", "echo started; wget *`, "executor",
 			`layer "app"`)
 	})
 }

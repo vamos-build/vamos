@@ -292,6 +292,7 @@ const ChildEnv = "VAMOS_TEST_ATTEMPT_STORE"
 type childStore struct {
 	GraphRoot, RunRoot string
 	Driver             string
+	DriverPriority     []string // which driver to try first, where Driver names none
 	DriverOptions      []string
 }
 
@@ -308,8 +309,8 @@ func ChildFromEnv() bool {
 		fmt.Fprintf(os.Stderr, "reading %s: %v\n", ChildEnv, err)
 		os.Exit(1)
 	}
-	options := storage.StoreOptions{GraphRoot: store.GraphRoot, RunRoot: store.RunRoot,
-		GraphDriverName: store.Driver, GraphDriverOptions: store.DriverOptions}
+	options := storage.StoreOptions{GraphRoot: store.GraphRoot, RunRoot: store.RunRoot, GraphDriverName: store.Driver,
+		GraphDriverPriority: store.DriverPriority, GraphDriverOptions: store.DriverOptions}
 	if err := run.Attempt(context.Background(), os.Stdin, os.Stdout, options); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -326,7 +327,8 @@ func TestChild(options storage.StoreOptions) func(ctx context.Context) *exec.Cmd
 			exe = os.Args[0]
 		}
 		spec, err := json.Marshal(childStore{GraphRoot: options.GraphRoot, RunRoot: options.RunRoot,
-			Driver: options.GraphDriverName, DriverOptions: options.GraphDriverOptions})
+			Driver: options.GraphDriverName, DriverPriority: options.GraphDriverPriority,
+			DriverOptions: options.GraphDriverOptions})
 		if err != nil {
 			panic(err) // strings always encode
 		}

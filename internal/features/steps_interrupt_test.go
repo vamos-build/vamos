@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"sync/atomic"
 	"time"
 )
 
@@ -50,17 +51,28 @@ type interrupter struct {
 	text   []byte
 	ctx    context.Context
 	cancel context.CancelFunc
-	fired  bool
+	done   bool
+	fired  *atomic.Bool // the world's, set once it has interrupted the command
 }
 
 func (i *interrupter) Write(p []byte) (int, error) {
 	start := max(0, i.out.Len()-len(i.text)+1) // so that text written across writes is found
 	n, err := i.out.Write(p)
-	if !i.fired && i.ctx.Err() == nil && bytes.Contains(i.out.Bytes()[start:], i.text) {
-		i.fired = true
+	if !i.done && i.ctx.Err() == nil && bytes.Contains(i.out.Bytes()[start:], i.text) {
+		i.done = true
 		i.cancel()
+		i.fired.Store(true)
 	}
 	return n, err
+}
+
+// GivenTheBarrierOpensOnceTheCommandIsInterrupted opens GivenABarrier's barrier once the command has been interrupted
+// on what it prints, as interruptedOnceItPrints asks: a step that waits at it is still running when the interrupt
+// comes, however long the interrupt takes to come, and then ends.
+func (w *world) GivenTheBarrierOpensOnceTheCommandIsInterrupted() {
+	w.t.Helper()
+	w.interrupted.Store(false) // so that only the next command's interrupt opens it
+	w.openBarrierOnce("the command was interrupted", w.interrupted.Load)
 }
 
 // ThenItIsInterrupted checks that the last command failed because it was interrupted, and not otherwise, such as

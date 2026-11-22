@@ -50,14 +50,15 @@ func TestMain(m *testing.M) {
 	testenv.Main(m, worker.ChildFromEnv)
 }
 
-// parallelRules holds the names of the rules that parallelRule marked, and parallelScenarios those of the scenarios
-// that runsInParallel made parallel.
+// parallelRules holds the names of the rules that parallelRule marked, and parallelScenarios the scenarios that
+// runsInParallel made parallel, as tests rather than names, since -count runs a scenario again under the same name.
 var parallelRules, parallelScenarios sync.Map
 
 // parallelRule runs the rule t in parallel with the other rules that call it, once every rule that doesn't has run,
 // and makes each of its scenarios run in parallel with the rule's others as its world starts, on stores of its own.
 // A rule calls it first, unless a step of its scenarios changes what the whole process shares, such as the
-// environment, as GivenTheEnvironmentSets does with t.Setenv, which panics in a parallel test, or the working folder.
+// environment, as GivenTheEnvironmentSets does with t.Setenv, which panics in a parallel test, the working folder,
+// or the umask.
 func parallelRule(t *testing.T) {
 	t.Parallel()
 	parallelRules.Store(t.Name(), true)
@@ -70,7 +71,7 @@ func runsInParallel(t *testing.T) bool {
 	if _, ok := parallelRules.Load(rule); !ok {
 		return false
 	}
-	if _, made := parallelScenarios.LoadOrStore(t.Name(), true); isScenario && !made {
+	if _, made := parallelScenarios.LoadOrStore(t, true); isScenario && !made {
 		t.Parallel()
 	}
 	return true

@@ -87,7 +87,8 @@ Tests never touch the developer's container store or build cache.
 `testenv.SuiteStores` makes a store and cache for the test binary, beside the default store, removed after the run;
 `testenv.PrivateStores` makes a test its own, for one that destroys what they hold or runs in parallel,
 as every scenario of a parallel rule has, and a serial one gets through `GivenStoresOfTheScenariosOwn`;
-it starts with the overlay driver's checks of the filesystem that the suite's store made,
+on overlay, it starts with the overlay driver's checks of the filesystem that the suite's store made,
+all but those of a first layer mount in `-short` runs, which mount no layer,
 since a check forks the test binary into a user namespace that holds every file it has open,
 and with them the build cache locks of the scenarios running beside it.
 In `internal/cli`, `vamos` runs against the suite's stores unless the test called `usePrivateStores`.
@@ -308,7 +309,8 @@ Select with `-run`: `go test ./internal/features -run TestTask_` runs the task s
 A rule calls `parallelRule(t)` first, which runs it, and its scenarios as their worlds start, in parallel,
 each scenario on stores of its own, so that `ThenNoImageIsLeftBehind` sees only its own leftovers.
 A rule whose steps change what the whole process shares, such as `GivenTheEnvironmentSets`, `GivenADockerDaemon`,
-which sets `DOCKER_HOST`, or a working directory, doesn't, and runs alone, on the suite's stores,
-before the parallel rules start; `t.Setenv` panics in a parallel test, which catches a rule that forgot.
+which sets `DOCKER_HOST`, a working directory or the umask, doesn't, and runs alone, on the suite's stores,
+before the parallel rules start; `t.Setenv` panics in a parallel test, which catches a rule that forgot,
+but nothing catches one that sets the umask or the working directory otherwise.
 Steps that start servers share the process otherwise: `testenv.InsecureRegistry` edits the registries.conf
 that `testenv.Main` names for the whole run, and `testenv.CgroupRoot` gives each test's workers a root of its own.

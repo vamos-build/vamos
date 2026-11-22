@@ -52,13 +52,50 @@ func TestWithoutSharedStores(t *testing.T) {
 	}
 }
 
-// TestWithMetacopy checks that metacopy is left out of every mount option to turn it off, dropping an option that
-// held only it, and is added to the mount options to turn it on, in an option of their own if there were none.
+// TestKernelAtLeast checks the kernel releases that decide whether overlay takes metacopy=off.
+func TestKernelAtLeast(t *testing.T) {
+	for release, want := range map[string]bool{
+		"4.19.0":             true,
+		"4.18.20":            false,
+		"5.4.0":              true,
+		"6.8.0-45-generic\n": true,
+		"3.10.0-1160.el7":    false,
+		"7.0.14-linuxkit":    true,
+		"":                   false,
+	} {
+		if got := kernelAtLeast(release, 4, 19); got != want {
+			t.Errorf("kernelAtLeast(%q, 4, 19) = %t, want %t", release, got, want)
+		}
+	}
+}
+
+// TestHasMountProgram checks that a mount program for overlay is found as the driver parses its options.
+func TestHasMountProgram(t *testing.T) {
+	for _, tt := range []struct {
+		options []string
+		want    bool
+	}{
+		{options: []string{"mount_program=/usr/bin/fuse-overlayfs"}, want: true},
+		{options: []string{"nodev", " Overlay.Mount_Program =/usr/bin/fuse-overlayfs"}, want: true},
+		{options: []string{"zfs.mount_program=/x"}, want: false},
+		{options: []string{"overlay.mountopt=nodev"}, want: false},
+	} {
+		if got := hasMountProgram(tt.options); got != tt.want {
+			t.Errorf("hasMountProgram(%q) = %t, want %t", tt.options, got, tt.want)
+		}
+	}
+}
+
+// TestWithMetacopy checks that metacopy=on, or metacopy=off where the kernel takes it, is set in the last mount option
+// that the overlay driver takes, or else that metacopy=on is left out of it, keeping an explicit metacopy=off; that the
+// others, and other drivers', are left as they are; that an emptied one is dropped only where no earlier one would take
+// its place; and that, with none to set metacopy in, it is set in an option of its own.
 func TestWithMetacopy(t *testing.T) {
 	for _, tt := range []struct {
 		name    string
 		options []string
 		on      bool
+		sayOff  bool
 		want    []string
 	}{
 		{
@@ -74,7 +111,7 @@ func TestWithMetacopy(t *testing.T) {
 		{
 			name:    "metacopy off already, off",
 			options: []string{"mountopt=metacopy=off,nodev"},
-			want:    []string{"mountopt=nodev"},
+			want:    []string{"mountopt=metacopy=off,nodev"},
 		},
 		{
 			name:    "no mount options, off",
@@ -93,10 +130,57 @@ func TestWithMetacopy(t *testing.T) {
 			on:      true,
 			want:    []string{"imagestore=/a", "overlay.mountopt=metacopy=on"},
 		},
+		{
+			name:    "general and overlay's, off",
+			options: []string{"mountopt=nodev", "overlay.mountopt=metacopy=on"},
+			want:    []string{"mountopt=nodev", "overlay.mountopt="},
+		},
+		{
+			name:    "general and overlay's, on",
+			options: []string{"mountopt=nodev", "overlay.mountopt=noatime"},
+			on:      true,
+			want:    []string{"mountopt=nodev", "overlay.mountopt=noatime,metacopy=on"},
+		},
+		{
+			name:    "another driver's, on",
+			options: []string{"zfs.mountopt=nodev"},
+			on:      true,
+			want:    []string{"zfs.mountopt=nodev", "overlay.mountopt=metacopy=on"},
+		},
+		{
+			name:    "another driver's after overlay's, off",
+			options: []string{"overlay.mountopt=nodev,metacopy=on", "zfs.mountopt=metacopy=on"},
+			want:    []string{"overlay.mountopt=nodev", "zfs.mountopt=metacopy=on"},
+		},
+		{
+			name:    "Fedora's options, said off",
+			options: []string{"overlay.mountopt=nodev,metacopy=on"},
+			sayOff:  true,
+			want:    []string{"overlay.mountopt=nodev,metacopy=off"},
+		},
+		{
+			name:    "metacopy off already, said off",
+			options: []string{"mountopt=metacopy=off,nodev"},
+			sayOff:  true,
+			want:    []string{"mountopt=nodev,metacopy=off"},
+		},
+		{
+			name:    "no mount options, said off",
+			options: []string{"imagestore=/a"},
+			sayOff:  true,
+			want:    []string{"imagestore=/a", "overlay.mountopt=metacopy=off"},
+		},
+		{
+			name:    "no mount options, on, though the kernel would say off",
+			options: []string{"imagestore=/a"},
+			on:      true,
+			sayOff:  true,
+			want:    []string{"imagestore=/a", "overlay.mountopt=metacopy=on"},
+		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := withMetacopy(tt.options, tt.on); !slices.Equal(got, tt.want) {
-				t.Errorf("withMetacopy(%q, %t) = %q, want %q", tt.options, tt.on, got, tt.want)
+			if got := withMetacopy(tt.options, tt.on, tt.sayOff); !slices.Equal(got, tt.want) {
+				t.Errorf("withMetacopy(%q, %t, %t) = %q, want %q", tt.options, tt.on, tt.sayOff, got, tt.want)
 			}
 		})
 	}
@@ -105,10 +189,16 @@ func TestWithMetacopy(t *testing.T) {
 // TestPrivateStoresStartWithTheDriversChecks checks that a test's store starts with the checks of the filesystem that
 // the overlay driver made for the suite's, and makes none of its own as it opens: one it lacked would be recorded.
 func TestPrivateStoresStartWithTheDriversChecks(t *testing.T) {
+	s := PrivateStores(t) // first, as a scenario's stores are made before it checks for buildah
 	RequireBuildah(t)
 	suite := SuiteStores(t)
-	if suite.Options.GraphDriverName != "overlay" {
-		t.Skipf("the store's driver is %s, which records no checks", suite.Options.GraphDriverName)
+	var driver string
+	Must(t, suite.WithStore(func(store storage.Store) error {
+		driver = store.GraphDriverName() // which may be one storage.conf leaves to containers/storage
+		return nil
+	}))
+	if driver != "overlay" {
+		t.Skipf("the store's driver is %s, which records no checks", driver)
 	}
 	checks := func(s *Stores) []string {
 		t.Helper()
@@ -116,7 +206,9 @@ func TestPrivateStoresStartWithTheDriversChecks(t *testing.T) {
 		Must(t, err)
 		var names []string
 		for _, e := range entries {
-			names = append(names, e.Name())
+			if e.Type().IsRegular() {
+				names = append(names, e.Name())
+			}
 		}
 		return names
 	}
@@ -124,13 +216,13 @@ func TestPrivateStoresStartWithTheDriversChecks(t *testing.T) {
 	if len(want) == 0 {
 		t.Fatal("the suite's store recorded no checks")
 	}
-	s := PrivateStores(t)
 	if got := checks(s); !slices.Equal(got, want) {
 		t.Errorf("a test's store starts with the checks %q, want the suite's, %q", got, want)
 	}
-	Must(t, s.WithStore(func(storage.Store) error { return nil }))
+	// Some checks are made only as the driver first mounts a layer.
+	Must(t, s.WithStore(probeBuilder))
 	if got := checks(s); !slices.Equal(got, want) {
-		t.Errorf("a test's store has the checks %q once opened, want only the suite's, %q", got, want)
+		t.Errorf("a test's store has the checks %q once it mounted a container, want only the suite's, %q", got, want)
 	}
 }
 
