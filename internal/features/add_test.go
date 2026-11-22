@@ -28,6 +28,7 @@ func newAddMistakeWorld(t *testing.T) *world {
 // overrides ownership, naming users and groups in the image: with only owner, the group is that user's group,
 // and with only group, the owner remains root. New parent directories receive the selected ownership too.
 func TestAdd_FilesAreOwnedByRootUnlessOverridden(t *testing.T) {
+	parallelRule(t)
 	for _, example := range []struct {
 		name  string
 		args  string // add()'s arguments after its source and destination, as Starlark
@@ -90,6 +91,7 @@ func TestAdd_FilesAreOwnedByRootUnlessOverridden(t *testing.T) {
 // keep their modes and owners, unless the fileset selects them itself:
 // a selected directory brings its masked mode and the selected ownership.
 func TestAdd_ExistingDirectoriesKeepTheirModesAndOwners(t *testing.T) {
+	parallelRule(t)
 	t.Run("Adding into an existing directory leaves its mode and owner", func(t *testing.T) {
 		w := newAddWorld(t)
 		w.GivenTheBuildFileDeclares(`
@@ -162,6 +164,7 @@ func TestAdd_ExistingDirectoriesKeepTheirModesAndOwners(t *testing.T) {
 // TestAdd_DestinationMustBeAbsolute specifies that workdir() paths and add() destinations, which can refer to
 // environment variables, must be absolute after expansion.
 func TestAdd_DestinationMustBeAbsolute(t *testing.T) {
+	parallelRule(t)
 	for _, example := range []struct {
 		name  string
 		step  string
@@ -234,6 +237,7 @@ func TestAdd_DestinationMustBeAbsolute(t *testing.T) {
 // TestAdd_OwnerAndGroupAreStrings specifies that owner and group require strings, including numeric IDs
 // such as owner = "1000".
 func TestAdd_OwnerAndGroupAreStrings(t *testing.T) {
+	parallelRule(t)
 	for _, example := range []struct {
 		name  string
 		args  string // add()'s arguments after its source and destination
@@ -266,6 +270,7 @@ func TestAdd_OwnerAndGroupAreStrings(t *testing.T) {
 // TestAdd_OwnerAndGroupAreGivenApart specifies that owner names a user and group a group,
 // so neither holds the other, as "user:group" would.
 func TestAdd_OwnerAndGroupAreGivenApart(t *testing.T) {
+	parallelRule(t)
 	for _, example := range []struct {
 		name  string
 		args  string // add()'s arguments after its source and destination

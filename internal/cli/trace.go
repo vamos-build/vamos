@@ -15,6 +15,8 @@ import (
 	"github.com/vamos-build/vamos/internal/api"
 	"github.com/vamos-build/vamos/internal/cache"
 	"github.com/vamos-build/vamos/internal/finish"
+	"github.com/vamos-build/vamos/internal/remote"
+	"github.com/vamos-build/vamos/internal/run"
 	"github.com/vamos-build/vamos/internal/tracing"
 )
 
@@ -22,8 +24,9 @@ import (
 const clientProcess = "vamos"
 
 // The bounds on a command's cleanup once its jobs end, each under the command's context without its cancellation,
-// so that an interrupted command still stores and writes its trace, and no step can take the others' time.
-const (
+// so that an interrupted command still stores and writes its trace, and no step can take the others' time;
+// tests shorten them.
+var (
 	traceStoreTimeout    = 10 * time.Second // storing the command trace, of at most tracing.MaxTraceSize
 	traceAssembleTimeout = 60 * time.Second // reading the manifests and attempt traces for --trace's file
 	releaseTimeout       = 10 * time.Second // releasing the jobs, which lets a prune run
@@ -118,20 +121,45 @@ func (t *traceSession) addJob(id api.JobID, outcome api.Outcome, warn func(error
 // measure measures ex's clock against the client's, for a command trace that can be stored,
 // with one sample, or three if the command writes the trace, whose spans are placed by it.
 // It runs once the command's jobs have ended and are held, so that no prune can run while it waits.
-// Each sample is bounded, so that an executor that stops answering can't hold the command, and none is ended
-// by an interrupt, which the jobs' end may meet; an offset not measured is warned about, and noted in the trace.
+// Each sample is bounded, so that an executor that stops answering can't hold the command, and makes none of the
+// coordinator client's retries, since a sample retried after a wait is skewed, and a coordinator that has gone, as an
+// interrupted one has, would otherwise hold the command for the whole bound; a measurement that fails before that
+// bound, as on a reused connection that was reset, is taken once more, timed afresh, so that its failure doesn't skew
+// the offset, within what is left of that bound. None is ended by an interrupt, which the jobs' end may meet.
+// An offset not measured is warned about, and noted in the trace.
+// The local executor runs in this process, on its clock, so its offset is none, exactly: measuring it would place the
+// spans a sample's round trip apart at worst, which, under load, can put a job's span before the client's that
+// started it.
 func (t *traceSession) measure(ctx context.Context, ex api.Executor, warn func(error)) {
+	if _, local := ex.(*run.Local); local {
+		t.mu.Lock()
+		t.offset = tracing.Offset{}
+		t.mu.Unlock()
+		return
+	}
 	samples := 1
 	if t.path != "" {
 		samples = 3
 	}
-	offset, err := tracing.EstimateOffset(context.WithoutCancel(ctx), samples, time.Now,
-		func(ctx context.Context) (time.Time, error) {
-			ctx, cancel := context.WithTimeout(ctx, clockTimeout)
-			defer cancel()
-			caps, err := ex.Capabilities(ctx)
-			return caps.Clock, err
-		})
+	sample := func(ctx context.Context) (time.Time, error) {
+		ctx, cancel := context.WithTimeout(remote.Once(ctx), clockTimeout)
+		defer cancel()
+		caps, err := ex.Capabilities(ctx)
+		return caps.Clock, err
+	}
+	ctx = context.WithoutCancel(ctx)
+	start := time.Now()
+	offset, err := tracing.EstimateOffset(ctx, samples, time.Now, sample)
+	if err != nil && time.Since(start) < clockTimeout { // a failure before the bound, as of a reset, not a stall
+		// Timed afresh, within what is left of the first measurement's bound, which bounds both.
+		again, cancel := context.WithDeadline(ctx, start.Add(clockTimeout))
+		first := err
+		if offset, err = tracing.EstimateOffset(again, samples, time.Now, sample); err != nil &&
+			err.Error() != first.Error() { // both, on a line, since the first's cause may be the one to know
+			err = fmt.Errorf("%w, and before, %w", err, first)
+		}
+		cancel()
+	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if err != nil {

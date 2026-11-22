@@ -31,7 +31,6 @@ import (
 	"github.com/vamos-build/vamos/internal/run"
 	"github.com/vamos-build/vamos/internal/testenv"
 	"github.com/vamos-build/vamos/internal/tracing"
-	"github.com/vamos-build/vamos/internal/worker"
 	"go.podman.io/storage"
 )
 
@@ -62,6 +61,15 @@ func (w *world) GivenTheCoordinatorRestartsWithoutItsState() {
 	w.startLocalCoordinator()
 }
 
+// GivenACoordinatorWhoseAttemptTracesKeep starts a coordinator, at <coordinator>, as GivenACoordinator does, that
+// keeps each attempt's trace within size bytes, rather than the 16 MiB of every executor, so that a scenario sees an
+// attempt's trace cut short without recording megabytes of spans.
+func (w *world) GivenACoordinatorWhoseAttemptTracesKeep(size int) {
+	w.t.Helper()
+	w.attemptTraceLimit = size
+	w.GivenACoordinator()
+}
+
 // startLocalCoordinator starts a coordinator that runs builds in this process, on the coordinator's stores.
 func (w *world) startLocalCoordinator() {
 	w.t.Helper()
@@ -69,6 +77,7 @@ func (w *world) startLocalCoordinator() {
 	if err != nil {
 		w.t.Fatal(err)
 	}
+	local.LimitAttemptTraces(w.attemptTraceLimit)
 	w.coordinatorLocal = local
 	w.t.Cleanup(func() { local.Close() })
 	content, err := local.ContentStore()
@@ -366,8 +375,8 @@ func onTheCoordinator(url string) option {
 func (w *world) GivenACoordinatorWithAWorker(args ...string) {
 	w.t.Helper()
 	w.hasNoCoordinator()
-	w.t.Setenv(worker.ChildEnv, "1") // the worker runs this test binary as its attempts' process
 	workerStores := testenv.PrivateStores(w.t)
+	w.cgroupRoot = testenv.CgroupRoot(w.t) // before the servers' cleanup, so that it is removed once they have ended
 	ctx, cancel := context.WithCancel(context.Background())
 	var coordinator, registered *server
 	w.t.Cleanup(func() { // registered first, so that it runs however the step ends
@@ -378,14 +387,42 @@ func (w *world) GivenACoordinatorWithAWorker(args ...string) {
 			}
 		}
 	})
+	// A failed scenario shows what they printed, before they are stopped, since a build's failure, or a server's
+	// own, may be told there alone, as a registry's error that the worker met is.
+	w.t.Cleanup(func() {
+		if !w.t.Failed() {
+			return
+		}
+		var started []*server
+		for _, s := range []*server{coordinator, registered} {
+			if s != nil {
+				started = append(started, s)
+			}
+		}
+		w.t.Logf("%s", outputsOf(started))
+	})
 	coordinator = w.serve(ctx, &w.stores.Options, append([]string{"coordinator", "--listen", "127.0.0.1:0",
-		"--cache-dir", w.t.TempDir(), "--cache-repository", w.atRegistry("<registry>/vamos-cache"), "--lease", "2s"},
-		w.allAtPlaceholders(args)...)...)
+		"--cache-dir", w.t.TempDir(), "--cache-repository", w.atRegistry("<registry>/vamos-cache"), "--lease",
+		workerLease.String()}, w.allAtPlaceholders(args)...)...)
 	address := w.front(coordinator)
+	w.coordinatorStarted = time.Now() // no earlier than the coordinator's: it says where it listens once started
 	// The worker reaches the coordinator itself, so that what it sends isn't counted as a command's.
 	registered = w.serve(ctx, &workerStores.Options, "worker", "--coordinator", address, "--capacity", "2")
 	// As the worker says, rather than as the coordinator's platforms do, which --offer gives before any registers.
 	registered.waitFor(w.t, "worker: registered as ", coordinator)
+}
+
+// workerLease is the lease of GivenACoordinatorWithAWorker's coordinator: short, so that it settles quickly.
+const workerLease = 2 * time.Second
+
+// GivenTheCoordinatorHasSettled waits until a lease has passed since GivenACoordinatorWithAWorker started the
+// coordinator, before which it refuses a prune, since an attempt of an earlier instance might still be running.
+func (w *world) GivenTheCoordinatorHasSettled() {
+	w.t.Helper()
+	if w.coordinatorStarted.IsZero() {
+		w.t.Fatal("no GivenACoordinatorWithAWorker step started a coordinator")
+	}
+	time.Sleep(time.Until(w.coordinatorStarted.Add(workerLease + 100*time.Millisecond)))
 }
 
 // GivenAnotherClientBuildsOnTheCoordinator starts building target on the scenario's coordinator, which options must
@@ -440,8 +477,8 @@ func (w *world) GivenTwoClientsBuiltAtOnceOnTheCoordinator(target string, first,
 		}
 	}
 	// At once: each job's target was building, or queued to, before the other job was done, as their events said
-	// when the coordinator's front read them. That the two history writes ran at the same moment would take a barrier
-	// within both attempts, which the tasks of persistent-traces leave to a separate PR.
+	// when the coordinator's front read them. A scenario whose attempts wait at a barrier, which
+	// GivenABarrierThatOpensOnceReachedBy starts, makes them be running at once too.
 	w.jobsMu.Lock()
 	jobs := slices.Clone(w.jobIDs[before:])
 	w.jobsMu.Unlock()
@@ -458,6 +495,162 @@ func (w *world) GivenTwoClientsBuiltAtOnceOnTheCoordinator(target string, first,
 	if !one.building.Before(two.done) || !two.building.Before(one.done) {
 		w.t.Fatalf("the two jobs' targets didn't build at once: %v to %v, and %v to %v", one.building, one.done,
 			two.building, two.done)
+	}
+}
+
+// GivenABarrierThatOpensOnceReachedBy starts a server, at the URL that <barrier> stands for in BUILD text, that holds
+// each request it is sent until n have arrived, then answers them all, and every later one at once, until the scenario
+// ends: a step that fetches it, with busybox's wget, ends only once n steps have reached it, so that n attempts that
+// run it are all running at the moment it opens.
+func (w *world) GivenABarrierThatOpensOnceReachedBy(n int) {
+	w.t.Helper()
+	w.startBarrier(n)
+}
+
+// GivenABarrier starts a server, at the URL that <barrier> stands for in BUILD text, that holds each request it is
+// sent until a later step opens it, as GivenTheBarrierOpensOnceTheOtherClientIsJoined does, then answers them all, and
+// every later one at once: a step that fetches it, with busybox's wget, runs until then, however long that takes,
+// rather than for a time that must be long enough.
+func (w *world) GivenABarrier() {
+	w.t.Helper()
+	w.startBarrier(0)
+}
+
+// startBarrier starts the scenario's barrier, which opens once want requests have reached it, or, for want 0, once
+// a step opens it.
+func (w *world) startBarrier(want int) {
+	w.t.Helper()
+	if w.barrier != nil {
+		w.t.Fatal("the scenario has a barrier already")
+	}
+	b := &barrier{want: want, open: make(chan struct{}), ended: make(chan struct{})}
+	server := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		b.mu.Lock()
+		if b.reached++; b.reached == b.want {
+			b.opens()
+		}
+		b.mu.Unlock()
+		select {
+		case <-b.open:
+			rw.WriteHeader(http.StatusNoContent)
+		case <-b.ended:
+		case <-r.Context().Done():
+		}
+	}))
+	w.t.Cleanup(server.Close)
+	w.t.Cleanup(func() { close(b.ended) }) // after server.Close's, so first, letting it close
+	b.url = server.URL
+	w.barrier = b
+}
+
+// GivenTheBarrierOpensOnceTheOtherClientIsJoined opens GivenABarrier's barrier once another build has joined an
+// attempt of the build of GivenAnotherClientBuildsOnTheCoordinator, as its events say: an attempt that waits at it
+// runs until a build has joined it.
+func (w *world) GivenTheBarrierOpensOnceTheOtherClientIsJoined() {
+	w.t.Helper()
+	job, timeline := w.otherJob, w.watchedJobs()
+	w.openBarrierOnce("another build joined the other client's attempt", func() bool {
+		return timeline.joinedBy(job)
+	})
+}
+
+// GivenTheBarrierOpensOnceTheOtherClientEnds opens GivenABarrier's barrier once the build of
+// GivenAnotherClientBuildsOnTheCoordinator has ended: an attempt that waits at it is still running when that build
+// leaves it.
+func (w *world) GivenTheBarrierOpensOnceTheOtherClientEnds() {
+	w.t.Helper()
+	other := w.otherClient()
+	w.openBarrierOnce("the other client's build ended", func() bool {
+		select {
+		case <-other.done:
+			return true
+		default:
+			return false
+		}
+	})
+}
+
+// openBarrierOnce opens GivenABarrier's barrier once happened returns true, checking every 10ms until the scenario
+// ends; what describes the event. After a minute it opens the barrier all the same, so that the steps waiting at it
+// end, and ThenTheBarrierOpened then says what never happened.
+func (w *world) openBarrierOnce(what string, happened func() bool) {
+	w.t.Helper()
+	b := w.barrier
+	if b == nil || b.want != 0 {
+		w.t.Fatal("no GivenABarrier step started a barrier for a step to open")
+	}
+	go func() {
+		deadline := time.After(time.Minute)
+		for !happened() {
+			select {
+			case <-b.ended:
+				return
+			case <-deadline:
+				b.mu.Lock()
+				b.missed = what
+				b.opens()
+				b.mu.Unlock()
+				return
+			case <-time.After(10 * time.Millisecond):
+			}
+		}
+		b.mu.Lock()
+		b.opens()
+		b.mu.Unlock()
+	}()
+}
+
+// barrier is the server of GivenABarrierThatOpensOnceReachedBy or GivenABarrier.
+type barrier struct {
+	url   string
+	want  int           // the requests that open it, or 0 for one that a step opens
+	open  chan struct{} // closed once it opens
+	ended chan struct{} // closed as the scenario ends
+
+	mu      sync.Mutex
+	reached int
+	opened  bool
+	missed  string // what openBarrierOnce waited a minute for in vain, opening it all the same
+}
+
+// opens opens the barrier, if it isn't open already; b.mu is held.
+func (b *barrier) opens() {
+	if !b.opened {
+		b.opened = true
+		close(b.open)
+	}
+}
+
+// atBarrier returns s with each <barrier> replaced by the URL of the scenario's barrier.
+func (w *world) atBarrier(s string) string {
+	w.t.Helper()
+	if !strings.Contains(s, "<barrier>") {
+		return s
+	}
+	if w.barrier == nil {
+		w.t.Fatalf("%q names <barrier>, but no Given step started one", s)
+	}
+	return strings.ReplaceAll(s, "<barrier>", w.barrier.url)
+}
+
+// ThenTheBarrierOpened checks that the scenario's barrier opened: that as many steps as it waits for reached it, or,
+// for GivenABarrier's, that what a step opens it on happened.
+func (w *world) ThenTheBarrierOpened() {
+	w.t.Helper()
+	if w.barrier == nil {
+		w.t.Fatal("no Given step started a barrier")
+	}
+	b := w.barrier
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	switch {
+	case b.missed != "":
+		w.t.Errorf("the barrier opened after a minute, when it was to open once %s", b.missed)
+	case b.opened:
+	case b.want == 0:
+		w.t.Error("the barrier never opened")
+	default:
+		w.t.Errorf("%d steps reached the barrier, which waits for %d", b.reached, b.want)
 	}
 }
 
@@ -841,7 +1034,8 @@ func (w *world) serve(ctx context.Context, store *storage.StoreOptions, args ...
 		w.t.Fatal("serve runs a command that serves, but was given no command line")
 	}
 	s := &server{name: "vamos " + args[0], ended: make(chan struct{})}
-	cmd := cli.NewRootCommand(cli.Config{Fs: afero.NewMemMapFs(), Store: store}) // which reads no project
+	cmd := cli.NewRootCommand(cli.Config{Fs: afero.NewMemMapFs(), Store: store, // which reads no project
+		CgroupRoot: w.cgroupRoot})
 	cmd.SetOut(s)
 	cmd.SetErr(s)
 	cmd.SetArgs(args)

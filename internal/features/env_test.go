@@ -27,6 +27,7 @@ func newEnvMistakeWorld(t *testing.T) *world {
 
 // TestEnv_EachCallSetsAVariable specifies that each call of env() or build_env() needs at least one variable.
 func TestEnv_EachCallSetsAVariable(t *testing.T) {
+	parallelRule(t)
 	for _, example := range []struct {
 		name  string
 		step  string
@@ -57,6 +58,7 @@ func TestEnv_EachCallSetsAVariable(t *testing.T) {
 // TestEnv_VariablesAreNamedStrings specifies that env() and build_env() set string-valued variables,
 // each given by a name that is nonempty and holds no "=", and given once in a call.
 func TestEnv_VariablesAreNamedStrings(t *testing.T) {
+	parallelRule(t)
 	for _, example := range []struct {
 		name  string
 		step  string
@@ -103,6 +105,7 @@ func TestEnv_VariablesAreNamedStrings(t *testing.T) {
 // expand $NAME and ${NAME}, and that any other $ syntax, including ${NAME:-default}, $5, or a trailing $,
 // is an error when the BUILD file loads; $$ gives a literal dollar sign.
 func TestEnv_DollarIsFollowedByANameOrBraces(t *testing.T) {
+	parallelRule(t)
 	for _, example := range []struct {
 		name  string
 		step  string
@@ -150,6 +153,7 @@ func TestEnv_DollarIsFollowedByANameOrBraces(t *testing.T) {
 // before that call, that unset variables expand to an empty string, and that $$ produces a literal dollar sign;
 // add() destinations and workdir() paths expand them too.
 func TestEnv_ValuesExpandTheVariablesBeforeTheCall(t *testing.T) {
+	parallelRule(t)
 	t.Run("Each value sees the variables as they were before its call", func(t *testing.T) {
 		w := newEnvWorld(t)
 		w.GivenTheBuildFileDeclares(`

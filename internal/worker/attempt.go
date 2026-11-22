@@ -109,7 +109,7 @@ func (w *Worker) execute(ctx context.Context, reg remote.Registration, a *remote
 	})
 
 	// What the subprocess prints is sent in batches, and its last line is its report.
-	report, readErr := w.relay(cctx, a.Attempt, stdout)
+	report, readErr := w.relay(cctx, a.Attempt, clock, stdout)
 	if readErr != nil {
 		// Nothing reads its output any more, such as past a line too long, so it would block writing the rest
 		// while its lease is renewed: it is killed, and the attempt fails.
@@ -279,8 +279,10 @@ const (
 )
 
 // relay reads the subprocess's lines from r: output and spans, which it sends to the coordinator in batches of at
-// most maxBatch, and the report, which it returns, once the stream ends. It stops reading while maxPending waits.
-func (w *Worker) relay(ctx context.Context, id string, r io.Reader) (*remote.AttemptReport, error) {
+// most maxBatch, each carrying clock, the estimate of the clock's offset made before the attempt started, and the
+// report, which it returns, once the stream ends. It stops reading while maxPending waits.
+func (w *Worker) relay(ctx context.Context, id string, clock *tracing.Offset, r io.Reader) (*remote.AttemptReport,
+	error) {
 	q := newEventQueue()
 	send := func() {
 		for {
@@ -288,6 +290,7 @@ func (w *Worker) relay(ctx context.Context, id string, r io.Reader) (*remote.Att
 			if !ok {
 				return
 			}
+			batch.Clock = clock
 			sctx, cancel := context.WithTimeout(ctx, w.lease())
 			err := w.client.Events(sctx, id, batch)
 			cancel()

@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -279,24 +280,37 @@ func (w *Worker) cleanLeftovers(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
-// ChildEnv is the variable that makes a test binary run one attempt, as `vamos attempt` does: its value is the
-// container store's graph root and run root, separated by a semicolon. A worker in a test whose environment sets it,
-// to anything, runs its attempts as the test binary, in its own store.
+// ChildEnv is the variable that makes a test binary run one attempt, as `vamos attempt` does: its value is a JSON
+// object of the container store's options, its graph and run roots and its driver's name and options. A worker in a
+// test whose environment sets it, to anything else, runs its attempts as the test binary, in its own store.
 const ChildEnv = "VAMOS_TEST_ATTEMPT_STORE"
+
+// childStore is what ChildEnv holds: the options a worker opens its store with, which the attempt opens it with too,
+// as `vamos attempt` opens the store its worker does. Opening it with other driver options would miss the driver's
+// checks of the filesystem that the worker recorded, keyed by its options, so that the attempt would mount the
+// filesystem to check it again, and could be killed while it is mounted, leaving the mount behind.
+type childStore struct {
+	GraphRoot, RunRoot string
+	Driver             string
+	DriverPriority     []string // which driver to try first, where Driver names none
+	DriverOptions      []string
+}
 
 // ChildFromEnv runs one attempt from standard input if childEnv is set, as a worker's subprocess in tests, and
 // reports whether it did, so that the caller exits; a TestMain calls it before running tests, after buildah's own
 // re-exec check.
 func ChildFromEnv() bool {
 	spec := os.Getenv(ChildEnv)
-	if spec == "" {
-		return false
+	if !strings.HasPrefix(spec, "{") {
+		return false // unset, or set to make a worker use this binary, not to run an attempt
 	}
-	graphRoot, runRoot, ok := strings.Cut(spec, ";")
-	if !ok {
-		return false // set to make a worker use this binary, not to run an attempt
+	var store childStore
+	if err := json.Unmarshal([]byte(spec), &store); err != nil {
+		fmt.Fprintf(os.Stderr, "reading %s: %v\n", ChildEnv, err)
+		os.Exit(1)
 	}
-	options := storage.StoreOptions{GraphRoot: graphRoot, RunRoot: runRoot}
+	options := storage.StoreOptions{GraphRoot: store.GraphRoot, RunRoot: store.RunRoot, GraphDriverName: store.Driver,
+		GraphDriverPriority: store.DriverPriority, GraphDriverOptions: store.DriverOptions}
 	if err := run.Attempt(context.Background(), os.Stdin, os.Stdout, options); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -312,8 +326,14 @@ func TestChild(options storage.StoreOptions) func(ctx context.Context) *exec.Cmd
 		if err != nil {
 			exe = os.Args[0]
 		}
+		spec, err := json.Marshal(childStore{GraphRoot: options.GraphRoot, RunRoot: options.RunRoot,
+			Driver: options.GraphDriverName, DriverPriority: options.GraphDriverPriority,
+			DriverOptions: options.GraphDriverOptions})
+		if err != nil {
+			panic(err) // strings always encode
+		}
 		cmd := exec.CommandContext(ctx, exe)
-		cmd.Env = append(os.Environ(), ChildEnv+"="+options.GraphRoot+";"+options.RunRoot)
+		cmd.Env = append(os.Environ(), ChildEnv+"="+string(spec))
 		return cmd
 	}
 }

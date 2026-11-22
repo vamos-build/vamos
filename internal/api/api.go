@@ -150,7 +150,6 @@ type PushRequest struct {
 	// Trace, if set, asks for the spans of a trace of the push, as events of the job.
 	// Stored traces, which Outcome.Trace names, replace it: a client that reads them sends it no longer,
 	// and it stays so that a request that does decodes.
-	// It stays so that an older client's request decodes.
 	Trace *tracing.CallContext `json:"trace,omitempty"`
 }
 
@@ -169,7 +168,6 @@ type PublishRequest struct {
 	// Trace, if set, asks for the spans of a trace of the publication, as events of the job.
 	// Stored traces, which Outcome.Trace names, replace it: a client that reads them sends it no longer,
 	// and it stays so that a request that does decodes.
-	// It stays so that an older client's request decodes.
 	Trace *tracing.CallContext `json:"trace,omitempty"`
 }
 
@@ -192,7 +190,6 @@ type ExportRequest struct {
 	// Trace, if set, asks for the spans of a trace of the export, as events of the job.
 	// Stored traces, which Outcome.Trace names, replace it: a client that reads them sends it no longer,
 	// and it stays so that a request that does decodes.
-	// It stays so that an older client's request decodes.
 	Trace *tracing.CallContext `json:"trace,omitempty"`
 }
 
@@ -216,7 +213,6 @@ type GraphRequest struct {
 	// Trace, if set, asks for the spans of a trace of the run, as events of the job.
 	// Stored traces, which Outcome.Trace names, replace it: a client that reads them sends it no longer,
 	// and it stays so that a request that does decodes.
-	// It stays so that an older client's request decodes.
 	Trace *tracing.CallContext `json:"trace,omitempty"`
 	// Generation is the executor's cache generation that the client read before capturing the build's sources;
 	// a submission of an earlier generation than the executor's is refused, since what it captured may be gone.

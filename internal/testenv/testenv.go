@@ -1,8 +1,9 @@
 package testenv
 
 import (
-	"cmp"
+	"errors"
 	"fmt"
+	"hash/fnv"
 	"io/fs"
 	"maps"
 	"math/rand/v2"
@@ -40,16 +41,14 @@ const BusyboxLock = `{
 `
 
 // withBusyboxPin returns files, with BusyboxLock as its lockfile if a BUILD file among them pulls busybox, as
-// PullBusybox does, and none is a lockfile: at the workspace's root, beside its WORKSPACE file, or else beside that
-// BUILD file.
+// PullBusybox does, and none is a lockfile: at the root of that BUILD file's workspace, beside the nearest WORKSPACE
+// file at or above it, or else beside that BUILD file.
 func withBusyboxPin(files map[string]string) map[string]string {
-	var pulling, workspace string
+	var pulling string
 	for _, name := range slices.Sorted(maps.Keys(files)) {
 		switch base := filepath.Base(name); {
 		case base == "vamos.lock":
 			return files
-		case base == "WORKSPACE" && (workspace == "" || len(name) < len(workspace)):
-			workspace = name
 		case pulling == "" && (base == "BUILD" || base == "BUILD.vms") && strings.Contains(files[name], PullBusybox):
 			pulling = name
 		}
@@ -57,7 +56,16 @@ func withBusyboxPin(files map[string]string) map[string]string {
 	if pulling == "" {
 		return files
 	}
-	root := filepath.Dir(cmp.Or(workspace, pulling))
+	root := filepath.Dir(pulling)
+	for dir := root; ; dir = filepath.Dir(dir) {
+		if _, ok := files[filepath.Join(dir, "WORKSPACE")]; ok {
+			root = dir
+			break
+		}
+		if dir == "." || dir == "/" {
+			break
+		}
+	}
 	pinned := maps.Clone(files)
 	pinned[filepath.Join(root, "vamos.lock")] = BusyboxLock
 	return pinned
@@ -258,4 +266,23 @@ func (f *DeniedFs) denied(op, path string) error {
 		return &fs.PathError{Op: op, Path: path, Err: fs.ErrPermission}
 	}
 	return nil
+}
+
+// CgroupRoot returns a cgroup root for the workers of this test, apart from every other's, which is removed when the
+// test ends if no attempt's cgroup is left in it: a worker kills the attempts whose cgroups it finds in its root as it
+// starts, as leftovers of one that crashed, so tests that run at once, in this binary or in others that `go test`
+// runs at once, mustn't share one. Each call in a test returns the same root, so that a worker that starts again in
+// it finds the leftovers of the one before.
+func CgroupRoot(t *testing.T) string {
+	t.Helper()
+	// storesName maps some names to the same, such as a/b and a-b, so a hash of the name tells them apart.
+	h := fnv.New32a()
+	h.Write([]byte(t.Name()))
+	root := fmt.Sprintf("/sys/fs/cgroup/vamos-test-%d-%s-%08x", os.Getpid(), storesName(t.Name()), h.Sum32())
+	t.Cleanup(func() {
+		if err := os.Remove(root); err != nil && !errors.Is(err, os.ErrNotExist) {
+			t.Logf("removing the test's cgroup root: %v", err)
+		}
+	})
+	return root
 }

@@ -8,6 +8,7 @@ import (
 
 	"github.com/vamos-build/vamos/internal/tracing"
 
+	"github.com/docker/distribution/registry/api/errcode"
 	"github.com/opencontainers/go-digest"
 	containersconfig "go.podman.io/common/pkg/config"
 	"go.podman.io/common/pkg/retry"
@@ -19,11 +20,47 @@ import (
 	"go.podman.io/image/v5/types"
 )
 
-// Retries returns how to retry a registry operation after an error that may not happen again,
-// such as a connection reset: as containers.conf's retry and retry_delay say, as for buildah and podman,
-// backing off exponentially from a second unless retry_delay is set.
+// Retries returns how to retry a registry operation after an error that may not happen again, such as a connection
+// reset or a registry's refusal for too many requests, as often and as long as RetryLimits says, with
+// retry.IsErrorRetryable's rule, which replaces any that RetryLimits sets.
+func Retries() (*retry.Options, error) {
+	limits, err := RetryLimits()
+	if err != nil {
+		return nil, err
+	}
+	options := *limits // a copy, should RetryLimits give the same options each time
+	options.IsErrorRetryable = retry.IsErrorRetryable
+	return &options, nil
+}
+
+// ReadRetries returns how to retry an operation that only reads from registries, as Retries does, but not after a
+// registry's refusal for too many requests: containers/image has asked again already, as the registry said to, for a
+// request with no body, and each request more spends more of an allowance such as Docker Hub's. A write, whose
+// requests containers/image doesn't ask again, takes Retries. A registry that refuses with another error code than
+// TOOMANYREQUESTS, such as UNKNOWN, may still be asked again.
+func ReadRetries() (*retry.Options, error) {
+	options, err := Retries()
+	if err != nil {
+		return nil, err
+	}
+	options.IsErrorRetryable = notRateLimited
+	return options, nil
+}
+
+// notRateLimited reports whether err may not happen again, as retry.IsErrorRetryable does, but for a registry's
+// refusal for too many requests.
+func notRateLimited(err error) bool {
+	var ec errcode.ErrorCoder
+	if errors.As(err, &ec) && ec.ErrorCode() == errcode.ErrorCodeTooManyRequests {
+		return false
+	}
+	return retry.IsErrorRetryable(err)
+}
+
+// RetryLimits returns how often and how long to retry: as containers.conf's retry and retry_delay say, as for buildah
+// and podman, backing off exponentially from a second unless retry_delay is set.
 // Tests replace it, so that they don't depend on the host's containers.conf.
-var Retries = func() (*retry.Options, error) {
+var RetryLimits = func() (*retry.Options, error) {
 	conf, err := containersconfig.Default()
 	if err != nil {
 		return nil, err
@@ -42,7 +79,7 @@ var Retries = func() (*retry.Options, error) {
 const readBackTimeout = time.Minute
 
 // Push copies the image or index src to the tag dest at a registry, as sys reaches it,
-// retrying transient failures as Retries says, then reads the tag back, retrying likewise,
+// retrying transient failures as Retries says, then reads the tag back, retrying as ReadRetries says,
 // and checks that it names the manifest written, and returns that manifest.
 func Push(
 	ctx context.Context, policyContext *signature.PolicyContext, dest reference.NamedTagged, src types.ImageReference,
@@ -64,7 +101,7 @@ func Push(
 	if err != nil {
 		return nil, fmt.Errorf("reading the manifest written: %w", err)
 	}
-	if err := checkTag(ctx, dest, ref, sys, want, "the push", "pushed", retries); err != nil {
+	if err := checkTag(ctx, dest, ref, sys, want, "the push", "pushed"); err != nil {
 		return nil, err
 	}
 	return written, nil
@@ -129,7 +166,7 @@ func (d uploadDestination) PutSignatures(
 // as sys reaches it: every blob and every manifest an index lists are already there, so this is all it sends.
 // It writes to the registry itself, never to one of the mirrors registries.conf may configure for pulling from it,
 // and reads nothing from either but the tag it wrote.
-// It retries transient failures as Retries says, then reads the tag back, retrying likewise,
+// It retries transient failures as Retries says, then reads the tag back, retrying as ReadRetries says,
 // and checks that it names the manifest uploaded.
 // If ctx is traced, tagging is a span.
 func Tag(ctx context.Context, dest reference.NamedTagged, uploaded []byte, sys *types.SystemContext) (err error) {
@@ -153,7 +190,7 @@ func Tag(ctx context.Context, dest reference.NamedTagged, uploaded []byte, sys *
 	if err != nil {
 		return fmt.Errorf("writing %s: %w", dest, err)
 	}
-	return checkTag(ctx, dest, ref, sys, want, "tagging", "uploaded", retries)
+	return checkTag(ctx, dest, ref, sys, want, "tagging", "uploaded")
 }
 
 // putManifest writes the manifest m to ref, a tag at a registry, as sys reaches it.
@@ -188,15 +225,19 @@ func copyRetrying(
 	return written, err
 }
 
-// checkTag reads the tag dest, at ref, back, retrying as retries says,
+// checkTag reads the tag dest, at ref, back, retrying as ReadRetries says,
 // and checks that it names the manifest want; a mismatch is reported as found after the write that after names,
 // of the manifest that what describes.
 func checkTag(
 	ctx context.Context, dest reference.NamedTagged, ref types.ImageReference, sys *types.SystemContext,
-	want digest.Digest, after, what string, retries *retry.Options,
+	want digest.Digest, after, what string,
 ) error {
+	retries, err := ReadRetries() // reading back, which containers/image retries after a 429 itself
+	if err != nil {
+		return err
+	}
 	var got digest.Digest
-	err := retry.IfNecessary(ctx, func() error {
+	err = retry.IfNecessary(ctx, func() error {
 		var err error
 		got, err = readBack(ctx, ref, sys)
 		return err

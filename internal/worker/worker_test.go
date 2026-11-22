@@ -94,7 +94,7 @@ func startWorker(t *testing.T, f *fixture, configure ...func(*Config)) (*Worker,
 		Store:       stores.Options,
 		Capacity:    2,
 		Child:       TestChild(stores.Options),
-		CgroupRoot:  testCgroupRoot(t),
+		CgroupRoot:  testenv.CgroupRoot(t),
 		Log:         testWriter{t},
 	}
 	for _, c := range configure {
@@ -155,18 +155,6 @@ func tagsOf(h http.Handler, repo string) []string {
 	}
 	_ = json.Unmarshal(rec.Body.Bytes(), &list) // an error, for a repository it doesn't know, lists no tags
 	return list.Tags
-}
-
-// testCgroupRoot returns a cgroup root for this test binary's workers, removed when the test ends.
-func testCgroupRoot(t *testing.T) string {
-	t.Helper()
-	root := filepath.Join(filepath.Dir(cgroupRoot), fmt.Sprintf("vamos-test-%d", os.Getpid()))
-	t.Cleanup(func() {
-		if err := os.Remove(root); err != nil && !errors.Is(err, os.ErrNotExist) {
-			t.Logf("removing the test's cgroup root: %v", err)
-		}
-	})
-	return root
 }
 
 // testWriter logs to the test.
@@ -285,12 +273,12 @@ func TestWorkerKillsOnCancel(t *testing.T) {
 	f := newFixture(t)
 	w, stores := startWorker(t, f)
 	ctx := t.Context()
-	// The step needs a shell to sleep in, so the base is busybox from Docker Hub, which the cli suite pulls too;
+	// The step needs a shell to sleep in, so the base is busybox from Docker Hub, through testenv.Main's mirror;
 	// one sleep leaves the process group with setsid, as a daemon would, and must die all the same.
 	platform := platforms.Format(run.HostPlatform)
 	g := &graph.Graph{Version: graph.Version, ExecPlatform: platform, Roots: []graph.Ref{1}, Nodes: []graph.Node{
 		{Label: "busybox", Desc: `pull "busybox"`, Pull: &graph.Pull{Image: "docker.io/library/busybox:1.36",
-			Platform: platform}},
+			Platform: platform, Digest: testenv.BusyboxIndex}},
 		{Label: "app", Desc: `layer "app"`, Layer: &graph.Layer{Base: 0, Platform: platform, Steps: []graph.Step{
 			{Op: graph.OpRun, Display: `run(["sh", "-c", "..."])`, Argv: []string{"sh", "-c",
 				"setsid sleep 300 & sleep 300"}},
@@ -302,14 +290,23 @@ func TestWorkerKillsOnCancel(t *testing.T) {
 	id, err := f.c.Submit(ctx, api.Request{Graph: &api.GraphRequest{Graph: stored, Version: graph.Version,
 		Platform: run.HostPlatform}})
 	testenv.Must(t, err)
-	// Wait for the layer to run: its attempt's cgroup holds processes.
+	// Wait for the layer to run: its attempt's cgroup holds processes. A job that ends first, as when its pull
+	// fails, fails the test with the job's own failure, rather than leaving it to wait for the deadline.
+	ended := make(chan error, 1)
+	go func() { ended <- f.c.Watch(ctx, id, 0, func(api.Event) error { return nil }) }()
 	var attempt string
 	deadline := time.Now().Add(3 * time.Minute)
 	for attempt == "" {
 		if time.Now().After(deadline) {
 			t.Fatal("the layer never started running")
 		}
-		time.Sleep(100 * time.Millisecond)
+		select {
+		case err := <-ended:
+			outcome, rerr := f.c.Result(ctx, id)
+			t.Fatalf("watching the job ended, with %v, before its layer ran; its result is %v, with failure %+v", err,
+				rerr, outcome.Failure)
+		case <-time.After(100 * time.Millisecond):
+		}
 		ids, _ := w.contain.leftovers()
 		for _, id := range ids {
 			procs, _ := os.ReadFile(filepath.Join(w.contain.path(id), "cgroup.procs"))
@@ -320,7 +317,7 @@ func TestWorkerKillsOnCancel(t *testing.T) {
 	}
 	start := time.Now()
 	testenv.Must(t, f.c.Cancel(ctx, id))
-	testenv.Must(t, f.c.Watch(ctx, id, 0, func(api.Event) error { return nil }))
+	testenv.Must(t, <-ended)
 	if outcome, err := f.c.Result(ctx, id); err != nil || !outcome.Cancelled {
 		t.Errorf("outcome = %+v, %v; want it cancelled", outcome, err)
 	}
@@ -335,18 +332,36 @@ func TestWorkerKillsOnCancel(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	t.Logf("the attempt's processes were gone %s after the cancel", time.Since(start))
-	store, err := storage.GetStore(stores.Options)
-	testenv.Must(t, err)
-	defer store.Shutdown(false)
-	containers, err := store.Containers()
-	testenv.Must(t, err)
-	for _, c := range containers {
-		for _, name := range c.Names {
-			if strings.HasPrefix(name, attemptPrefix) {
-				t.Errorf("container %s remains after the kill", name)
+	// The worker removes the attempt's container once its processes are gone and their cgroup removed, so the
+	// container may outlast the cgroup for a moment.
+	for {
+		remaining := attemptContainers(t, stores)
+		if len(remaining) == 0 {
+			break
+		}
+		if time.Since(start) > 30*time.Second {
+			t.Fatalf("containers %q remain %s after the kill", remaining, time.Since(start))
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// attemptContainers returns the names of the attempts' containers in stores.
+func attemptContainers(t *testing.T, stores *testenv.Stores) []string {
+	t.Helper()
+	var names []string
+	testenv.Must(t, stores.WithStore(func(store storage.Store) error {
+		containers, err := store.Containers()
+		for _, c := range containers {
+			for _, name := range c.Names {
+				if strings.HasPrefix(name, attemptPrefix) {
+					names = append(names, name)
+				}
 			}
 		}
-	}
+		return err
+	}))
+	return names
 }
 
 // attemptPrefix is how the run package names attempts' containers.
@@ -436,7 +451,7 @@ func TestWorkerFencesItself(t *testing.T) {
 	platform := platforms.Format(run.HostPlatform)
 	g := &graph.Graph{Version: graph.Version, ExecPlatform: platform, Roots: []graph.Ref{1}, Nodes: []graph.Node{
 		{Label: "busybox", Desc: `pull "busybox"`, Pull: &graph.Pull{Image: "docker.io/library/busybox:1.36",
-			Platform: platform}},
+			Platform: platform, Digest: testenv.BusyboxIndex}},
 		{Label: "app", Desc: `layer "app"`, Layer: &graph.Layer{Base: 0, Platform: platform, Steps: []graph.Step{
 			{Op: graph.OpRun, Display: `run(["sleep", "300"])`, Argv: []string{"sleep", "300"}},
 		}}},

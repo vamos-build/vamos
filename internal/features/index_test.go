@@ -62,6 +62,7 @@ func anIndexOfApp(nonce string) string {
 // TestIndex_HasAnImageForEachPlatform specifies that with a single pull or layer reference, vamos configures that
 // target once for each listed platform and preserves the list's order in the index, which push publishes whole.
 func TestIndex_HasAnImageForEachPlatform(t *testing.T) {
+	parallelRule(t)
 	for _, example := range []struct {
 		name    string
 		options []option
@@ -126,6 +127,7 @@ func TestIndex_HasAnImageForEachPlatform(t *testing.T) {
 // TestIndex_GivesEachPlatformItsOwnTarget specifies that an index whose layer is a nonempty dictionary, from each
 // platform to its target, has each target's image for its platform, in the dictionary's order.
 func TestIndex_GivesEachPlatformItsOwnTarget(t *testing.T) {
+	parallelRule(t)
 	t.Run("Each platform's image is its own target's, in the dictionary's order", func(t *testing.T) {
 		w := newIndexWorld(t)
 		nonce := testenv.NewNonce()
@@ -147,6 +149,7 @@ func TestIndex_GivesEachPlatformItsOwnTarget(t *testing.T) {
 // layer reference with a nonempty list of platforms, or a nonempty dictionary from each platform to its reference,
 // without platforms, and that each platform is unique.
 func TestIndex_DeclaresEachPlatformOnce(t *testing.T) {
+	parallelRule(t)
 	for _, example := range []struct {
 		name  string
 		index string // on line 4, after theAppForAnIndex
@@ -212,6 +215,7 @@ func TestIndex_DeclaresEachPlatformOnce(t *testing.T) {
 // indexes, can't be a base, and that a dep() in it may pass user parameters but can't specify platform,
 // which the list or dictionary already determines.
 func TestIndex_HoldsPullsAndLayersForTheirPlatforms(t *testing.T) {
+	parallelRule(t)
 	for _, example := range []struct {
 		name  string
 		build string // on line 4, after theAppForAnIndex
@@ -266,6 +270,7 @@ func TestIndex_HoldsPullsAndLayersForTheirPlatforms(t *testing.T) {
 // TestIndex_SuppliesItsOwnPlatforms specifies that an index supplies its own platform list, so it cannot be named
 // with --platform, and that selecting a platform missing from the index is an error.
 func TestIndex_SuppliesItsOwnPlatforms(t *testing.T) {
+	parallelRule(t)
 	t.Run("An index named with --platform fails, saying to name one of its targets", func(t *testing.T) {
 		w := newIndexMistakeWorld(t)
 		w.GivenTheBuildFileDeclares(`index(name="server", layer="app", platforms=["linux/amd64"])`)

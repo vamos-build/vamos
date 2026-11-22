@@ -66,6 +66,7 @@ func aReleaseOfTwoImages(nonce string) string {
 // repository name without a tag or digest, to the pull, layer or index published there,
 // and that a mistake in one is reported as the BUILD file loads, naming the file, line and column.
 func TestPublication_DeclaresItsChecksAndImages(t *testing.T) {
+	parallelRule(t)
 	t.Run("A publication names its checks and images", func(t *testing.T) {
 		w := newPublicationWorld(t)
 		nonce := testenv.NewNonce()
@@ -156,6 +157,7 @@ func TestPublication_DeclaresItsChecksAndImages(t *testing.T) {
 // TestPublication_PublishesATargetToSeveralRepositories specifies that one target can be published to several
 // repositories of one publication, each receiving the same image under every tag given.
 func TestPublication_PublishesATargetToSeveralRepositories(t *testing.T) {
+	parallelRule(t)
 	t.Run("An image goes to two repositories", func(t *testing.T) {
 		w := newPublicationWorld(t)
 		w.GivenTheBuildFileDeclares(`
@@ -173,6 +175,7 @@ func TestPublication_PublishesATargetToSeveralRepositories(t *testing.T) {
 // publication's own result is never cached: publishing it again pushes again, while its checks and images are reused
 // from the build cache.
 func TestPublication_IsARootNeverADependency(t *testing.T) {
+	parallelRule(t)
 	t.Run("Depending on a publication is refused", func(t *testing.T) {
 		w := newPublicationMistakeWorld(t)
 		w.GivenTheBuildFileDeclares(`
@@ -202,6 +205,7 @@ func TestPublication_IsARootNeverADependency(t *testing.T) {
 // TestPublication_RepositoriesCanDependOnParameters specifies that a publication takes params, set with --set,
 // and that its attributes can be functions of ctx, so that a parameter can choose its repositories.
 func TestPublication_RepositoriesCanDependOnParameters(t *testing.T) {
+	parallelRule(t)
 	t.Run("A parameter chooses the registry", func(t *testing.T) {
 		w := newPublicationWorld(t)
 		w.GivenTheBuildFileDeclares(`
@@ -225,6 +229,7 @@ func TestPublication_RepositoriesCanDependOnParameters(t *testing.T) {
 // is published under every tag given, and that a missing or invalid tag is a mistake on the command line, reported
 // before anything is built, as is naming a target that isn't a publication, saying what it is.
 func TestPublication_PublishRequiresATag(t *testing.T) {
+	parallelRule(t)
 	t.Run("Every image under every tag", func(t *testing.T) {
 		w := newPublicationWorld(t)
 		nonce := testenv.NewNonce()
@@ -284,6 +289,7 @@ func TestPublication_PublishRequiresATag(t *testing.T) {
 // TestPublication_NothingIsPublishedUnlessEverythingSucceeds specifies that publish builds every check and image, with
 // their dependencies, in one run, and pushes nothing to any repository unless all of them succeed.
 func TestPublication_NothingIsPublishedUnlessEverythingSucceeds(t *testing.T) {
+	parallelRule(t)
 	t.Run("A failing check publishes nothing", func(t *testing.T) {
 		w := newPublicationWorld(t)
 		w.GivenTheBuildFileDeclares(fmt.Sprintf(`
@@ -313,6 +319,7 @@ func TestPublication_NothingIsPublishedUnlessEverythingSucceeds(t *testing.T) {
 // content to each of its repositories by digest, with no tag, and writes tags only once every upload has succeeded,
 // so that a failed upload leaves every tag of the publication as it was.
 func TestPublication_UploadsEveryImageBeforeAnyTag(t *testing.T) {
+	parallelRule(t)
 	for _, example := range []struct {
 		name    string
 		options []option
@@ -346,6 +353,7 @@ func TestPublication_UploadsEveryImageBeforeAnyTag(t *testing.T) {
 // every tag of every repository even if some fail, reads each written tag back, and fails if any tag was not written,
 // naming each that failed and each that was written; publishing again then finishes the job.
 func TestPublication_AFailureWhileTaggingReportsWhatWasTagged(t *testing.T) {
+	parallelRule(t)
 	for _, example := range []struct {
 		name    string
 		options []option
@@ -382,6 +390,7 @@ func TestPublication_AFailureWhileTaggingReportsWhatWasTagged(t *testing.T) {
 // TestPublication_ReportsEachDestination specifies that on success publish reports one line for each repository and
 // tag, naming the destination and the image ID there, in the publication's order.
 func TestPublication_ReportsEachDestination(t *testing.T) {
+	parallelRule(t)
 	t.Run("One line per destination", func(t *testing.T) {
 		w := newPublicationWorld(t)
 		w.GivenTheBuildFileDeclares(`
@@ -400,6 +409,7 @@ func TestPublication_ReportsEachDestination(t *testing.T) {
 // registry settings and credentials, by default, and from the client, with the client's and the command line's
 // --tls-verify, given --push-from=client, as push does.
 func TestPublication_EachSidePublishesWithItsOwnSettings(t *testing.T) {
+	parallelRule(t)
 	t.Run("The executor publishes over HTTPS where registries.conf says to", func(t *testing.T) {
 		w := newBuildingWorld(t)
 		w.GivenAProjectThatPullsBusybox()
@@ -431,6 +441,7 @@ func TestPublication_EachSidePublishesWithItsOwnSettings(t *testing.T) {
 // TestPublication_BuildingAPublicationPublishesNothing specifies that vamos build of a publication builds its checks
 // and its images as publish would, and pushes nothing.
 func TestPublication_BuildingAPublicationPublishesNothing(t *testing.T) {
+	parallelRule(t)
 	t.Run("A dry run", func(t *testing.T) {
 		w := newPublicationWorld(t)
 		nonce := testenv.NewNonce()
@@ -460,6 +471,7 @@ const aTaskThatWaits = `
 // TestPublication_ACoordinatorsWorkersPublish specifies that on a coordinator, publishing runs on its workers, with
 // their registry settings and credentials, never on the coordinator itself.
 func TestPublication_ACoordinatorsWorkersPublish(t *testing.T) {
+	parallelRule(t)
 	t.Run("A coordinator's workers publish", func(t *testing.T) {
 		w := newPublicationWorld(t)
 		w.GivenACoordinatorWithAWorker()
@@ -478,6 +490,7 @@ func TestPublication_ACoordinatorsWorkersPublish(t *testing.T) {
 // so that it refuses one, if at all, before anything is pushed, and that a busy coordinator refuses the publication's
 // build first.
 func TestPublication_ACoordinatorAdmitsAPublicationAsOneJob(t *testing.T) {
+	parallelRule(t)
 	// A coordinator admits each job as it is submitted, counting those running: the publication's build, which runs
 	// first, meets the same limit as the publication, so a coordinator that is busy refuses that build already.
 	// A coordinator's Go tests show the publication itself refused while another job runs.

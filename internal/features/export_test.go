@@ -43,6 +43,7 @@ const aTargetOfEachKind = `
 // TestExport_FilesKeepModesLinksAndTheTasksTimestamp specifies that exported files receive the task's timestamp,
 // and keep the modes the task selected them with, and that symbolic links are written as links, never followed.
 func TestExport_FilesKeepModesLinksAndTheTasksTimestamp(t *testing.T) {
+	parallelRule(t)
 	t.Run("Files keep their modes and links, and take the task's time", func(t *testing.T) {
 		w := newExportWorld(t)
 		nonce := testenv.NewNonce()
@@ -110,6 +111,7 @@ func TestExport_FilesKeepModesLinksAndTheTasksTimestamp(t *testing.T) {
 // TestExport_FolderIsReplacedAsAWhole specifies that the folder is replaced as a whole,
 // rather than merged with existing contents, and that a nonempty folder requires --replace.
 func TestExport_FolderIsReplacedAsAWhole(t *testing.T) {
+	parallelRule(t)
 	t.Run("A folder that holds files is replaced only with --replace, losing the files the task doesn't make",
 		func(t *testing.T) {
 			w := newExportWorld(t)
@@ -168,6 +170,7 @@ func TestExport_FolderIsReplacedAsAWhole(t *testing.T) {
 // and group of the destination's parent directory, keeping their setuid and setgid bits, which changing an owner
 // clears, where the task's mode_mask retains them.
 func TestExport_AsRootFilesTakeTheParentsOwner(t *testing.T) {
+	parallelRule(t)
 	t.Run("Every file, folder and link exported takes the parent's owner, and keeps its special bits",
 		func(t *testing.T) {
 			w := newExportWorld(t)
@@ -218,6 +221,7 @@ func TestExport_AsRootFilesTakeTheParentsOwner(t *testing.T) {
 // TestExport_RequiresATaskWithOutputAndAFolderToWrite specifies that export requires a task declaring source and
 // include, and a folder that is empty or replaced, whose parent directory already exists.
 func TestExport_RequiresATaskWithOutputAndAFolderToWrite(t *testing.T) {
+	parallelRule(t)
 	for _, example := range []struct {
 		name    string
 		target  string

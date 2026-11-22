@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -52,24 +53,6 @@ type cached struct {
 	names                  map[string]string
 }
 
-// holds reports whether c holds everything that other does: its files, results and images, with the same names.
-func (c cached) holds(other cached) bool {
-	kinds := [][2]map[string]bool{{c.blobs, other.blobs}, {c.records, other.records}, {c.images, other.images}}
-	for _, pair := range kinds {
-		for key := range pair[1] {
-			if !pair[0][key] {
-				return false
-			}
-		}
-	}
-	for id, names := range other.names {
-		if c.names[id] != names {
-			return false
-		}
-	}
-	return true
-}
-
 // same reports whether c and other hold the same files, results and images, every image with the same names.
 func (c cached) same(other cached) bool {
 	return maps.Equal(c.blobs, other.blobs) && maps.Equal(c.records, other.records) &&
@@ -88,11 +71,18 @@ func (w *world) cached() cached {
 	return w.cachedIn(w.stores)
 }
 
-// cachedIn returns what stores hold.
+// cachedIn returns what stores hold. A container store that was never opened holds nothing, and isn't opened, so that
+// a scenario that never reaches it, such as one whose BUILD file fails to load, doesn't need one that opens here;
+// one that reaches a store that then fails to open, as GetStore can after making its graph root, fails here still.
 func (w *world) cachedIn(stores *testenv.Stores) cached {
 	w.t.Helper()
 	held := cached{blobs: w.entriesOf(stores, "cas", "sha256"), records: w.entriesOf(stores, "ac"),
 		images: map[string]bool{}, names: map[string]string{}}
+	if _, err := os.Stat(stores.Options.GraphRoot); errors.Is(err, os.ErrNotExist) {
+		return held
+	} else if err != nil {
+		w.t.Fatal(err)
+	}
 	err := stores.WithStore(func(store storage.Store) error {
 		all, err := store.Images()
 		for _, img := range all {
@@ -576,11 +566,11 @@ func (w *world) ThenTheStoresHoldWhatTheyDidBefore() {
 	}
 }
 
-// GivenTheSuitesStoresHoldAResult builds a layer of its own in the suite's stores, which other scenarios use,
-// and notes what they hold, for ThenTheSuitesStoresHoldWhatTheyDid.
-func (w *world) GivenTheSuitesStoresHoldAResult() {
+// GivenOtherStoresHoldAResult makes stores other than the scenario's, which no other scenario uses, builds a layer of
+// its own in them, and notes what they hold, for ThenTheOtherStoresHoldWhatTheyDid.
+func (w *world) GivenOtherStoresHoldAResult() {
 	w.t.Helper()
-	suite := testenv.SuiteStores(w.t)
+	w.apart = testenv.PrivateStores(w.t)
 	fsys := testenv.Project(w.t, files{
 		"BUILD": dedent(`
 			glob(name="marks", include=["mark.txt"])
@@ -588,30 +578,29 @@ func (w *world) GivenTheSuitesStoresHoldAResult() {
 		`),
 		"mark.txt": testenv.NewNonce(),
 	})
-	cmd := cli.NewRootCommand(cli.Config{Fs: fsys, Store: &suite.Options})
+	cmd := cli.NewRootCommand(cli.Config{Fs: fsys, Store: &w.apart.Options})
 	cmd.SetArgs([]string{"-C", testenv.ProjectDir, "build", "mark"})
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
 	if err := cmd.ExecuteContext(w.t.Context()); err != nil {
-		w.t.Fatalf("building in the suite's stores: %v\n%s", err, out.String())
+		w.t.Fatalf("building in the other stores: %v\n%s", err, out.String())
 	}
-	w.suiteBefore = w.cachedIn(suite)
-	if len(w.suiteBefore.blobs) == 0 || len(w.suiteBefore.records) == 0 || len(w.suiteBefore.images) == 0 {
-		w.t.Fatalf("the suite's stores hold %v after building there, want some of each", w.suiteBefore)
+	w.apartBefore = w.cachedIn(w.apart)
+	if len(w.apartBefore.blobs) == 0 || len(w.apartBefore.records) == 0 || len(w.apartBefore.images) == 0 {
+		w.t.Fatalf("the other stores hold %v after building there, want some of each", w.apartBefore)
 	}
 }
 
-// ThenTheSuitesStoresHoldWhatTheyDid checks that the suite's stores, which other scenarios use, still hold what they
-// did when GivenTheSuitesStoresHoldAResult built there: every file and result of the build cache, and every image,
-// with its names, whatever else they have gained since.
-func (w *world) ThenTheSuitesStoresHoldWhatTheyDid() {
+// ThenTheOtherStoresHoldWhatTheyDid checks that the stores of GivenOtherStoresHoldAResult hold just what they did
+// when it built there: every file and result of the build cache, and every image, with its names, and nothing more.
+func (w *world) ThenTheOtherStoresHoldWhatTheyDid() {
 	w.t.Helper()
-	if len(w.suiteBefore.records) == 0 {
-		w.t.Fatal("no Given step built in the suite's stores")
+	if w.apart == nil {
+		w.t.Fatal("no Given step built in other stores")
 	}
-	if now := w.cachedIn(testenv.SuiteStores(w.t)); !now.holds(w.suiteBefore) {
-		w.t.Errorf("the suite's stores held %v, and now %v, want them as they were", w.suiteBefore, now)
+	if now := w.cachedIn(w.apart); !now.same(w.apartBefore) {
+		w.t.Errorf("the other stores held %v, and now %v, want them as they were", w.apartBefore, now)
 	}
 }
 

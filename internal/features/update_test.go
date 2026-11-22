@@ -37,6 +37,7 @@ func pullOfBase(tag string) string {
 // tag to the tag it resolved to and the digest of the manifest that tag named, and that a lockfile vamos can't read
 // fails every command that loads it.
 func TestUpdate_TheLockfilePinsEachPulledTag(t *testing.T) {
+	parallelRule(t)
 	t.Run("A malformed lockfile is refused", func(t *testing.T) {
 		w := newWorld(t)
 		w.GivenAProjectThatPullsBusybox()
@@ -247,6 +248,7 @@ func TestUpdate_TheLockfilePinsEachPulledTag(t *testing.T) {
 // newest stable tag the registry lists that the tag covers, with the same v prefix and suffix, whose leading numbers
 // are the tag's, and a tag that covers no other, or isn't a version, to itself.
 func TestUpdate_TagsResolveToTheNewestTagTheyCover(t *testing.T) {
+	parallelRule(t)
 	for _, example := range []struct {
 		tag      string
 		listed   []string
@@ -305,6 +307,7 @@ func TestUpdate_TagsResolveToTheNewestTagTheyCover(t *testing.T) {
 // the pulls named, rewrites their pins, and reports each pin it added, changed or removed, with the tags and digests
 // before and after; that updating every pull removes the pins that no pull uses; and that it changes no other pin.
 func TestUpdate_ReResolvesPinsAndReportsWhatChanged(t *testing.T) {
+	parallelRule(t)
 	t.Run("A moved tag is updated and reported", func(t *testing.T) {
 		w := newWorld(t)
 		w.GivenTheTagNames("<registry>/base:v1", "first")
@@ -573,6 +576,7 @@ func TestUpdate_ReResolvesPinsAndReportsWhatChanged(t *testing.T) {
 // major version, each where one exists, among the tags with the same v prefix and suffix; a tag it resolved to isn't
 // newer.
 func TestUpdate_NewerReleasesAreReported(t *testing.T) {
+	parallelRule(t)
 	for _, example := range []struct {
 		tag      string
 		listed   []string
@@ -657,6 +661,7 @@ func TestUpdate_NewerReleasesAreReported(t *testing.T) {
 // prerelease tag newer than a pull's resolved tag, and each pulled tag that doesn't read as a version, saying that it
 // can't report newer releases of it.
 func TestUpdate_PrereleasesAndTagsThatArentVersionsAreNoted(t *testing.T) {
+	parallelRule(t)
 	t.Run("A newer prerelease is noted", func(t *testing.T) {
 		w := newWorld(t)
 		w.GivenTheRegistryListsTags("<registry>/base", "1.3", "1.4-rc1")
@@ -701,6 +706,7 @@ func TestUpdate_PrereleasesAndTagsThatArentVersionsAreNoted(t *testing.T) {
 // as vamos update does, leaves the lockfile as it is, creating none where there is none, and fails when vamos update
 // would change it, while newer releases, prereleases and tags that aren't versions alone don't fail it.
 func TestUpdate_ADryRunWritesNothingAndFailsIfAPinWouldChange(t *testing.T) {
+	parallelRule(t)
 	t.Run("A dry run fails when a pin would change", func(t *testing.T) {
 		w := newWorld(t)
 		w.GivenTheTagNames("<registry>/base:v1", "first")
@@ -802,6 +808,7 @@ func TestUpdate_ADryRunWritesNothingAndFailsIfAPinWouldChange(t *testing.T) {
 // fails the command, naming the image and saying why; and that one that won't list tags resolves the tag to itself,
 // noted.
 func TestUpdate_TagsAreResolvedAtTheirUpstreamRegistry(t *testing.T) {
+	parallelRule(t)
 	t.Run("A pull-through cache is not asked about tags", func(t *testing.T) {
 		w := newWorld(t)
 		w.GivenARegistry()

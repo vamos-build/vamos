@@ -48,9 +48,26 @@ func anAppOnThePull(nonce, tag string) string {
 	`
 }
 
+// anAppOfATasksFiles declares the pull "base" of busybox from the scenario's registry, the task "gen" on it, which
+// writes nonce to n.txt, and the layer "app" on scratch, which adds gen's files, so that their first build runs.
+func anAppOfATasksFiles(nonce string) string {
+	return `
+		pull(name="base", image="<registry>/busybox", tag="1.36")
+		task(
+		    name="gen",
+		    base="base",
+		    steps=[run(["sh", "-c", "mkdir /out && echo ` + nonce + ` > /out/n.txt"])],
+		    source="/out",
+		    include=["n.txt"],
+		)
+		layer(name="app", base="scratch", steps=[add("gen", "/data")])
+	`
+}
+
 // TestMisses_EveryMissHasOneCause specifies, as the cache reference says, that "each layer or task that runs, rather
 // than being reused, gets one cause in its trace".
 func TestMisses_EveryMissHasOneCause(t *testing.T) {
+	parallelRule(t)
 	t.Run("A reused target has no cause", func(t *testing.T) {
 		w := newMissWorld(t)
 		w.GivenTheBuildFileDeclares(anAppOfAGlob(testenv.NewNonce(), `"a.txt"`))
@@ -67,6 +84,7 @@ func TestMisses_EveryMissHasOneCause(t *testing.T) {
 // TestMisses_AForcedBuildIsForced specifies, as the cache reference says, that a target is "forced" when "--rebuild
 // named it, whatever else changed".
 func TestMisses_AForcedBuildIsForced(t *testing.T) {
+	parallelRule(t)
 	t.Run("--rebuild forces a target", func(t *testing.T) {
 		w := newMissWorld(t)
 		w.GivenTheBuildFileDeclares(anAppOfAGlob(testenv.NewNonce(), `"a.txt"`))
@@ -83,6 +101,7 @@ func TestMisses_AForcedBuildIsForced(t *testing.T) {
 // TestMisses_TargetHistory specifies, as the cache reference says, that "builds of different branches don't inflate
 // each other's changes": a build that returns to an earlier branch's action is compared with that branch's build.
 func TestMisses_TargetHistory(t *testing.T) {
+	parallelRule(t)
 	t.Run("Two branches' builds don't look like changes", func(t *testing.T) {
 		w := newMissWorld(t)
 		w.GivenTheBuildFileDeclares(anAppOfAGlob(testenv.NewNonce(), `"a.txt"`))
@@ -105,18 +124,23 @@ func TestMisses_TargetHistory(t *testing.T) {
 // TestMisses_ConcurrentBuildsEachAddTheirAction specifies, as the cache reference says, that "builds of a target that
 // run at once each add their action to its history".
 func TestMisses_ConcurrentBuildsEachAddTheirAction(t *testing.T) {
+	parallelRule(t)
 	t.Run("Concurrent builds each add their action", func(t *testing.T) {
 		w := newMissWorld(t)
 		w.GivenARegistry()
 		w.GivenACoordinatorWithAWorker()
 		w.GivenAProjectThatPullsBusybox()
+		// Each build's attempt waits at the barrier until the other's reaches it, so that both are running at once.
+		w.GivenABarrierThatOpensOnceReachedBy(2)
 		w.GivenTheBuildFileDeclares(`
 			glob(name="src", include=["a.txt"])
 			task(name="app", base="busybox", steps=[env(NONCE="` + testenv.NewNonce() + `"), add("src", "/src"),
-			    run(["sleep", "2"])])
+			    run(["wget", "-q", "-O", "/dev/null", "<barrier>"])])
 		`)
 		w.GivenTwoClientsBuiltAtOnceOnTheCoordinator("app", files{"a.txt": "one"}, files{"a.txt": "two"},
 			onTheCoordinator("<coordinator>"))
+		w.ThenTheBarrierOpened()
+		w.GivenTheCoordinatorHasSettled()
 		w.WhenIPrune(onTheCoordinator("<coordinator>"))
 		w.ThenItSucceeds()
 		for _, source := range []string{"one", "two"} {
@@ -132,6 +156,7 @@ func TestMisses_ConcurrentBuildsEachAddTheirAction(t *testing.T) {
 // TestMisses_HistoryKeepsTheLastEightActions specifies, as the cache reference says, that history holds "the last 8
 // actions its builds used".
 func TestMisses_HistoryKeepsTheLastEightActions(t *testing.T) {
+	parallelRule(t)
 	t.Run("A ninth action makes the first be forgotten", func(t *testing.T) {
 		w := newMissWorld(t)
 		w.GivenTheBuildFileDeclares(anAppOfAGlob(testenv.NewNonce(), `"a.txt"`))
@@ -158,6 +183,7 @@ func TestMisses_HistoryKeepsTheLastEightActions(t *testing.T) {
 // TestMisses_TheWorkspaceNameKeysTargetHistory specifies, as the cache reference says, that history is kept "in a
 // named workspace", whose name keys it, so that a target is "new" in "an unnamed workspace".
 func TestMisses_TheWorkspaceNameKeysTargetHistory(t *testing.T) {
+	parallelRule(t)
 	t.Run("Another workspace's history is not compared", func(t *testing.T) {
 		w := newMissWorld(t)
 		nonce := testenv.NewNonce()
@@ -189,6 +215,7 @@ func TestMisses_TheWorkspaceNameKeysTargetHistory(t *testing.T) {
 // TestMisses_ATargetWithoutComparableHistoryIsNew specifies, as the cache reference says, that a target is "new" when
 // "it has no earlier build to compare with: a first build, a new configuration, or an unnamed workspace".
 func TestMisses_ATargetWithoutComparableHistoryIsNew(t *testing.T) {
+	parallelRule(t)
 	t.Run("A target's first build is new", func(t *testing.T) {
 		w := newMissWorld(t)
 		w.GivenTheBuildFileDeclares(anAppOfAGlob(testenv.NewNonce(), `"a.txt"`))
@@ -215,6 +242,24 @@ func TestMisses_ATargetWithoutComparableHistoryIsNew(t *testing.T) {
 // TestMisses_AResultThatIsGoneIsLost specifies, as the cache reference says, that a target is "lost" when "its action
 // is one it built before, but the result is gone or can't be used, as after a prune".
 func TestMisses_AResultThatIsGoneIsLost(t *testing.T) {
+	parallelRule(t)
+	t.Run("A task whose cached files are corrupt is lost", func(t *testing.T) {
+		w := newMissWorld(t)
+		w.GivenARegistry()
+		w.GivenTheRegistryHoldsBusybox("<registry>/busybox:1.36")
+		nonce := testenv.NewNonce()
+		w.GivenTheBuildFileDeclares(anAppOfATasksFiles(nonce))
+		w.WhenIBuild("app")
+		w.ThenItSucceeds()
+		w.GivenTheCachedBlobOfIsCorrupt(nonce + "\n") // gen's n.txt, which app adds
+		w.WhenIBuild("app", rebuilding(), traced())
+		w.ThenItSucceeds()
+		w.ThenTheTargetWasShownAs(task("gen"), "cached", "building again, since its cached files are corrupt: ")
+		// Looked up, its files found corrupt by app, then built again.
+		w.ThenTheTraceSpansSayAtLeast("executor", `task "gen"`, traceArgs{"outcome": "cached"},
+			traceArgs{"outcome": "building again, since its cached files are corrupt: *", "miss": "lost"})
+	})
+
 	t.Run("A target built again after a prune is lost", func(t *testing.T) {
 		w := newMissWorld(t)
 		w.GivenTheBuildFileDeclares(anAppOfAGlob(testenv.NewNonce(), `"a.txt"`))
@@ -232,6 +277,7 @@ func TestMisses_AResultThatIsGoneIsLost(t *testing.T) {
 // TestMisses_AttributionComparesWithTheNearestEntry specifies, as the cache reference says, that "a miss is compared
 // with the history entry that differs from it least".
 func TestMisses_AttributionComparesWithTheNearestEntry(t *testing.T) {
+	parallelRule(t)
 	t.Run("The nearest entry is compared, not the latest", func(t *testing.T) {
 		w := newMissWorld(t)
 		w.GivenTheBuildFileDeclares(anAppOfAGlob(testenv.NewNonce(), `"a.txt", "b.txt"`))
@@ -254,6 +300,7 @@ func TestMisses_AttributionComparesWithTheNearestEntry(t *testing.T) {
 // "own-inputs" when "a step, command, output, source file, or which target supplies its base or files changed; a
 // source's added, removed and changed files are named".
 func TestMisses_AChangeOfTheTargetsOwnInputsIsOwnInputs(t *testing.T) {
+	parallelRule(t)
 	t.Run("A layer that became a task is own-inputs", func(t *testing.T) {
 		w := newMissWorld(t)
 		nonce := testenv.NewNonce()
@@ -378,6 +425,7 @@ func TestMisses_AChangeOfTheTargetsOwnInputsIsOwnInputs(t *testing.T) {
 // misses for "dependency" when "only what a target it depends on supplies changed, as a base layer's image or an added
 // task's files; each is named".
 func TestMisses_AChangeOnlyInWhatADependencySuppliesIsDependency(t *testing.T) {
+	parallelRule(t)
 	t.Run("A layer on a changed layer", func(t *testing.T) {
 		w := newMissWorld(t)
 		nonce := testenv.NewNonce()
@@ -502,6 +550,7 @@ func TestMisses_AChangeOnlyInWhatADependencySuppliesIsDependency(t *testing.T) {
 // "only the image its base pull's reference names moved: a tag that moved, or an updated pin; the pull and both
 // digests are named".
 func TestMisses_AMovedPullIsUpstream(t *testing.T) {
+	parallelRule(t)
 	t.Run("A tag that moved, updated with vamos update", func(t *testing.T) {
 		w := newMissWorld(t)
 		w.GivenARegistry()
@@ -560,6 +609,7 @@ func TestMisses_AMovedPullIsUpstream(t *testing.T) {
 // so it survives a prune", which "keeps the history of a target built or reused in the last 90 days, and removes it
 // once its target has been neither built nor reused for 100".
 func TestMisses_HistorySurvivesAPrune(t *testing.T) {
+	parallelRule(t)
 	t.Run("A changed source after a prune is still own-inputs", func(t *testing.T) {
 		w := newMissWorld(t)
 		w.GivenTheBuildFileDeclares(anAppOfAGlob(testenv.NewNonce(), `"*.txt"`))

@@ -117,6 +117,11 @@ type HeartbeatAnswer struct {
 type AttemptEvents struct {
 	Output []OutputEvent  `json:"output,omitempty"`
 	Spans  []tracing.Span `json:"spans,omitempty"`
+	// Clock is how far the worker's clock is ahead of the coordinator's, as the worker estimated it before the
+	// attempt started, the same in every batch of the attempt, by which the coordinator shifts the batch's spans onto
+	// its own clock, so that they keep the order they ran in: an estimate refined between batches could shift a step
+	// before the one it followed. Nil from a worker that sends none, whose spans are shifted by Heartbeat.Clock.
+	Clock *tracing.Offset `json:"clock,omitempty"`
 }
 
 // OutputEvent is one write of an attempt's run() steps.

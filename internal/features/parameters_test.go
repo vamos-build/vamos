@@ -126,6 +126,7 @@ const settings = `
 // TestParameters_PlainValuesAreDefaults specifies that a plain value declares both a default and a type,
 // and that a plain label uses all the referenced target's defaults.
 func TestParameters_PlainValuesAreDefaults(t *testing.T) {
+	parallelRule(t)
 	t.Run("Without arguments, every target takes its defaults, and one configured alike is built once",
 		func(t *testing.T) {
 			w := newParametersWorld(t)
@@ -165,6 +166,7 @@ func TestParameters_PlainValuesAreDefaults(t *testing.T) {
 // TestParameters_WithoutADefaultIsGivenOnEveryUse specifies that a parameter without a default, given its type
 // by param(), must be supplied on every use: a use that doesn't give it fails, saying how to give it.
 func TestParameters_WithoutADefaultIsGivenOnEveryUse(t *testing.T) {
+	parallelRule(t)
 	t.Run("A parameter without a default is given its value on every use", func(t *testing.T) {
 		w := newParametersWorld(t)
 		w.GivenTheBuildFileDeclares(`
@@ -233,6 +235,7 @@ func TestParameters_WithoutADefaultIsGivenOnEveryUse(t *testing.T) {
 // TestParameters_SetOverridesParameters specifies that --set name=value overrides a parameter, that lists use
 // comma-separated strings and preserve order, and that an empty value gives an empty list.
 func TestParameters_SetOverridesParameters(t *testing.T) {
+	parallelRule(t)
 	for _, example := range []struct {
 		name string
 		sets []string
@@ -267,6 +270,7 @@ func TestParameters_SetOverridesParameters(t *testing.T) {
 // TestParameters_DepAndArgPassArguments specifies that dep() names a target with explicit parameter arguments,
 // and that arg() forwards the using target's parameter value as an argument of dep().
 func TestParameters_DepAndArgPassArguments(t *testing.T) {
+	parallelRule(t)
 	t.Run("dep() names a target with the arguments it gives", func(t *testing.T) {
 		w := newParametersWorld(t)
 		nonce := testenv.NewNonce()
@@ -311,6 +315,7 @@ func TestParameters_DepAndArgPassArguments(t *testing.T) {
 // TestParameters_OnlyUsedParametersAffectReuse specifies that parameters affect reuse through the configured inputs
 // and operations, and that changing an unused parameter does not by itself force a target to run again.
 func TestParameters_OnlyUsedParametersAffectReuse(t *testing.T) {
+	parallelRule(t)
 	t.Run("A target whose used parameter changes runs again", func(t *testing.T) {
 		w := newParametersWorld(t)
 		w.GivenTheBuildFileDeclares(fmt.Sprintf(`
@@ -341,6 +346,7 @@ func TestParameters_OnlyUsedParametersAffectReuse(t *testing.T) {
 // TestParameters_SetGoesToEveryNamedTargetDeclaringIt specifies that with several targets, build applies each flag
 // to every named target declaring that parameter.
 func TestParameters_SetGoesToEveryNamedTargetDeclaringIt(t *testing.T) {
+	parallelRule(t)
 	t.Run("Each named target with the parameter takes the flag, and the others are built as they are",
 		func(t *testing.T) {
 			w := newParametersWorld(t)
@@ -365,6 +371,7 @@ func TestParameters_SetGoesToEveryNamedTargetDeclaringIt(t *testing.T) {
 // TestParameters_DeclaredInAPlainDictionary specifies that targets other than pulls accept a params dictionary,
 // from each parameter's name to its default or param(), which can't be a function of ctx.
 func TestParameters_DeclaredInAPlainDictionary(t *testing.T) {
+	parallelRule(t)
 	for _, example := range []struct {
 		name   string
 		params string
@@ -400,6 +407,7 @@ func TestParameters_DeclaredInAPlainDictionary(t *testing.T) {
 // TestParameters_NamesAreReadAsFieldsOfCtx specifies that user parameters are read as ctx.<name>,
 // so a name is an identifier, and ctx's own fields, platform, os, arch, variant and exec_platform, are reserved.
 func TestParameters_NamesAreReadAsFieldsOfCtx(t *testing.T) {
+	parallelRule(t)
 	for _, example := range []struct {
 		name   string
 		params string
@@ -450,6 +458,7 @@ func TestParameters_NamesAreReadAsFieldsOfCtx(t *testing.T) {
 // TestParameters_TypesAreStringsBooleansIntegersAndLists specifies that the supported types are strings, booleans,
 // integers, and lists of strings.
 func TestParameters_TypesAreStringsBooleansIntegersAndLists(t *testing.T) {
+	parallelRule(t)
 	for _, example := range []struct {
 		name   string
 		params string
@@ -480,6 +489,7 @@ func TestParameters_TypesAreStringsBooleansIntegersAndLists(t *testing.T) {
 // TestParameters_ParamGivesADefaultOrATypeThatAgree specifies that param() is given a default or a type,
 // one of "string", "bool", "int" or "list", and that if both are given, they must agree.
 func TestParameters_ParamGivesADefaultOrATypeThatAgree(t *testing.T) {
+	parallelRule(t)
 	for _, example := range []struct {
 		name  string
 		param string
@@ -515,6 +525,7 @@ func TestParameters_ParamGivesADefaultOrATypeThatAgree(t *testing.T) {
 // TestParameters_ValuesConstrainStringsAndLists specifies that values is a nonempty list of allowed strings,
 // for a string or list parameter, that constrains each item of a list.
 func TestParameters_ValuesConstrainStringsAndLists(t *testing.T) {
+	parallelRule(t)
 	for _, example := range []struct {
 		name  string
 		param string
@@ -560,6 +571,7 @@ func TestParameters_ValuesConstrainStringsAndLists(t *testing.T) {
 // TestParameters_SetNamesAParameterOfANamedTarget specifies that --set name=value names a parameter of a target the
 // command names: a flag that matches none of the named targets is an error, as is one that gives no value.
 func TestParameters_SetNamesAParameterOfANamedTarget(t *testing.T) {
+	parallelRule(t)
 	for _, example := range []struct {
 		name    string
 		targets []string // the first, and those after it
@@ -617,6 +629,7 @@ func TestParameters_SetNamesAParameterOfANamedTarget(t *testing.T) {
 // TestParameters_SetGivesAValueTheParameterCanHave specifies that --set gives a parameter once, a value it can have:
 // one of its values, if it has them, an integer for an int, and lowercase true or false for a boolean.
 func TestParameters_SetGivesAValueTheParameterCanHave(t *testing.T) {
+	parallelRule(t)
 	for _, example := range []struct {
 		name  string
 		sets  []string
@@ -677,6 +690,7 @@ func TestParameters_SetGivesAValueTheParameterCanHave(t *testing.T) {
 // TestParameters_ArgumentsAreParametersOfTheTarget specifies that the target that dep() names must declare each
 // argument's parameter and take its value, and that the using target must declare the parameter that arg() forwards.
 func TestParameters_ArgumentsAreParametersOfTheTarget(t *testing.T) {
+	parallelRule(t)
 	for _, example := range []struct {
 		name  string
 		build string // on line 10, after libsTakingParameters and the glob "code"
@@ -757,6 +771,7 @@ func TestParameters_ArgumentsAreParametersOfTheTarget(t *testing.T) {
 // ctx.<name> and returns the whole attribute, such as a complete steps or include list, whose entries can't be
 // functions themselves, and that its mistakes name the configuration it was given.
 func TestParameters_FunctionsOfCtxGiveWholeAttributes(t *testing.T) {
+	parallelRule(t)
 	for _, example := range []struct {
 		name  string
 		build string // on line 2, after the pull of busybox
@@ -852,6 +867,7 @@ func TestParameters_FunctionsOfCtxGiveWholeAttributes(t *testing.T) {
 // TestParameters_FunctionsOfCtxOnlyConfigure specifies that functions of ctx configure existing targets:
 // they can't declare new targets, and a target's name and params can't be functions of ctx.
 func TestParameters_FunctionsOfCtxOnlyConfigure(t *testing.T) {
+	parallelRule(t)
 	for _, example := range []struct {
 		name  string
 		build string // on line 2, after the pull of busybox

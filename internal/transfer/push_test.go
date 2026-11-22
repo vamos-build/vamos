@@ -17,6 +17,7 @@ import (
 
 	"github.com/vamos-build/vamos/internal/testenv"
 
+	"github.com/docker/distribution/registry/api/errcode"
 	"github.com/google/go-containerregistry/pkg/registry"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/empty"
@@ -62,9 +63,9 @@ func pushTo(t *testing.T, image string, src types.ImageReference) ([]byte, error
 // quickRetries makes pushes retry twice without waiting, whatever the host's containers.conf says.
 func quickRetries(t *testing.T) {
 	t.Helper()
-	was := Retries
-	Retries = func() (*retry.Options, error) { return &retry.Options{MaxRetry: 2, Delay: time.Millisecond}, nil }
-	t.Cleanup(func() { Retries = was })
+	was := RetryLimits
+	RetryLimits = func() (*retry.Options, error) { return &retry.Options{MaxRetry: 2, Delay: time.Millisecond}, nil }
+	t.Cleanup(func() { RetryLimits = was })
 }
 
 // TestPushRetries checks that a push survives a registry that fails transiently, and reads the tag back.
@@ -228,4 +229,56 @@ func mediaTypeOf(t *testing.T, img v1.Image) string {
 	mt, err := img.MediaType()
 	testenv.Must(t, err)
 	return string(mt)
+}
+
+// TestReadRetriesNotWhenRateLimited checks that a write retries what may not happen again, a registry's refusal for
+// too many requests among it, which containers/image doesn't ask again for a request with a body, and that a read
+// retries the same but that refusal, which containers/image has asked again after already.
+func TestReadRetriesNotWhenRateLimited(t *testing.T) {
+	quickRetries(t)
+	writes, err := Retries()
+	if err != nil {
+		t.Fatal(err)
+	}
+	reads, err := ReadRetries()
+	if err != nil {
+		t.Fatal(err)
+	}
+	unavailable := errcode.ErrorCodeUnavailable.WithMessage("unavailable for now")
+	limited := fmt.Errorf("reading manifest: %w", errcode.ErrorCodeTooManyRequests.WithMessage("pull rate limit"))
+	for _, example := range []struct {
+		name    string
+		options *retry.Options
+		err     error
+		want    bool
+	}{
+		{
+			name:    "a write, unavailable",
+			options: writes,
+			err:     unavailable,
+			want:    true,
+		},
+		{
+			name:    "a write, rate-limited",
+			options: writes,
+			err:     limited,
+			want:    true,
+		},
+		{
+			name:    "a read, unavailable",
+			options: reads,
+			err:     unavailable,
+			want:    true,
+		},
+		{
+			name:    "a read, rate-limited",
+			options: reads,
+			err:     limited,
+			want:    false,
+		},
+	} {
+		if got := example.options.IsErrorRetryable(example.err); got != example.want {
+			t.Errorf("%s: retrying %v = %t, want %t", example.name, example.err, got, example.want)
+		}
+	}
 }

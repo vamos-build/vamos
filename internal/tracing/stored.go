@@ -71,6 +71,13 @@ type Attempt struct {
 // EncodeAttempt returns the stored trace of the attempt id, holding spans,
 // trimmed with Trim to MaxTraceSize with what lost says the recorder refused.
 func EncodeAttempt(id string, spans []Span, lost Lost) ([]byte, error) {
+	return EncodeAttemptWithin(id, spans, lost, MaxTraceSize)
+}
+
+// EncodeAttemptWithin is EncodeAttempt with spans trimmed to fit the document in limit bytes, rather than
+// MaxTraceSize, so that a test can see a trace cut short without recording megabytes of spans.
+// A limit too small for the document with none of its spans gives it none, and the instant that says so if it fits.
+func EncodeAttemptWithin(id string, spans []Span, lost Lost, limit int) ([]byte, error) {
 	if len(id) > maxAttemptID {
 		return nil, fmt.Errorf("an attempt's ID of %d bytes is longer than %d", len(id), maxAttemptID)
 	}
@@ -79,7 +86,7 @@ func EncodeAttempt(id string, spans []Span, lost Lost) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if a.Spans = Trim(spans, lost, MaxTraceSize-len(empty)+len("[]")); a.Spans == nil {
+	if a.Spans = Trim(spans, lost, min(limit, MaxTraceSize)-len(empty)+len("[]")); a.Spans == nil {
 		a.Spans = []Span{}
 	}
 	return json.Marshal(a)

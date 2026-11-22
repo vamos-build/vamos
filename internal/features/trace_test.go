@@ -1,6 +1,7 @@
 package features
 
 import (
+	"fmt"
 	"maps"
 	"slices"
 	"strings"
@@ -18,10 +19,10 @@ func newTraceWorld(t *testing.T) *world {
 	return newBuildingWorld(t)
 }
 
-// slowTaskSteps returns the names of the steps of aSlowTask(nonce)'s task: setting the nonce, then sleeping six
-// seconds, long enough for another build to join it.
+// slowTaskSteps returns the names of the steps of aSlowTask(nonce)'s task: setting the nonce, then waiting at the
+// scenario's barrier, which GivenABarrier starts, until a step opens it, as once another build has joined the task.
 func slowTaskSteps(nonce string) []string {
-	return []string{`env(NONCE="` + nonce + `")`, `run(["sleep", "6"])`}
+	return []string{`env(NONCE="` + nonce + `")`, `run(["wget", "-q", "-O", "/dev/null", "<barrier>"])`}
 }
 
 // aSlowTask declares the task "slow", on busybox, whose steps are slowTaskSteps(nonce).
@@ -62,6 +63,7 @@ var theSources = files{"src/a.txt": "a\n", "src/b.txt": "bb\n"}
 // the results of globs, pulls and targets to the steps that consume them; and that spans include details such as
 // file counts, byte sizes, digests and image IDs.
 func TestTrace_ShowsTheBuild(t *testing.T) {
+	parallelRule(t)
 	t.Run("A save's trace shows its load, its globs, and each target's steps, with arrows to what they use",
 		func(t *testing.T) {
 			w := newTraceWorld(t)
@@ -139,6 +141,7 @@ func TestTrace_ShowsTheBuild(t *testing.T) {
 // executor or from the client, with a span for each blob, which a push again skips, as the registry has it; a save's
 // copy to its archive; and an export, saying the files it wrote.
 func TestTrace_ShowsDelivery(t *testing.T) {
+	parallelRule(t)
 	for _, example := range []struct {
 		name    string
 		options []option
@@ -237,6 +240,7 @@ const aPublicationOnScratch = `
 // before the first tag starts, and each copy in the process that made it: the executor, the client given
 // --push-from=client, or a coordinator's worker, never the coordinator itself.
 func TestTrace_ShowsPublishing(t *testing.T) {
+	parallelRule(t)
 	t.Run("Uploads, then tags, within one publish job", func(t *testing.T) {
 		w := newTraceWorld(t)
 		w.GivenAProjectThatPullsBusybox()
@@ -323,6 +327,7 @@ func TestTrace_ShowsPublishing(t *testing.T) {
 // TestTrace_ShowsPulls specifies that the trace of a pull of an image that the store lacks shows resolving its tag,
 // and copying the image, a blob at a time.
 func TestTrace_ShowsPulls(t *testing.T) {
+	parallelRule(t)
 	t.Run("A pull resolves its tag and copies the image it names", func(t *testing.T) {
 		w := newTraceWorld(t)
 		w.GivenARegistry()
@@ -337,6 +342,7 @@ func TestTrace_ShowsPulls(t *testing.T) {
 // TestTrace_IsWrittenEvenIfTheCommandFails specifies that once tracing starts, vamos writes the trace even if
 // execution fails, ending at the failing step, with its error, and reports the command's error.
 func TestTrace_IsWrittenEvenIfTheCommandFails(t *testing.T) {
+	parallelRule(t)
 	t.Run("A failing build's trace ends at the step that failed, with its error", func(t *testing.T) {
 		w := newTraceWorld(t)
 		w.GivenAProjectThatPullsBusybox()
@@ -367,6 +373,7 @@ func newTraceMistakeWorld(t *testing.T) *world {
 // different from a save archive and outside an export destination folder, through any link, which is checked before
 // anything is loaded or built, writing nothing.
 func TestTrace_PathCanBeWrittenAndIsNotTheOutput(t *testing.T) {
+	parallelRule(t)
 	for _, example := range []struct {
 		name  string
 		trace string
@@ -467,6 +474,7 @@ func aLayerThatRuns(nonce string) string {
 // traced, whether or not you ask", and that "a command's trace holds all of its work: this process's, and each job's
 // on its executor".
 func TestTrace_EveryCommandThatBuildsIsTraced(t *testing.T) {
+	parallelRule(t)
 	t.Run("A build without --trace has a trace", func(t *testing.T) {
 		w := newTraceWorld(t)
 		w.GivenAProjectThatPullsBusybox()
@@ -499,6 +507,7 @@ func TestTrace_EveryCommandThatBuildsIsTraced(t *testing.T) {
 // TestTrace_ACommandPrintsItsTrace specifies, as the CLI's output reference says, that "a command that builds prints
 // its trace's digest on standard error once its jobs end, whether it succeeded or failed".
 func TestTrace_ACommandPrintsItsTrace(t *testing.T) {
+	parallelRule(t)
 	t.Run("A failed build prints its trace", func(t *testing.T) {
 		w := newTraceWorld(t)
 		w.GivenAProjectThatPullsBusybox()
@@ -548,18 +557,21 @@ func TestTrace_ACommandPrintsItsTrace(t *testing.T) {
 	t.Run("An interrupted build prints its trace, which holds what ran", func(t *testing.T) {
 		w := newTraceWorld(t)
 		w.GivenAProjectThatPullsBusybox()
+		w.GivenABarrier()
+		w.GivenTheBarrierOpensOnceTheCommandIsInterrupted()
 		w.GivenTheBuildFileDeclares(`
 			layer(name="app", base="busybox", steps=[env(NONCE="` + testenv.NewNonce() + `"),
-			    run(["sh", "-c", "echo started; sleep 30"])])
+			    run(["sh", "-c", "echo started; wget -q -O /dev/null <barrier>"])])
 		`)
 		w.WhenIBuild("app", interruptedOnceItPrints("started"), traced())
 		w.ThenItIsInterrupted()
+		w.ThenTheBarrierOpened()
 		w.ThenItPrintsItsTrace()
-		w.ThenTheTraceSpanIsWithin("executor", `run(["sh", "-c", "echo started; sleep 30"])`, "executor",
+		w.ThenTheTraceSpanIsWithin("executor", `run(["sh", "-c", "echo started; wget *`, "executor",
 			`layer "app"`)
 		w.WhenIReadTheTrace("<printed trace>")
 		w.ThenItSucceeds()
-		w.ThenTheTraceSpanIsWithin("executor", `run(["sh", "-c", "echo started; sleep 30"])`, "executor",
+		w.ThenTheTraceSpanIsWithin("executor", `run(["sh", "-c", "echo started; wget *`, "executor",
 			`layer "app"`)
 	})
 }
@@ -568,6 +580,7 @@ func TestTrace_ACommandPrintsItsTrace(t *testing.T) {
 // trace to file.json": "a digest reads the trace from the executor's build cache until a prune removes it", and "a job
 // ID reads that job's trace from the coordinator that ran it", failing, writing nothing, for what it can't read.
 func TestTrace_VamosTraceWritesAStoredTrace(t *testing.T) {
+	parallelRule(t)
 	t.Run("--trace and vamos trace write the same trace", func(t *testing.T) {
 		w := newTraceWorld(t)
 		w.GivenAProjectThatPullsBusybox()
@@ -663,18 +676,22 @@ func TestTrace_VamosTraceWritesAStoredTrace(t *testing.T) {
 // that a reused target's span says "when the result was made, how long making it took, and the time reusing it
 // saved".
 func TestTrace_AnAttemptsTraceIsKeptWithItsResult(t *testing.T) {
+	parallelRule(t)
 	t.Run("A build that joins another's run shows its steps on the target's shared track", func(t *testing.T) {
 		w := newTraceWorld(t)
 		w.GivenARegistry()
 		w.GivenACoordinatorWithAWorker()
 		w.GivenAProjectThatPullsBusybox()
-		w.GivenTheBuildFileDeclares(`task(name="slow", base="busybox", steps=[env(NONCE="` + testenv.NewNonce() +
-			`"), run(["sleep", "6"])])`)
+		w.GivenABarrier()
+		nonce := testenv.NewNonce()
+		w.GivenTheBuildFileDeclares(aSlowTask(nonce))
 		w.GivenAnotherClientBuildsOnTheCoordinator("slow", onTheCoordinator("<coordinator>"))
 		w.GivenTheOtherClientIsBuildingIt()
+		w.GivenTheBarrierOpensOnceTheOtherClientIsJoined()
 		w.WhenIBuild("slow", onTheCoordinator("<coordinator>"), traced())
 		w.ThenItSucceeds()
-		w.ThenTheTraceSpanIsOnTrack("worker", `run(["sleep", "6"])`, `task "slow" (shared)`)
+		w.ThenTheBarrierOpened()
+		w.ThenTheTraceSpanIsOnTrack("worker", slowTaskSteps(nonce)[1], `task "slow" (shared)`)
 	})
 
 	t.Run("Two builds that share an attempt both show its steps", func(t *testing.T) {
@@ -682,13 +699,16 @@ func TestTrace_AnAttemptsTraceIsKeptWithItsResult(t *testing.T) {
 		w.GivenARegistry()
 		w.GivenACoordinatorWithAWorker()
 		w.GivenAProjectThatPullsBusybox()
+		w.GivenABarrier()
 		nonce := testenv.NewNonce()
 		w.GivenTheBuildFileDeclares(aSlowTask(nonce))
 		steps := slowTaskSteps(nonce)
 		w.GivenAnotherClientBuildsOnTheCoordinator("slow", onTheCoordinator("<coordinator>"))
 		w.GivenTheOtherClientIsBuildingIt()
+		w.GivenTheBarrierOpensOnceTheOtherClientIsJoined()
 		w.WhenIBuild("slow", onTheCoordinator("<coordinator>"), traced())
 		w.ThenItSucceeds()
+		w.ThenTheBarrierOpened()
 		for _, step := range steps {
 			w.ThenTheTraceSpanIsOnTrack("worker", step, `task "slow" (shared)`)
 		}
@@ -708,14 +728,17 @@ func TestTrace_AnAttemptsTraceIsKeptWithItsResult(t *testing.T) {
 		w.GivenARegistry()
 		w.GivenACoordinatorWithAWorker()
 		w.GivenAProjectThatPullsBusybox()
+		w.GivenABarrier()
 		nonce := testenv.NewNonce()
 		w.GivenTheBuildFileDeclares(aSlowTask(nonce))
 		steps := slowTaskSteps(nonce)
 		w.GivenAnotherClientBuildsOnTheCoordinator("slow", onTheCoordinator("<coordinator>"))
 		w.GivenTheOtherClientIsBuildingIt()
 		w.GivenTheOtherClientIsInterruptedOnceJoined()
+		w.GivenTheBarrierOpensOnceTheOtherClientEnds()
 		w.WhenIBuild("slow", onTheCoordinator("<coordinator>"), traced())
 		w.ThenItSucceeds()
+		w.ThenTheBarrierOpened()
 		w.ThenTheOtherClientIsInterrupted()
 		for _, step := range steps {
 			w.ThenTheTraceSpanIsOnTrack("worker", step, `task "slow" (shared)`)
@@ -748,6 +771,7 @@ func TestTrace_AnAttemptsTraceIsKeptWithItsResult(t *testing.T) {
 // TestTrace_AMissingTraceNeverCostsAHit specifies, as the cache reference says, that "a result whose trace is gone is
 // reused all the same; a trace that would show it says the trace is gone".
 func TestTrace_AMissingTraceNeverCostsAHit(t *testing.T) {
+	parallelRule(t)
 	w := newTraceWorld(t)
 	w.GivenStoresOfTheScenariosOwn()
 	w.GivenTheBuildFileDeclares(`layer(name="app", base="scratch", steps=[env(NONCE="` + testenv.NewNonce() +
@@ -769,6 +793,39 @@ func TestTrace_AMissingTraceNeverCostsAHit(t *testing.T) {
 		w.WhenIBuild("app")
 		w.ThenItSucceeds()
 		w.ThenTheTargetsWere(statuses{layer("app"): reused})
+	})
+}
+
+// aTaskOfManySteps declares the task "steps", on scratch, which sets NONCE to nonce, then STEP to each of 1 to 40 in
+// turn: an attempt whose trace holds a span for each, which an attempt's trace of a few kilobytes can't keep.
+func aTaskOfManySteps(nonce string) string {
+	steps := []string{`env(NONCE="` + nonce + `")`}
+	for i := 1; i <= 40; i++ {
+		steps = append(steps, fmt.Sprintf(`env(STEP="%d")`, i))
+	}
+	return `task(name="steps", base="scratch", steps=[` + strings.Join(steps, ", ") + `])`
+}
+
+// TestTrace_ATraceIsCappedInSize specifies, as the cache reference says, that "each stored trace is kept whole within
+// 16 MiB, as a log is: past that, the latest-started spans are dropped, and the trace says it was cut short and how
+// many it dropped".
+func TestTrace_ATraceIsCappedInSize(t *testing.T) {
+	parallelRule(t)
+	t.Run("An attempt that traces past the cap is cut short", func(t *testing.T) {
+		w := newTraceWorld(t)
+		w.GivenACoordinatorWhoseAttemptTracesKeep(4 << 10)
+		w.GivenTheBuildFileDeclares(aTaskOfManySteps(testenv.NewNonce()))
+		w.WhenIBuild("steps", onTheCoordinator("<coordinator>"))
+		w.ThenItSucceeds()
+		w.ThenItPrintsItsTrace()
+		w.ThenItWarnsNothing()
+		w.WhenIReadTheTrace("<printed trace>", onTheCoordinator("<coordinator>"))
+		w.ThenItSucceeds()
+		w.ThenTheTraceSpanSaysAtLeast("executor", `task "steps"`, traceArgs{"outcome": "building"})
+		w.ThenTheTraceSpanIsWithin("executor", `env(STEP="1")`, "executor", `task "steps"`)
+		w.ThenTheTraceHasNoSpan("executor", `env(STEP="40")`)
+		w.ThenTheTraceSpanSaysAtLeast("executor", "trace truncated", traceArgs{"dropped": aCount})
+		w.ThenTheTraceSpanIsOnTrack("executor", "trace truncated", `task "steps"`)
 	})
 }
 

@@ -24,6 +24,7 @@ func newOutputWorld(t *testing.T) *world {
 // TestOutput_ThatCantBeWrittenStopsTheCommand specifies that a command whose standard output can't be written stops,
 // and fails with the write's failure.
 func TestOutput_ThatCantBeWrittenStopsTheCommand(t *testing.T) {
+	parallelRule(t)
 	t.Run("A build whose progress can't be written stops, and says what it was writing", func(t *testing.T) {
 		w := newOutputWorld(t)
 		w.GivenBuildahCanBuildHere()

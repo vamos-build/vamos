@@ -36,6 +36,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/random"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/opencontainers/go-digest"
+	"github.com/vamos-build/vamos/internal/cli"
 	"github.com/vamos-build/vamos/internal/testenv"
 	"go.podman.io/image/v5/docker/reference"
 )
@@ -95,8 +96,9 @@ func (w *world) GivenTheBuildFileChanges(old, new string) {
 }
 
 // GivenThePackageDeclares appends build, dedented, to the BUILD file of the package in dir, "." for the project's,
-// in which <registry> stands for the host of the scenario's registry, and <outside> for the folder of
-// GivenAFileOutsideTheProjectHolds, which comes first.
+// in which <registry> stands for the host of the scenario's registry, <barrier> for the URL of
+// GivenABarrierThatOpensOnceReachedBy's barrier, and <outside> for the folder of GivenAFileOutsideTheProjectHolds,
+// which come first.
 // A blank build appends nothing, though the package then has its BUILD file, empty if it had none.
 func (w *world) GivenThePackageDeclares(dir, build string) {
 	w.t.Helper()
@@ -105,7 +107,7 @@ func (w *world) GivenThePackageDeclares(dir, build string) {
 		w.files[file] += ""
 		return
 	}
-	w.files[file] += dedent(w.atOutside(w.atRegistry(build)))
+	w.files[file] += dedent(w.atOutside(w.atRegistry(w.atBarrier(build))))
 }
 
 // GivenIWorkIn makes later commands run in dir, within the project, "." for the project itself,
@@ -576,6 +578,23 @@ func (w *world) atHeldDigests(s string) string {
 // heldDigestPlaceholder is <digest of label>, which atHeldDigests replaces.
 var heldDigestPlaceholder = regexp.MustCompile(`<digest of ([^>]+)>`)
 
+// GivenTheRegistryHoldsBusybox pushes busybox to the image name image, in which <registry> stands for the scenario's
+// registry, having pulled it, through the Docker Hub mirror where testenv.Main runs one, into stores of its own,
+// which neither this scenario nor any other uses: a runnable image, which a scenario on stores of its own pulls from
+// its own registry, rather than Docker Hub, whose pulls are limited, so that its steps can run commands.
+func (w *world) GivenTheRegistryHoldsBusybox(image string) {
+	w.t.Helper()
+	fsys := testenv.Project(w.t, files{"BUILD": testenv.PullBusybox + `layer(name="runnable", base="busybox")` + "\n"})
+	cmd := cli.NewRootCommand(cli.Config{Fs: fsys, Store: &testenv.PrivateStores(w.t).Options})
+	cmd.SetArgs([]string{"-C", testenv.ProjectDir, "push", "runnable", w.atRegistry(image)})
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	if err := cmd.ExecuteContext(w.t.Context()); err != nil {
+		w.t.Fatalf("pushing busybox to %s: %v\n%s", image, err, out.String())
+	}
+}
+
 // GivenTheRegistryHoldsAnImage pushes to the image name image, in which <registry> stands for the scenario's
 // registry, an image of random files for platform alone, rather than an index, which label names, with the platform.
 func (w *world) GivenTheRegistryHoldsAnImage(image, label, platform string) {
@@ -679,9 +698,13 @@ func (w *world) GivenTheRegistryStops() {
 
 // GivenStoresOfTheScenariosOwn gives the scenario a container store and build cache of its own, for the rest of the
 // scenario, rather than the suite's, for a scenario that destroys what they hold, as prune does.
+// A scenario of a rule that runs in parallel has stores of its own already, which it keeps.
 // It stops the scenario if a command has run already, on the suite's stores.
 func (w *world) GivenStoresOfTheScenariosOwn() {
 	w.t.Helper()
+	if w.ownStores {
+		return
+	}
 	if w.ran {
 		w.t.Fatal("a command has run already, on the suite's stores")
 	}

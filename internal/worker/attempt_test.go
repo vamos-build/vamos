@@ -213,9 +213,10 @@ func (c countingWriter) Write(p []byte) (int, error) {
 }
 
 // TestRelayBoundsEvents checks that output too large for one request crosses in batches the transport takes, in
-// order, and that a coordinator that doesn't take events stops the subprocess's output from being read, rather than
-// the worker holding it all.
+// order, each carrying the attempt's estimate of the clock's offset, and that a coordinator that doesn't take events
+// stops the subprocess's output from being read, rather than the worker holding it all.
 func TestRelayBoundsEvents(t *testing.T) {
+	clock := &tracing.Offset{Offset: 3 * time.Second, Uncertainty: time.Millisecond}
 	var mu sync.Mutex
 	var got bytes.Buffer
 	var largest int
@@ -226,6 +227,9 @@ func TestRelayBoundsEvents(t *testing.T) {
 		var events remote.AttemptEvents
 		if err := json.Unmarshal(body, &events); err != nil {
 			t.Errorf("decoding a batch: %v", err)
+		}
+		if events.Clock == nil || *events.Clock != *clock {
+			t.Errorf("a batch carries the clock %+v, want %+v", events.Clock, *clock)
 		}
 		mu.Lock()
 		largest = max(largest, len(body))
@@ -263,7 +267,7 @@ func TestRelayBoundsEvents(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		_, _ = w.relay(t.Context(), "a", r) // the test checks what reached the coordinator
+		_, _ = w.relay(t.Context(), "a", clock, r) // the test checks what reached the coordinator
 	}()
 	time.Sleep(time.Second)
 	// What was read is what waits, a line over the bound at most, and one more line in the scanner.

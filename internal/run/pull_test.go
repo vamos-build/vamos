@@ -9,8 +9,10 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/containerd/platforms"
+	"github.com/docker/distribution/registry/api/errcode"
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/go-containerregistry/pkg/registry"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
@@ -23,6 +25,9 @@ import (
 	"github.com/vamos-build/vamos/internal/cache"
 	"github.com/vamos-build/vamos/internal/sched"
 	"github.com/vamos-build/vamos/internal/testenv"
+	"github.com/vamos-build/vamos/internal/transfer"
+	"go.podman.io/common/pkg/retry"
+	"go.podman.io/image/v5/docker"
 	"go.podman.io/image/v5/docker/reference"
 	"go.podman.io/image/v5/types"
 	"go.podman.io/storage"
@@ -86,6 +91,99 @@ func TestPullerPinnedIndex(t *testing.T) {
 	if want := "the registry gave manifest " + second.String() + " for " + first.String(); err == nil ||
 		err.Error() != want {
 		t.Errorf("pinned resolve from a lying registry = %v, want %q", err, want)
+	}
+}
+
+// TestPullerRetriesTheManifest checks that a pinned resolve whose tag isn't recorded, as in a fresh build cache, asks
+// the registry for its index again after a failure that may not happen again, 503 Service Unavailable, rather than
+// failing the build, but not after a refusal for too many requests, which containers/image has retried already.
+func TestPullerRetriesTheManifest(t *testing.T) {
+	old := transfer.RetryLimits
+	transfer.RetryLimits = func() (*retry.Options, error) {
+		return &retry.Options{MaxRetry: 2, Delay: time.Millisecond}, nil
+	}
+	t.Cleanup(func() { transfer.RetryLimits = old })
+	reg := registry.New(registry.Logger(log.New(io.Discard, "", 0)))
+	var drops atomic.Int64  // manifest requests still to refuse as unavailable
+	var limited atomic.Bool // whether to refuse manifest requests as too many, to be asked again at once
+	var asked atomic.Int64  // manifest requests
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/manifests/") {
+			asked.Add(1)
+		}
+		if strings.Contains(r.URL.Path, "/manifests/") && limited.Load() {
+			// As Docker Hub refuses, with the registry API's error code, which retry.IsErrorRetryable retries.
+			w.Header().Set("Retry-After", "0")
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"errors":[{"code":"TOOMANYREQUESTS","message":"pull rate limit"}]}`))
+			return
+		}
+		if strings.Contains(r.URL.Path, "/manifests/") && drops.Add(-1) >= 0 {
+			http.Error(w, "unavailable for now", http.StatusServiceUnavailable)
+			return
+		}
+		reg.ServeHTTP(w, r)
+	}))
+	t.Cleanup(server.Close)
+	image := strings.TrimPrefix(server.URL, "http://") + "/team/base:v1"
+	img, err := random.Image(64, 1)
+	testenv.Must(t, err)
+	idx := mutate.AppendManifests(empty.Index, mutate.IndexAddendum{
+		Add:      img,
+		Platform: &v1.Platform{OS: "linux", Architecture: "amd64"},
+	})
+	ref, err := name.ParseReference(image, name.Insecure)
+	testenv.Must(t, err)
+	testenv.Must(t, remote.WriteIndex(ref, idx))
+	index, err := idx.Digest()
+	testenv.Must(t, err)
+	named, err := reference.ParseNamed(image)
+	testenv.Must(t, err)
+	pl := &puller{systemContext: &types.SystemContext{DockerInsecureSkipTLSVerify: types.OptionalBoolTrue}}
+	platform := imgspecv1.Platform{OS: "linux", Architecture: "amd64"}
+	pinned := digest.Digest(index.String())
+
+	drops.Store(1)
+	if _, _, err := pl.instance(t.Context(), named.(reference.NamedTagged), platform, pinned, nil); err != nil {
+		t.Errorf("a pinned resolve whose first request for the index was refused = %v, want it asked again", err)
+	}
+	drops.Store(3) // the first try and both retries
+	asked.Store(0)
+	if _, _, err := pl.instance(t.Context(), named.(reference.NamedTagged), platform, pinned, nil); err == nil {
+		t.Errorf("a pinned resolve whose every request for the index was refused succeeded, want it to fail")
+	}
+	if n := asked.Load(); n != 3 {
+		t.Errorf("the index was asked for %d times, want 3: once and twice again", n)
+	}
+
+	// A registry that refuses too many requests is asked again only as containers/image does, by itself, since each
+	// request more spends what is left of an allowance such as Docker Hub's.
+	limited.Store(true)
+	asked.Store(0)
+	digested, err := reference.WithDigest(reference.TrimNamed(named), pinned)
+	testenv.Must(t, err)
+	direct, err := docker.NewReference(digested)
+	testenv.Must(t, err)
+	if src, err := direct.NewImageSource(t.Context(), pl.systemContext); err == nil {
+		src.Close()
+		t.Fatal("a registry refusing too many requests gave the index; want it refused")
+	} else if ec := errcode.ErrorCoder(nil); !errors.As(err, &ec) ||
+		ec.ErrorCode() != errcode.ErrorCodeTooManyRequests {
+		t.Fatalf("asking a registry refusing too many requests = %v; want it refused for that", err)
+	}
+	byItself := asked.Load() // how often containers/image asks, refused
+	if byItself < 2 {
+		t.Fatalf("containers/image asked a registry refusing too many requests %d times; want it to ask again",
+			byItself)
+	}
+	asked.Store(0)
+	if _, _, err := pl.instance(t.Context(), named.(reference.NamedTagged), platform, pinned, nil); err == nil {
+		t.Errorf("a pinned resolve refused for too many requests succeeded, want it to fail")
+	}
+	if n := asked.Load(); n != byItself {
+		t.Errorf("a registry refusing too many requests was asked for the index %d times, want %d, as "+
+			"containers/image asks by itself", n, byItself)
 	}
 }
 

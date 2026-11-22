@@ -64,6 +64,7 @@ func aLayerOnScratch(nonce string) string {
 // TestCache_UnchangedInputsAreReused specifies that vamos reuses target results while their effective inputs are
 // unchanged, and that the CLI reports reuse and replays a cached target's previous output.
 func TestCache_UnchangedInputsAreReused(t *testing.T) {
+	parallelRule(t)
 	t.Run("A second save reuses every target, replays its output and saves the same image", func(t *testing.T) {
 		w := newCacheWorld(t)
 		nonce := testenv.NewNonce()
@@ -156,6 +157,7 @@ func TestCache_UnchangedInputsAreReused(t *testing.T) {
 // TestCache_SharedByBuildAndDelivery specifies that delivery commands use the same cache as build,
 // which builds the targets it names and those they use.
 func TestCache_SharedByBuildAndDelivery(t *testing.T) {
+	parallelRule(t)
 	t.Run("Build builds only the targets named and those they use, for later commands to reuse", func(t *testing.T) {
 		w := newCacheWorld(t)
 		w.GivenTheBuildFileDeclares(depsSizeAndApp(testenv.NewNonce()))
@@ -184,6 +186,7 @@ func TestCache_SharedByBuildAndDelivery(t *testing.T) {
 // TestCache_ChangedInputsRunAgain specifies that a target runs again when its inputs change:
 // its base image, configured steps and arguments, and the contents, modes and links of the files it adds.
 func TestCache_ChangedInputsRunAgain(t *testing.T) {
+	parallelRule(t)
 	for _, example := range []struct {
 		name     string
 		holds    files    // the project's files then
@@ -325,6 +328,7 @@ func TestCache_ChangedInputsRunAgain(t *testing.T) {
 // TestCache_NamesAndModificationTimesAreNotInputs specifies that target names and source modification times
 // are not inputs: touching a file or renaming a target does not force it to run again.
 func TestCache_NamesAndModificationTimesAreNotInputs(t *testing.T) {
+	parallelRule(t)
 	t.Run("A renamed target is reused", func(t *testing.T) {
 		w := newCacheWorld(t)
 		w.GivenTheBuildFileDeclares(depsSizeAndApp(testenv.NewNonce()))
@@ -356,6 +360,7 @@ func TestCache_NamesAndModificationTimesAreNotInputs(t *testing.T) {
 // TestCache_ConsumersRunAgainWhenWhatTheyConsumeChanges specifies that consumers run again
 // when the result they consume changes, and only then.
 func TestCache_ConsumersRunAgainWhenWhatTheyConsumeChanges(t *testing.T) {
+	parallelRule(t)
 	t.Run("A task that makes other files runs the layers adding them again", func(t *testing.T) {
 		w := newCacheWorld(t)
 		w.GivenTheBuildFileDeclares(depsSizeAndApp(testenv.NewNonce()))
@@ -401,6 +406,7 @@ func TestCache_ConsumersRunAgainWhenWhatTheyConsumeChanges(t *testing.T) {
 // TestCache_FailuresAreNotCached specifies that a failed target does not produce a successful reusable result,
 // but dependencies that succeeded before its failure remain cached.
 func TestCache_FailuresAreNotCached(t *testing.T) {
+	parallelRule(t)
 	t.Run("A failed target runs again, and the targets before it are reused", func(t *testing.T) {
 		w := newCacheWorld(t)
 		w.GivenTheBuildFileDeclares(fmt.Sprintf(`
@@ -423,6 +429,7 @@ func TestCache_FailuresAreNotCached(t *testing.T) {
 // reuses their dependencies when possible, and replaces their cached results; a pull it names it doesn't resolve
 // again, saying that vamos update refreshes pulls.
 func TestCache_RebuildRefreshesTheNamedTargets(t *testing.T) {
+	parallelRule(t)
 	t.Run("A rebuilt target replaces its cached result, and the targets it uses are reused", func(t *testing.T) {
 		w := newCacheWorld(t)
 		w.GivenTheBuildFileDeclares(fmt.Sprintf(`
@@ -467,6 +474,7 @@ func TestCache_RebuildRefreshesTheNamedTargets(t *testing.T) {
 // TestCache_TimestampsComeFromBasesAndTasks specifies that the files a target adds, and the resulting image,
 // use the latest timestamp from its base and any tasks whose files it adds.
 func TestCache_TimestampsComeFromBasesAndTasks(t *testing.T) {
+	parallelRule(t)
 	t.Run("A layer's files and image take the time its pulled base was created", func(t *testing.T) {
 		w := newCacheWorld(t)
 		w.GivenTheBuildFileDeclares(depsSizeAndApp(testenv.NewNonce()))
@@ -483,6 +491,7 @@ func TestCache_TimestampsComeFromBasesAndTasks(t *testing.T) {
 // TestCache_AddedTasksTimestampIsAnInput specifies that an added task's timestamp is an input of the target
 // that adds its files, even when their contents are unchanged.
 func TestCache_AddedTasksTimestampIsAnInput(t *testing.T) {
+	parallelRule(t)
 	t.Run("A task rebuilt with a later timestamp runs the layers adding its files again, at that time",
 		func(t *testing.T) {
 			w := newCacheWorld(t)
@@ -505,6 +514,7 @@ func TestCache_AddedTasksTimestampIsAnInput(t *testing.T) {
 // TestCache_TimestampIsAMinimumForTargetsThatRun specifies that --timestamp sets a minimum time for newly executed
 // targets, and is not a cache input, so a cached result keeps its previous timestamp.
 func TestCache_TimestampIsAMinimumForTargetsThatRun(t *testing.T) {
+	parallelRule(t)
 	t.Run("Targets that run are stamped, and reused with that stamp whatever the next", func(t *testing.T) {
 		w := newCacheWorld(t)
 		stamp := time.Date(2030, 1, 2, 3, 4, 5, 0, time.UTC)
@@ -542,6 +552,7 @@ func TestCache_TimestampIsAMinimumForTargetsThatRun(t *testing.T) {
 // that a glob captured, which only the client can capture again, fail the build, saying to run it again.
 // Scenarios damage the build cache, so each has stores of its own.
 func TestCache_ResultsThatCantBeUsedAreBuiltAgain(t *testing.T) {
+	parallelRule(t)
 	t.Run("A task whose cached files are corrupt is built again, and what needed them tried again", func(t *testing.T) {
 		w := newCacheWorld(t)
 		w.GivenStoresOfTheScenariosOwn()
@@ -670,6 +681,7 @@ func TestCache_ResultsThatCantBeUsedAreBuiltAgain(t *testing.T) {
 // only if what has the name is that image, with the layers its config lists.
 // Scenarios change the container store, so each has stores of its own.
 func TestCache_CachedLayersAreFoundByTheirImageIDs(t *testing.T) {
+	parallelRule(t)
 	t.Run("A layer whose name another image has taken is built again, and gets its name back", func(t *testing.T) {
 		w := newCacheWorld(t)
 		w.GivenStoresOfTheScenariosOwn()
