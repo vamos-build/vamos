@@ -506,14 +506,30 @@ func (w *world) GivenTwoClientsBuiltAtOnceOnTheCoordinator(target string, first,
 // run it are all running at the moment it opens.
 func (w *world) GivenABarrierThatOpensOnceReachedBy(n int) {
 	w.t.Helper()
+	w.startBarrier(n)
+}
+
+// GivenABarrier starts a server, at the URL that <barrier> stands for in BUILD text, that holds each request it is
+// sent until a later step opens it, as GivenTheBarrierOpensOnceTheOtherClientIsJoined does, then answers them all, and
+// every later one at once: a step that fetches it, with busybox's wget, runs until then, however long that takes,
+// rather than for a time that must be long enough.
+func (w *world) GivenABarrier() {
+	w.t.Helper()
+	w.startBarrier(0)
+}
+
+// startBarrier starts the scenario's barrier, which opens once want requests have reached it, or, for want 0, once
+// a step opens it.
+func (w *world) startBarrier(want int) {
+	w.t.Helper()
 	if w.barrier != nil {
 		w.t.Fatal("the scenario has a barrier already")
 	}
-	b := &barrier{want: n, open: make(chan struct{}), ended: make(chan struct{})}
+	b := &barrier{want: want, open: make(chan struct{}), ended: make(chan struct{})}
 	server := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
 		b.mu.Lock()
 		if b.reached++; b.reached == b.want {
-			close(b.open)
+			b.opens()
 		}
 		b.mu.Unlock()
 		select {
@@ -529,15 +545,82 @@ func (w *world) GivenABarrierThatOpensOnceReachedBy(n int) {
 	w.barrier = b
 }
 
-// barrier is GivenABarrierThatOpensOnceReachedBy's server.
+// GivenTheBarrierOpensOnceTheOtherClientIsJoined opens GivenABarrier's barrier once another build has joined an
+// attempt of the build of GivenAnotherClientBuildsOnTheCoordinator, as its events say: an attempt that waits at it
+// runs until a build has joined it.
+func (w *world) GivenTheBarrierOpensOnceTheOtherClientIsJoined() {
+	w.t.Helper()
+	job, timeline := w.otherJob, w.watchedJobs()
+	w.openBarrierOnce("another build joined the other client's attempt", func() bool {
+		return timeline.joinedBy(job)
+	})
+}
+
+// GivenTheBarrierOpensOnceTheOtherClientEnds opens GivenABarrier's barrier once the build of
+// GivenAnotherClientBuildsOnTheCoordinator has ended: an attempt that waits at it is still running when that build
+// leaves it.
+func (w *world) GivenTheBarrierOpensOnceTheOtherClientEnds() {
+	w.t.Helper()
+	other := w.otherClient()
+	w.openBarrierOnce("the other client's build ended", func() bool {
+		select {
+		case <-other.done:
+			return true
+		default:
+			return false
+		}
+	})
+}
+
+// openBarrierOnce opens GivenABarrier's barrier once happened returns true, checking every 10ms until the scenario
+// ends; what describes the event. After a minute it opens the barrier all the same, so that the steps waiting at it
+// end, and ThenTheBarrierOpened then says what never happened.
+func (w *world) openBarrierOnce(what string, happened func() bool) {
+	w.t.Helper()
+	b := w.barrier
+	if b == nil || b.want != 0 {
+		w.t.Fatal("no GivenABarrier step started a barrier for a step to open")
+	}
+	go func() {
+		deadline := time.After(time.Minute)
+		for !happened() {
+			select {
+			case <-b.ended:
+				return
+			case <-deadline:
+				b.mu.Lock()
+				b.missed = what
+				b.opens()
+				b.mu.Unlock()
+				return
+			case <-time.After(10 * time.Millisecond):
+			}
+		}
+		b.mu.Lock()
+		b.opens()
+		b.mu.Unlock()
+	}()
+}
+
+// barrier is the server of GivenABarrierThatOpensOnceReachedBy or GivenABarrier.
 type barrier struct {
 	url   string
-	want  int
-	open  chan struct{} // closed once want requests have reached it
+	want  int           // the requests that open it, or 0 for one that a step opens
+	open  chan struct{} // closed once it opens
 	ended chan struct{} // closed as the scenario ends
 
 	mu      sync.Mutex
 	reached int
+	opened  bool
+	missed  string // what openBarrierOnce waited a minute for in vain, opening it all the same
+}
+
+// opens opens the barrier, if it isn't open already; b.mu is held.
+func (b *barrier) opens() {
+	if !b.opened {
+		b.opened = true
+		close(b.open)
+	}
 }
 
 // atBarrier returns s with each <barrier> replaced by the URL of the scenario's barrier.
@@ -552,18 +635,24 @@ func (w *world) atBarrier(s string) string {
 	return strings.ReplaceAll(s, "<barrier>", w.barrier.url)
 }
 
-// ThenTheBarrierOpened checks that the scenario's barrier opened: that as many steps as it waits for reached it.
+// ThenTheBarrierOpened checks that the scenario's barrier opened: that as many steps as it waits for reached it, or,
+// for GivenABarrier's, that what a step opens it on happened.
 func (w *world) ThenTheBarrierOpened() {
 	w.t.Helper()
 	if w.barrier == nil {
 		w.t.Fatal("no Given step started a barrier")
 	}
-	select {
-	case <-w.barrier.open:
+	b := w.barrier
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	switch {
+	case b.missed != "":
+		w.t.Errorf("the barrier opened after a minute, when it was to open once %s", b.missed)
+	case b.opened:
+	case b.want == 0:
+		w.t.Error("the barrier never opened")
 	default:
-		w.barrier.mu.Lock()
-		defer w.barrier.mu.Unlock()
-		w.t.Errorf("%d steps reached the barrier, which waits for %d", w.barrier.reached, w.barrier.want)
+		w.t.Errorf("%d steps reached the barrier, which waits for %d", b.reached, b.want)
 	}
 }
 

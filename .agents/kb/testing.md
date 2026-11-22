@@ -14,7 +14,7 @@ govulncheck fails only for a known vulnerability that vamos's code can reach;
 fix one by updating the module, under the update-dependencies skill's policy.
 
 For timeout planning, previous devcontainer runs with a warm Go build cache took about 15 seconds for the short suite
-and about two minutes for the full suite, nearly all of it `internal/features`, whose scenarios run one at a time.
+and about 100 seconds for the full suite, nearly all of it `internal/features`, whose scenarios run one at a time.
 These are approximate timings, not deadlines: allow extra time for cold Go compilation, image pulls and emulation.
 
 Run the full suite before finishing changes to building, committing or destinations.
@@ -171,7 +171,11 @@ see a glob's files in a layer that adds them, which the scenario declares, such 
 `layer(name="app", base="busybox", steps=[add("code", "/app")])`.
 For attempts that must run at once, `GivenABarrierThatOpensOnceReachedBy(n)` starts a barrier whose URL
 `<barrier>` stands for in BUILD text; a BUILD step that runs busybox's `wget` on it waits until n requests arrive.
-`ThenTheBarrierOpened` checks that the barrier opened, rather than relying on sleeps to make attempts overlap.
+For a step that must still be running when something else happens, such as another build joining its attempt,
+`GivenABarrier` starts one that holds until a later step opens it, as `GivenTheBarrierOpensOnceTheOtherClientIsJoined`
+does once that build has joined.
+`ThenTheBarrierOpened` checks that the barrier opened, or that what opens it happened,
+rather than relying on sleeps to make attempts overlap or to keep a step running.
 A scenario shows its input, its BUILD file and project, in its own text or in a fixture of its feature:
 a constant, such as `theApp`, or a function of the values that vary, such as `depsSizeAndApp(nonce)`,
 that returns BUILD text, or the files of a project, such as `locales`,

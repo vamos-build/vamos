@@ -19,10 +19,10 @@ func newTraceWorld(t *testing.T) *world {
 	return newBuildingWorld(t)
 }
 
-// slowTaskSteps returns the names of the steps of aSlowTask(nonce)'s task: setting the nonce, then sleeping six
-// seconds, long enough for another build to join it.
+// slowTaskSteps returns the names of the steps of aSlowTask(nonce)'s task: setting the nonce, then waiting at the
+// scenario's barrier, which GivenABarrier starts, until a step opens it, as once another build has joined the task.
 func slowTaskSteps(nonce string) []string {
-	return []string{`env(NONCE="` + nonce + `")`, `run(["sleep", "6"])`}
+	return []string{`env(NONCE="` + nonce + `")`, `run(["wget", "-q", "-O", "/dev/null", "<barrier>"])`}
 }
 
 // aSlowTask declares the task "slow", on busybox, whose steps are slowTaskSteps(nonce).
@@ -669,13 +669,16 @@ func TestTrace_AnAttemptsTraceIsKeptWithItsResult(t *testing.T) {
 		w.GivenARegistry()
 		w.GivenACoordinatorWithAWorker()
 		w.GivenAProjectThatPullsBusybox()
-		w.GivenTheBuildFileDeclares(`task(name="slow", base="busybox", steps=[env(NONCE="` + testenv.NewNonce() +
-			`"), run(["sleep", "6"])])`)
+		w.GivenABarrier()
+		nonce := testenv.NewNonce()
+		w.GivenTheBuildFileDeclares(aSlowTask(nonce))
 		w.GivenAnotherClientBuildsOnTheCoordinator("slow", onTheCoordinator("<coordinator>"))
 		w.GivenTheOtherClientIsBuildingIt()
+		w.GivenTheBarrierOpensOnceTheOtherClientIsJoined()
 		w.WhenIBuild("slow", onTheCoordinator("<coordinator>"), traced())
 		w.ThenItSucceeds()
-		w.ThenTheTraceSpanIsOnTrack("worker", `run(["sleep", "6"])`, `task "slow" (shared)`)
+		w.ThenTheBarrierOpened()
+		w.ThenTheTraceSpanIsOnTrack("worker", slowTaskSteps(nonce)[1], `task "slow" (shared)`)
 	})
 
 	t.Run("Two builds that share an attempt both show its steps", func(t *testing.T) {
@@ -683,13 +686,16 @@ func TestTrace_AnAttemptsTraceIsKeptWithItsResult(t *testing.T) {
 		w.GivenARegistry()
 		w.GivenACoordinatorWithAWorker()
 		w.GivenAProjectThatPullsBusybox()
+		w.GivenABarrier()
 		nonce := testenv.NewNonce()
 		w.GivenTheBuildFileDeclares(aSlowTask(nonce))
 		steps := slowTaskSteps(nonce)
 		w.GivenAnotherClientBuildsOnTheCoordinator("slow", onTheCoordinator("<coordinator>"))
 		w.GivenTheOtherClientIsBuildingIt()
+		w.GivenTheBarrierOpensOnceTheOtherClientIsJoined()
 		w.WhenIBuild("slow", onTheCoordinator("<coordinator>"), traced())
 		w.ThenItSucceeds()
+		w.ThenTheBarrierOpened()
 		for _, step := range steps {
 			w.ThenTheTraceSpanIsOnTrack("worker", step, `task "slow" (shared)`)
 		}
@@ -709,14 +715,17 @@ func TestTrace_AnAttemptsTraceIsKeptWithItsResult(t *testing.T) {
 		w.GivenARegistry()
 		w.GivenACoordinatorWithAWorker()
 		w.GivenAProjectThatPullsBusybox()
+		w.GivenABarrier()
 		nonce := testenv.NewNonce()
 		w.GivenTheBuildFileDeclares(aSlowTask(nonce))
 		steps := slowTaskSteps(nonce)
 		w.GivenAnotherClientBuildsOnTheCoordinator("slow", onTheCoordinator("<coordinator>"))
 		w.GivenTheOtherClientIsBuildingIt()
 		w.GivenTheOtherClientIsInterruptedOnceJoined()
+		w.GivenTheBarrierOpensOnceTheOtherClientEnds()
 		w.WhenIBuild("slow", onTheCoordinator("<coordinator>"), traced())
 		w.ThenItSucceeds()
+		w.ThenTheBarrierOpened()
 		w.ThenTheOtherClientIsInterrupted()
 		for _, step := range steps {
 			w.ThenTheTraceSpanIsOnTrack("worker", step, `task "slow" (shared)`)

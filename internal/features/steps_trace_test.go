@@ -203,10 +203,11 @@ func (w *world) ThenEverySpanEndsBeforeAnyStarts(process, first, then string) {
 	}
 }
 
-// ThenTheTraceSpanIsOnTrack checks that the span of process that name names is on the track named track.
+// ThenTheTraceSpanIsOnTrack checks that the span of process that name names is on the track named track, in both of
+// which placeholders stand for what they name in the scenario, as in the command lines that steps run.
 func (w *world) ThenTheTraceSpanIsOnTrack(process, name, track string) {
 	w.t.Helper()
-	if s := w.span(process, name); s.track != track {
+	if s, track := w.span(process, name), w.atPlaceholders(track); s.track != track {
 		w.t.Errorf("%q is on the track %q, want %q", s.Name, s.track, track)
 	}
 }
