@@ -324,12 +324,21 @@ A killed attempt reports nothing, so its try has no usage. An older worker's rep
 
 ### TRACEPARENT travels on each request
 
-The CLI reads `TRACEPARENT`, and `TRACESTATE` with it, when it opens a coordinator, and checks the traceparent with
-`propagation.TraceContext`: version `00`, the right length and non-zero IDs. A malformed value is warned about once and
-dropped, and an empty one is taken as unset. `GraphRequest`, `PushRequest`, `PublishRequest` and `ExportRequest` gain
-`Parent string` (JSON `traceparent`) and `State string` (`tracestate`), as metadata like `Workspace`. The journal keeps
-them with the request. The coordinator checks them again, and ignores and logs one it can't parse, since a client may be
-older or another program. The local executor ignores them.
+The CLI reads `TRACEPARENT`, and `TRACESTATE` with it, as it sends its first job to a coordinator, so that a command
+that sends none, such as a prune, says nothing of them, and checks the traceparent with `propagation.TraceContext`:
+lower-case hex, non-zero IDs, and version `00`'s length, or a later version's fields as the W3C recommends reading them.
+A malformed traceparent, or a tracestate that `trace.ParseTraceState` refuses, is warned about once and dropped, and an
+empty one is taken as unset. `GraphRequest`, `PushRequest`, `PublishRequest` and `ExportRequest` gain `Parent string`
+(JSON `traceparent`) and `State string` (`tracestate`), as metadata like `Workspace`. The coordinator checks them again
+once it has checked the rest of the request and before it journals it, since a client may be older or another
+program, and drops one it can't parse, logging it, with the job and the value, if it exports traces; it keeps the
+traceparent written as version `00`, with the flags version `00` defines, so that the record holds only what a job
+joins, bounded, and reads again as itself; it checks and repairs a resumed record's as the build resumes, reporting it
+once if it exports traces, as one journaled by an older coordinator wasn't checked. The local executor ignores them.
+`telemetry.OuterTrace` is the one check both make. `coord.Config.Telemetry` is a function of the coordinator's
+instance that returns the bridge, rather than the bridge itself, since `coord.New` reads the instance from its state
+and resumes jobs, which export into the bridge, before it returns; `inv.coordinator` runs `telemetry.Setup` in it, and
+shuts down what it made whether or not `New` succeeds, while `New` releases the state's lock if the function fails.
 
 ### The Helm chart
 

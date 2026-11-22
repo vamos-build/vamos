@@ -73,26 +73,32 @@
 
 ## 4. TRACEPARENT
 
-- [ ] 4.1 Add `Parent` (`traceparent`) and `State` (`tracestate`) to `GraphRequest`, `PushRequest`, `PublishRequest` and
-  `ExportRequest`. Verify that they round-trip through `apitest.Contract` over `remote`, and that the coordinator's
-  journal keeps them across a restart, with a case in `restart_test.go`
-- [ ] 4.2 Have the CLI read `TRACEPARENT` and `TRACESTATE` when it builds on a coordinator, validate them with
+- [x] 4.1 Add `Parent` (`traceparent`) and `State` (`tracestate`) to `GraphRequest`, `PushRequest`, `PublishRequest` and
+  `ExportRequest`. Verify that executors accept graph, push and publish requests carrying them through
+  `apitest.Contract`, over `remote` and locally, that a
+  coordinator receives a build's over `remote` and its journal keeps them, bounded, across a restart, in `coord` tests,
+  and that the CLI sends a push's on both its jobs; the contract can't observe a field's arrival, and publish and
+  export requests carry them as builds do
+- [x] 4.2 Have the CLI read `TRACEPARENT` and `TRACESTATE` when it builds on a coordinator, validate them with
   `propagation.TraceContext`, warn once about a malformed one and drop it, take an empty one as unset, and send them on
   every job of the command. Verify with `cli` tests for valid, malformed, all-zero and empty values, and for a push
   sending them on both its jobs
-- [ ] 4.3 Have the coordinator check a request's `Parent` again, log and ignore one it can't parse, and pass it to
-  `Bridge.StartJob`. Verify with a `coord` test of a malformed parent from a raw request
-- [ ] 4.4 Document `TRACEPARENT` in the CLI reference's environment section and in the user docs on building on a
+- [x] 4.3 Have the coordinator check a request's `Parent` again, ignore one it can't parse, logging it if it exports
+  traces, as one that doesn't ignores them all, and pass it to
+  `Bridge.StartJob`. Verify with a `coord` test of a malformed parent from a raw request, and one of a build resumed
+  after a restart in the outer trace
+- [x] 4.4 Document `TRACEPARENT` in the CLI reference's environment section and in the user docs on building on a
   coordinator, and verify the docs' link check passes
 
 ## 5. Exporting a coordinator's traces
 
-- [ ] 5.1 Add `coord.Config.Telemetry` (a bridge, or nil for none), wrap each job's context with `Bridge.StartJob` in
-  `Coordinator.traced`, give `Sharing` the bridge as its `SpanSink`, and have `inv.coordinator` call
-  `telemetry.HandleErrors(inv.warn)` and `telemetry.Setup`, and shut it down after the API stops, but not with
-  `--local`. Verify with `coord/trace_test.go` cases with fake workers against `tracetest.InMemoryExporter`: one trace
-  per job, worker spans within it, a shared attempt exported once with the joiner's link, and a resumed job in the same
-  trace after a restart
+- [ ] 5.1 Add `coord.Config.Telemetry` (a function of the coordinator's instance that returns a bridge, or nil for none,
+  since `New` reads the instance from the state it resumes jobs from), wrap each job's context with `Bridge.StartJob` in
+  `Coordinator.traced`, give `Sharing` the bridge as its `SpanSink` (done with 4.3, which needs them), and have
+  `inv.coordinator` call `telemetry.HandleErrors(inv.warn)` and `telemetry.Setup`, and shut it down after the API stops,
+  but not with `--local`. Verify with `coord` tests with fake workers: one trace per job, a build's, a push's and a
+  publication's, each under the outer span it joined, worker spans within it, a shared attempt exported once with the
+  joiner's link, and a resumed job in the same trace after a restart
 - [ ] 5.2 Add `internal/features/steps_telemetry_test.go`: `GivenAnOTLPCollector`, an in-process OTLP/HTTP receiver that
   decodes `go.opentelemetry.io/proto/otlp`, a coordinator option for its environment, passed to `telemetry.Setup` as
   its `getenv` rather than set in the process's, so that rules using it can run in parallel, `GivenTRACEPARENT`, which

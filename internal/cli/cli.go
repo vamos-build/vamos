@@ -27,6 +27,7 @@ import (
 	"github.com/vamos-build/vamos/internal/remote"
 	"github.com/vamos-build/vamos/internal/run"
 	"github.com/vamos-build/vamos/internal/sched"
+	"github.com/vamos-build/vamos/internal/telemetry"
 	"github.com/vamos-build/vamos/internal/tracing"
 	"github.com/vamos-build/vamos/internal/worker"
 
@@ -139,6 +140,10 @@ type invocation struct {
 	generation     uint64               // the executor's cache generation, from its capabilities, read before capture
 	registries     []api.RegistryPolicy // how the executor reaches its results' registries, from its capabilities
 	workspace      string               // the workspace's name, as its WORKSPACE file declares it, once loaded
+	// traceParent and traceState are the outer trace that every job sent to a coordinator joins, from TRACEPARENT
+	// and TRACESTATE, read as the first job is; "" for none, and always locally.
+	traceParent, traceState string
+	tracedOuter             bool // TRACEPARENT was read, and warned about if it isn't one
 }
 
 // hold keeps a build open on its executor while the command delivers its result: a watch past the terminal
@@ -652,6 +657,27 @@ func (inv *invocation) executor() (executor, *types.SystemContext, error) {
 	return ex, sys, nil
 }
 
+// outerTrace returns the outer trace that a job sent to the executor joins, such as a CI pipeline's, from TRACEPARENT
+// and TRACESTATE, read as the first job is, and only if it goes to a coordinator, which alone exports traces: an empty
+// TRACEPARENT is none, and one that isn't a W3C traceparent, or a TRACESTATE that isn't a tracestate, is warned about
+// once and ignored, so that the build goes on in a trace of its own, or without the state.
+func (inv *invocation) outerTrace() (parent, state string) {
+	if inv.tracedOuter || inv.opts.coordinator == "" {
+		return inv.traceParent, inv.traceState
+	}
+	inv.tracedOuter = true
+	parentValue, stateValue := os.Getenv("TRACEPARENT"), os.Getenv("TRACESTATE")
+	parent, state, err := telemetry.OuterTrace(parentValue, stateValue)
+	switch {
+	case errors.Is(err, telemetry.ErrNotTraceparent):
+		inv.warn(fmt.Errorf("TRACEPARENT %s is %w and is ignored", telemetry.ShowTraceValue(parentValue), err))
+	case errors.Is(err, telemetry.ErrNotTracestate):
+		inv.warn(fmt.Errorf("TRACESTATE %s is %w and is ignored", telemetry.ShowTraceValue(stateValue), err))
+	}
+	inv.traceParent, inv.traceState = parent, state
+	return parent, state
+}
+
 // remoteExecutor is a coordinator as an executor: its content store is the coordinator's, over HTTP.
 type remoteExecutor struct {
 	*remote.Client
@@ -1104,6 +1130,7 @@ func (inv *invocation) runLoaded(
 		Generation: inv.generation, // read before the sources were captured: a prune since refuses the build
 		Secrets:    secrets,
 	}
+	runReq.Parent, runReq.State = inv.outerTrace()
 	events.graph = g
 	ctx, runSpan := tracing.Start(ctx, "run")
 	id, err := ex.Submit(ctx, api.Request{Graph: &runReq})
@@ -1136,8 +1163,9 @@ var closedChan = func() chan struct{} { ch := make(chan struct{}); close(ch); re
 func (inv *invocation) deliver(
 	ctx context.Context, ex api.Executor, res api.Result, events *eventPrinter,
 ) (api.Exported, error) {
+	parent, state := inv.outerTrace()
 	id, err := ex.Submit(ctx, api.Request{Export: &api.ExportRequest{
-		Result: res, Workspace: inv.workspace,
+		Result: res, Workspace: inv.workspace, Parent: parent, State: state,
 	}})
 	if err != nil {
 		return api.Exported{}, err
@@ -1204,8 +1232,9 @@ func (inv *invocation) buildImage(target string, dest destination) error {
 		if dest.push != "" {
 			// The executor pushes, with its own credentials and registry settings.
 			var id api.JobID
+			parent, state := inv.outerTrace()
 			id, err = ex.Submit(ctx, api.Request{Push: &api.PushRequest{
-				Result: res, Destination: dest.push, Workspace: inv.workspace,
+				Result: res, Destination: dest.push, Workspace: inv.workspace, Parent: parent, State: state,
 			}})
 			var outcome api.Outcome
 			if err == nil {
@@ -1320,6 +1349,7 @@ func (inv *invocation) publish(target string) error {
 func (inv *invocation) publishFromExecutor(ctx context.Context, ex api.Executor, plan *load.Publication,
 	results []api.Result, events *eventPrinter) ([]api.Destination, error) {
 	req := api.PublishRequest{Tags: inv.opts.tags, Workspace: inv.workspace}
+	req.Parent, req.State = inv.outerTrace()
 	for _, image := range plan.Images {
 		req.Images = append(req.Images, api.PublishImage{Result: results[image.Root], Repository: image.Repository})
 	}

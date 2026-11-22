@@ -84,6 +84,20 @@ const maxRecordSize = 16 << 20
 // errCorruptRecord says that a job's record holds what isn't a record, as a write cut short would leave it.
 var errCorruptRecord = errors.New("the record is corrupt")
 
+// outerTrace returns where the record's request keeps the outer trace its job joins, its traceparent and tracestate,
+// or nils for a prune's, which joins none.
+func (r *record) outerTrace() (parent, state *string) {
+	switch {
+	case r.Build != nil:
+		return &r.Build.Parent, &r.Build.State
+	case r.Push != nil:
+		return &r.Push.Parent, &r.Push.State
+	case r.Publish != nil:
+		return &r.Publish.Parent, &r.Publish.State
+	}
+	return nil, nil
+}
+
 // openJournal opens the journal in dir, making it if need be, and returns the coordinator's instance, made when the
 // journal was, and the jobs' records, the tombstones oldest first. A record that is corrupt is reported to warn and
 // removed, so that the job it was is forgotten, as a restart without a journal would forget it; one that can't be

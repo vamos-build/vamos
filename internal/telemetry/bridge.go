@@ -19,7 +19,6 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
-	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/vamos-build/vamos/internal/tracing"
@@ -300,8 +299,7 @@ func (b *Bridge) StartJob(ctx context.Context, info JobInfo) context.Context {
 	}
 	j := &job{info: info, span: jobSpanIDOf(b.instance, info.ID)}
 	if info.Parent != "" {
-		carrier := propagation.MapCarrier{"traceparent": info.Parent, "tracestate": info.State}
-		j.parent = trace.SpanContextFromContext(propagation.TraceContext{}.Extract(context.Background(), carrier))
+		j.parent = outerSpanContext(info.Parent, info.State)
 	}
 	j.trace = traceIDOf(b.instance, info.ID)
 	if j.parent.IsValid() {
@@ -314,6 +312,11 @@ func (b *Bridge) StartJob(ctx context.Context, info JobInfo) context.Context {
 	}
 	return tracing.WithExported(ctx, tracing.Exported{TraceID: j.trace.String(), SpanID: j.span.String(),
 		Sampled: j.sampled})
+}
+
+// Exports reports whether b exports traces, as one that Setup made for metrics alone doesn't.
+func (b *Bridge) Exports() bool {
+	return b != nil && b.tracer != nil
 }
 
 // jobOf returns the record that StartJob put in ctx, or nil.

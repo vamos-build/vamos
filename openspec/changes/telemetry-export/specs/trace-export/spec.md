@@ -225,6 +225,8 @@ default sampler. The coordinator SHALL keep it with the job, so that a resumed j
 
 A client building on a coordinator whose `TRACEPARENT` is not a valid W3C `traceparent` SHALL warn once, naming the
 variable and its value, and build as if it were unset. An empty `TRACEPARENT` SHALL be taken as unset, without warning.
+A `TRACESTATE` that isn't a W3C tracestate SHALL be warned about likewise, and the build SHALL join the outer trace
+without it.
 
 #### Scenario: A malformed TRACEPARENT starts a trace of the build's own
 
@@ -233,6 +235,15 @@ variable and its value, and build as if it were unset. An empty `TRACEPARENT` SH
 - **WHEN** I build `app` on the coordinator
 - **THEN** it succeeds, warning that `TRACEPARENT` `00-not-a-trace` is not a W3C traceparent and is ignored
 - **AND** the collector received the build's job span as the root of a trace of its own
+
+#### Scenario: A malformed TRACESTATE is dropped
+
+- **GIVEN** a coordinator with a worker, exporting traces to an OTLP collector
+- **AND** `TRACEPARENT` set to `00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01`
+- **AND** `TRACESTATE` set to `not a state`
+- **WHEN** I build `app` on the coordinator
+- **THEN** it succeeds, warning that `TRACESTATE` `not a state` is not a W3C tracestate and is ignored
+- **AND** the collector received the build's job span in trace `4bf92f3577b34da6a3ce929d0e0e4736`, with no tracestate
 
 #### Scenario: An all-zero trace ID is malformed
 

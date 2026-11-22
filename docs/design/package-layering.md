@@ -47,6 +47,8 @@ flowchart TB
 
     telemetry
 
+    cli --> telemetry
+    coord --> telemetry
     finish --> api
     finish --> transfer
     load --> graphpkg

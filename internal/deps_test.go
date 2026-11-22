@@ -78,7 +78,7 @@ func TestImportRules(t *testing.T) {
 		},
 		{
 			pkg:      "coord",
-			internal: []string{"api", "cache", "fileset", "graph", "remote", "sched", "tracing"},
+			internal: []string{"api", "cache", "fileset", "graph", "remote", "sched", "telemetry", "tracing"},
 			not:      []string{starlark, buildah, storage},
 		},
 		{

@@ -49,4 +49,5 @@
 // bridge.go converts spans, their attributes, as design.md's table names them, and their links;
 // BenchmarkConvertAttempt measures it.
 // setup.go builds the exporters and serves Prometheus; errors.go limits the error handler.
+// outer.go holds OuterTrace, the one check of an outer trace that the CLI and the coordinator make.
 package telemetry
