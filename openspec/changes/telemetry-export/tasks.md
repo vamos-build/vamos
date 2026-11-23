@@ -176,12 +176,12 @@
 
 ## 9. Integration
 
-- [ ] 9.1 Run `scripts/check full` as root in the devcontainer and verify that it passes, with the new features'
+- [x] 9.1 Run `scripts/check full` as root in the devcontainer and verify that it passes, with the new features'
   scenarios running rather than skipping (`VAMOS_REQUIRE_INTEGRATION=1`)
 - [ ] 9.2 Run the compose environment in `remote/compose.yaml` with an OpenTelemetry Collector added for the check
   only, build an example project with `TRACEPARENT` set, and verify that the collector logs the job's span under the
   given parent and the coordinator's metrics, including an exemplar
-- [ ] 9.3 Verify that `openspec validate telemetry-export --strict` passes
+- [x] 9.3 Verify that `openspec validate telemetry-export --strict` passes
 
 ## Workflow follow-up
 
