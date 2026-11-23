@@ -1048,17 +1048,37 @@ func (inv *invocation) worker() error {
 	if err != nil {
 		return err
 	}
+	// A worker exports its metrics over OTLP alone; its coordinator exports its spans. Its log is also its attempts'
+	// subprocesses' stderr: a file stays a file, which they inherit, as a wrapper would make it a pipe that a
+	// descendant could hold open, and an exporter's warning is one write to it; any other writer is copied to through
+	// a pipe already, and is locked, as a coordinator's streams are, so that the log and the warnings don't interleave.
+	if _, isFile := inv.stderr.(*os.File); !isFile {
+		inv.stdout, inv.stderr = lockStreams(inv.stdout, inv.stderr)
+	}
+	host, _ := os.Hostname()
+	tel, err := telemetry.Setup(telemetry.Config{Role: telemetry.Worker, Instance: host, Version: run.Version(),
+		Getenv: inv.app.getenv, Console: inv.stdout, Warn: func(msg string) { inv.warn(errors.New(msg)) }})
+	if err != nil {
+		return err
+	}
 	w, err := worker.New(worker.Config{
 		Coordinator: inv.opts.coordinator,
 		Store:       options,
 		Capacity:    inv.opts.capacity,
 		Log:         inv.stderr,
 		CgroupRoot:  inv.app.cgroups,
+		Meter:       tel.Meter,
 	})
 	if err != nil {
-		return err
+		return errors.Join(err, shutdownTelemetry(tel))
 	}
-	return w.Run(inv.ctx)
+	// The error handler is the process's: replaced only by a worker that has started and exports something.
+	if tel.ExportsMetrics() {
+		stderr := inv.stderr
+		telemetry.HandleErrors(func(msg string) { fmt.Fprintf(stderr, "vamos: warning: %s\n", msg) })
+	}
+	// Shut down once the worker has stopped, so that what it counted last is sent.
+	return errors.Join(w.Run(inv.ctx), shutdownTelemetry(tel))
 }
 
 // attempt runs one attempt as a worker's subprocess: the assignment comes on standard input, and what it does goes

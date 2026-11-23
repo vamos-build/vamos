@@ -193,7 +193,8 @@ of the attempt's run, which the stored trace shows; the coordinator SHALL export
 - **GIVEN** a coordinator with a worker, serving Prometheus metrics
 - **AND** a project whose layer `app` runs a step that keeps a CPU busy for one second
 - **WHEN** I build `app` on the coordinator with `--trace trace.json`, and scrape the metrics
-- **THEN** in `trace.json`, the span of `app`'s run says it used at least 0.5 seconds of CPU, and a peak of memory
+- **THEN** in `trace.json`, the span of `app`'s try says it used at least 0.5 seconds of CPU, and a peak of memory
+  where the worker's cgroups count memory
 - **AND** `vamos_attempts_cpu_seconds_count` for `kind` `layer` is 1
 
 ### Requirement: Workers export their own metrics over OTLP

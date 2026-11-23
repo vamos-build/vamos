@@ -1068,8 +1068,12 @@ func (w *world) serve(ctx context.Context, store *storage.StoreOptions, args ...
 		w.t.Fatal("serve runs a command that serves, but was given no command line")
 	}
 	s := &server{name: "vamos " + args[0], ended: make(chan struct{})}
+	getenv := w.telemetryGetenv
+	if args[0] == "worker" {
+		getenv = w.workerTelemetryGetenv
+	}
 	cmd := cli.NewRootCommand(cli.Config{Fs: afero.NewMemMapFs(), Store: store, // which reads no project
-		CgroupRoot: w.cgroupRoot, Getenv: w.telemetryGetenv})
+		CgroupRoot: w.cgroupRoot, Getenv: getenv})
 	cmd.SetOut(s)
 	cmd.SetErr(s)
 	cmd.SetArgs(args)

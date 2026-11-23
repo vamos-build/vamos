@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	"io"
 	"log"
 	"maps"
@@ -19,6 +21,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -231,6 +234,12 @@ func TestWorkerBuilds(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(statuses, ","), "building") {
 		t.Errorf("statuses = %q, want the layer building", statuses)
+	}
+	// The attempt's subprocess used CPU in its cgroup, which its try's span says, in seconds.
+	if ts := tries(t, f, outcome); len(ts) != 1 || ts[0].Args["cpu"] == nil {
+		t.Errorf("the build's tries = %+v; want one, saying the CPU it used", ts)
+	} else if cpu, ok := ts[0].Args["cpu"].(float64); !ok || cpu <= 0 {
+		t.Errorf("the try used %v seconds of CPU; want some", ts[0].Args["cpu"])
 	}
 	checker := &coord.Registry{Sys: mustSys(t)}
 	if problem, err := checker.CheckImage(t.Context(), res.Image, registry[0]); problem != nil || err != nil {
@@ -446,7 +455,8 @@ func TestWorkerFencesItself(t *testing.T) {
 	}))
 	t.Cleanup(proxy.Close)
 	f.server = proxy
-	w, stores := startWorker(t, f)
+	reader := sdkmetric.NewManualReader()
+	w, stores := startWorker(t, f, metered(t, reader))
 	ctx := t.Context()
 	platform := platforms.Format(run.HostPlatform)
 	g := &graph.Graph{Version: graph.Version, ExecPlatform: platform, Roots: []graph.Ref{1}, Nodes: []graph.Node{
@@ -507,6 +517,9 @@ func TestWorkerFencesItself(t *testing.T) {
 	testenv.Must(t, err)
 	if slices.Contains(leftover, attempt) {
 		t.Errorf("attempt %s's container is still in the store after the worker finished with it", attempt)
+	}
+	if n := counted(t, reader, "vamos.worker.fenced"); n != 1 {
+		t.Errorf("the worker counted %d fenced attempts; want the one", n)
 	}
 	testenv.Must(t, f.c.Cancel(ctx, id))
 }
@@ -577,6 +590,10 @@ func TestWorkerFailsUnreadableOutput(t *testing.T) {
 	testenv.Must(t, f.c.Release(t.Context(), id))
 	if outcome.Failure == nil || !strings.Contains(outcome.Failure.Message, "reading the attempt's output") {
 		t.Fatalf("outcome = %+v, want a failure to read the attempt's output", outcome.Failure)
+	}
+	// What it used is read before it is killed, which removes its cgroup.
+	if ts := tries(t, f, outcome); len(ts) != 1 || ts[0].Args["cpu"] == nil {
+		t.Errorf("the failed attempt's tries = %+v; want one, saying the CPU it used", ts)
 	}
 }
 
@@ -657,4 +674,238 @@ func TestPruneClearsRepository(t *testing.T) {
 	if problem, err := checker.CheckImage(ctx, res.Image, location); problem != nil || err != nil {
 		t.Errorf("the image after the rebuild = %v, %v; want it back at its location", problem, err)
 	}
+}
+
+// TestUsageOfABusyCgroup checks that an attempt's cgroup tells the CPU time its processes used, here two seconds of a
+// busy loop, of which at least half a second must have run, and their peak memory if it counts memory, or leaves it
+// out rather than reporting none.
+func TestUsageOfABusyCgroup(t *testing.T) {
+	c, err := newContainment(testenv.CgroupRoot(t))
+	if err != nil {
+		testenv.Unavailable(t, "a cgroup of the test's own", err)
+	}
+	cgroup, err := c.create("busy")
+	testenv.Must(t, err)
+	defer cgroup.Close()
+	defer func() { _ = c.kill("busy", killWait) }()
+	cmd := exec.Command("timeout", "2", "sh", "-c", "while :; do :; done") // twice the CPU it is asked for
+	cmd.SysProcAttr = &syscall.SysProcAttr{UseCgroupFD: true, CgroupFD: int(cgroup.Fd())}
+	_ = cmd.Run() // which timeout ends, failing
+	u := c.usage("busy")
+	if u == nil || u.CPUMicros == nil || *u.CPUMicros < 500_000 {
+		t.Fatalf("the cgroup's usage = %+v; want at least half a second of CPU", u)
+	}
+	_, err = os.Stat(filepath.Join(c.path("busy"), "memory.peak"))
+	switch counts := err == nil; {
+	case counts && (u.MemoryPeak == nil || *u.MemoryPeak <= 0):
+		t.Errorf("a cgroup that counts memory reported a peak of %v; want some", u.MemoryPeak)
+	case !counts && u.MemoryPeak != nil:
+		t.Errorf("a cgroup without memory.peak reported a peak of %d", *u.MemoryPeak)
+	}
+}
+
+// tries returns the try spans of the attempts that the job of outcome stored, from f's store.
+func tries(t *testing.T, f *fixture, outcome api.Outcome) []tracing.Span {
+	t.Helper()
+	if outcome.Trace == nil {
+		t.Fatalf("the outcome %+v names no trace", outcome)
+	}
+	data, err := f.m.Read(t.Context(), *outcome.Trace, tracing.MaxTraceSize)
+	testenv.Must(t, err)
+	manifest, err := api.DecodeJobTrace(data)
+	testenv.Must(t, err)
+	var found []tracing.Span
+	for _, e := range manifest.Entries {
+		if e.Trace == nil {
+			continue
+		}
+		data, err := f.m.Read(t.Context(), *e.Trace, tracing.MaxTraceSize)
+		testenv.Must(t, err)
+		a, err := tracing.DecodeAttempt(data)
+		testenv.Must(t, err)
+		for _, s := range a.Spans {
+			if s.Args[tracing.Role] == tracing.RoleTry {
+				found = append(found, s)
+			}
+		}
+	}
+	return found
+}
+
+// metered configures a worker to count into reader.
+func metered(t *testing.T, reader *sdkmetric.ManualReader) func(*Config) {
+	provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	t.Cleanup(func() { _ = provider.Shutdown(context.Background()) })
+	return func(cfg *Config) { cfg.Meter = provider }
+}
+
+// counted returns the value of the counter name in what reader collects now, failing t if it isn't exported.
+func counted(t *testing.T, reader *sdkmetric.ManualReader, name string) int64 {
+	t.Helper()
+	var rm metricdata.ResourceMetrics
+	testenv.Must(t, reader.Collect(t.Context(), &rm))
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			if sum, ok := m.Data.(metricdata.Sum[int64]); ok && m.Name == name && len(sum.DataPoints) == 1 {
+				return sum.DataPoints[0].Value
+			}
+		}
+	}
+	t.Fatalf("the worker exports no %s", name)
+	return 0
+}
+
+// TestWorkerCountsDroppedEvents checks that a worker counts the batches of an attempt's events the coordinator
+// didn't take, which it doesn't send again, and that its counters are exported from zero.
+func TestWorkerCountsDroppedEvents(t *testing.T) {
+	f := newFixture(t)
+	upstream := httputil.NewSingleHostReverseProxy(mustURL(t, f.server.URL))
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/v1/attempts/") &&
+			strings.HasSuffix(r.URL.Path, "/events") {
+			http.Error(w, "refused", http.StatusInternalServerError) // as a coordinator that fails to take them
+			return
+		}
+		upstream.ServeHTTP(w, r)
+	}))
+	t.Cleanup(proxy.Close)
+	f.server = proxy
+	reader := sdkmetric.NewManualReader()
+	startWorker(t, f, metered(t, reader))
+	for _, name := range []string{"vamos.worker.fenced", "vamos.worker.events.dropped", "vamos.worker.cgroups.stuck"} {
+		if n := counted(t, reader, name); n != 0 {
+			t.Errorf("before any attempt, %s = %d; want 0", name, n)
+		}
+	}
+	outcome, _ := runJob(t, f.c, layerGraph(t, f, "events dropped"))
+	if outcome.Failure != nil {
+		t.Fatalf("outcome = %+v; want the build to succeed without its events", outcome.Failure)
+	}
+	if n := counted(t, reader, "vamos.worker.events.dropped"); n < 1 {
+		t.Errorf("the worker counted %d dropped batches; want the attempt's", n)
+	}
+}
+
+// TestKillOfACgroupThatWontEmpty checks that a kill of a cgroup whose processes don't exit fails as errStuck, which
+// the worker counts once for the attempt, though both the cancellation's kill and the cleanup's find it so.
+func TestKillOfACgroupThatWontEmpty(t *testing.T) {
+	c := &containment{root: t.TempDir()} // a directory that acts as a cgroup that never empties
+	dir := c.path("stuck")
+	testenv.Must(t, os.MkdirAll(dir, 0o755))
+	testenv.Must(t, os.WriteFile(filepath.Join(dir, "cgroup.kill"), nil, 0o644))
+	testenv.Must(t, os.WriteFile(filepath.Join(dir, "cgroup.procs"), []byte("123\n"), 0o644))
+	reader := sdkmetric.NewManualReader()
+	cfg := Config{}
+	metered(t, reader)(&cfg)
+	m, err := newMetrics(cfg.Meter)
+	testenv.Must(t, err)
+	w := &Worker{contain: c, metrics: m}
+	kill := w.killer("stuck", 50*time.Millisecond)
+	for _, remove := range []bool{false, true} { // the cancellation's, and the cleanup's
+		if err := kill(remove); !errors.Is(err, errStuck) {
+			t.Errorf("the kill = %v; want %v", err, errStuck)
+		}
+	}
+	if n := counted(t, reader, "vamos.worker.cgroups.stuck"); n != 1 {
+		t.Errorf("the worker counted %d stuck cgroups; want the attempt's one", n)
+	}
+}
+
+// TestWorkerKillsAChildThatClosedItsOutput checks that an attempt whose subprocess closed its output without a report
+// and runs on is still killed as its job is cancelled, as the end of its output doesn't end the attempt.
+func TestWorkerKillsAChildThatClosedItsOutput(t *testing.T) {
+	f := newFixture(t)
+	w, _ := startWorker(t, f, func(cfg *Config) {
+		cfg.Child = func(ctx context.Context) *exec.Cmd {
+			return exec.CommandContext(ctx, "sh", "-c", "exec >&-; sleep 300")
+		}
+	})
+	req := layerGraph(t, f, "closed output")
+	ctx := t.Context()
+	id, err := f.c.Submit(ctx, api.Request{Graph: &req})
+	testenv.Must(t, err)
+	var attempt string
+	for deadline := time.Now().Add(time.Minute); attempt == ""; time.Sleep(20 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("the attempt never started")
+		}
+		if ids, _ := w.contain.leftovers(); len(ids) == 1 {
+			attempt = ids[0]
+		}
+	}
+	time.Sleep(200 * time.Millisecond) // so that its output has ended
+	testenv.Must(t, f.c.Cancel(ctx, id))
+	for start := time.Now(); ; time.Sleep(20 * time.Millisecond) {
+		if _, err := os.Stat(w.contain.path(attempt)); errors.Is(err, os.ErrNotExist) {
+			return
+		}
+		if time.Since(start) > 30*time.Second {
+			t.Fatalf("attempt %s still runs %s after its job was cancelled", attempt, time.Since(start))
+		}
+	}
+}
+
+// TestWorkerReportsNothingOfAFencedChildWithoutAReport checks that a fence that kills a subprocess that closed its
+// output without a report sends no report, of a failure the kill made, so that the coordinator, once the lease
+// expires, tries the attempt again rather than taking the failure as the attempt's; and that the fence is counted.
+func TestWorkerReportsNothingOfAFencedChildWithoutAReport(t *testing.T) {
+	f := newFixture(t)
+	var hanging atomic.Bool
+	var reports atomic.Int64
+	upstream := httputil.NewSingleHostReverseProxy(mustURL(t, f.server.URL))
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/report"):
+			reports.Add(1)
+		case hanging.Load() && strings.HasSuffix(r.URL.Path, "/heartbeat"):
+			_, _ = io.Copy(io.Discard, r.Body)
+			<-r.Context().Done()
+			return
+		}
+		upstream.ServeHTTP(w, r)
+	}))
+	t.Cleanup(proxy.Close)
+	f.server = proxy
+	reader := sdkmetric.NewManualReader()
+	w, _ := startWorker(t, f, metered(t, reader), func(cfg *Config) {
+		cfg.Child = func(ctx context.Context) *exec.Cmd {
+			return exec.CommandContext(ctx, "sh", "-c", "exec >&-; sleep 300")
+		}
+	})
+	req := layerGraph(t, f, "fenced without a report")
+	id, err := f.c.Submit(t.Context(), api.Request{Graph: &req})
+	testenv.Must(t, err)
+	t.Cleanup(func() { _ = f.c.Cancel(context.Background(), id) })
+	// Its lease is renewed, and its process runs, once its cgroup holds it, which closed its output at once.
+	var done <-chan struct{}
+	for start := time.Now(); done == nil; time.Sleep(20 * time.Millisecond) {
+		if time.Since(start) > time.Minute {
+			t.Fatal("the attempt's process never started")
+		}
+		w.mu.Lock()
+		for id, r := range w.attempts {
+			if w.contain.running(id) {
+				done = r.done
+			}
+		}
+		w.mu.Unlock()
+	}
+	hanging.Store(true)
+	select {
+	case <-done: // fenced, killed, and finished with, its report sent if it was to be
+	case <-time.After(2 * time.Minute):
+		t.Fatal("the worker never finished with the attempt")
+	}
+	if n := counted(t, reader, "vamos.worker.fenced"); n != 1 {
+		t.Errorf("the worker counted %d fences; want the one", n)
+	}
+	if n := reports.Load(); n != 0 {
+		t.Errorf("the worker sent %d reports of an attempt it fenced, which reported nothing; want none", n)
+	}
+}
+
+// running reports whether the attempt's cgroup holds processes.
+func (c *containment) running(id string) bool {
+	procs, err := os.ReadFile(filepath.Join(c.path(id), "cgroup.procs"))
+	return err == nil && strings.TrimSpace(string(procs)) != ""
 }

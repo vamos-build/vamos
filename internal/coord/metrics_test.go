@@ -3,6 +3,8 @@ package coord
 import (
 	"context"
 	"errors"
+	"github.com/vamos-build/vamos/internal/testenv"
+	"maps"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -406,4 +408,44 @@ func TestShutdownWithdrawsUncounted(t *testing.T) {
 	}
 	checkMeasured(t, reader, 0, "vamos.attempts.killed", reason(killWithdrawn))
 	checkMeasured(t, reader, 0, "vamos.attempts.killed", reason(killStale))
+}
+
+// TestTryUsage checks that the try of a report that says what its processes used carries it, the CPU in seconds and
+// the peak memory in bytes, and that one of an older worker, which says nothing of it, leaves both out.
+func TestTryUsage(t *testing.T) {
+	cpu, peak := int64(1_500_000), int64(64<<20)
+	for name, c := range map[string]struct {
+		usage *remote.Usage
+		want  map[string]any
+	}{
+		"reported": {&remote.Usage{CPUMicros: &cpu, MemoryPeak: &peak},
+			map[string]any{"cpu": 1.5, "memory peak": peak}},
+		"cpu alone":    {&remote.Usage{CPUMicros: &cpu}, map[string]any{"cpu": 1.5}},
+		"older worker": {nil, map[string]any{}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			p := newPool(Config{}.withDefaults(), "i", func() (uint64, error) { return 0, nil })
+			w := &worker{id: "w", info: remote.WorkerInfo{Platform: amd64, Capacity: 1}, running: 1}
+			p.workers[w.id] = w
+			recorder := tracing.NewRecorder("executor", nil)
+			ctx := tracing.WithRecorder(t.Context(), recorder, "")
+			at := &attempt{id: newID(), worker: w, lease: time.Now().Add(time.Hour), done: make(chan struct{})}
+			_, at.try = tracing.Start(ctx, "try", tracing.Role, tracing.RoleTry)
+			p.attempts[at.id] = at
+			testenv.Must(t, p.Report(t.Context(), at.id, remote.AttemptReport{Report: &sched.Report{}, Usage: c.usage}))
+			spans := recorder.Spans()
+			if len(spans) != 1 {
+				t.Fatalf("the trace holds %d spans; want the try", len(spans))
+			}
+			got := map[string]any{}
+			for _, k := range []string{"cpu", "memory peak"} {
+				if v, ok := spans[0].Args[k]; ok {
+					got[k] = v
+				}
+			}
+			if !maps.Equal(got, c.want) {
+				t.Errorf("the try says %v; want %v", got, c.want)
+			}
+		})
+	}
 }

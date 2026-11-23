@@ -90,8 +90,11 @@ type world struct {
 	// telemetryEnv is the OTEL_* environment of the scenario's coordinator, which it reads through cli.Config.Getenv
 	// rather than the process's, so that scenarios with collectors of their own run at once.
 	telemetryEnv map[string]string
-	collector    *otlpCollector  // the OTLP collector that GivenAnOTLPCollector started, if one did
-	metrics      *metricsScrapes // where the coordinator serves Prometheus, and what was scraped, if it does
+	// workerTelemetryEnv is the OTEL_* environment of the scenario's workers, apart from the coordinator's, as a
+	// deployment gives each its own; empty, they export nothing.
+	workerTelemetryEnv map[string]string
+	collector          *otlpCollector  // the OTLP collector that GivenAnOTLPCollector started, if one did
+	metrics            *metricsScrapes // where the coordinator serves Prometheus, and what was scraped, if it does
 	// workerLines are the connections of GivenACoordinatorWithTwoWorkers's workers to the coordinator, which a step
 	// cuts.
 	workerLines      []*workerLine

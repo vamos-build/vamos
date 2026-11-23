@@ -5,9 +5,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/vamos-build/vamos/internal/remote"
 )
 
 // cgroupRoot is where the worker makes a cgroup for each attempt, beneath the cgroup v2 hierarchy,
@@ -17,6 +21,9 @@ const cgroupRoot = "/sys/fs/cgroup/vamos"
 // containment is how attempts are contained: cgroups, when the host has cgroup v2 that the worker may write.
 type containment struct {
 	root string // the cgroup that attempts' cgroups are made in
+	// noMemory is why attempts' cgroups can't count their peak memory, if they can't: the memory controller couldn't
+	// be enabled for them.
+	noMemory error
 }
 
 // newContainment checks that attempts can be contained here, making the worker's cgroup, and returns how.
@@ -42,7 +49,13 @@ func newContainment(root string) (*containment, error) {
 	if err := os.Remove(probe); err != nil {
 		return nil, fmt.Errorf("attempts can't be contained: removing a cgroup in %s: %w", root, err)
 	}
-	return &containment{root: root}, nil
+	// Attempts' cgroups count their peak memory only if the memory controller reaches them, which the worker's own
+	// cgroup must have been given; without it, their reports leave the peak out.
+	c := &containment{root: root}
+	if err := os.WriteFile(filepath.Join(root, "cgroup.subtree_control"), []byte("+memory"), 0o644); err != nil {
+		c.noMemory = err
+	}
+	return c, nil
 }
 
 // path returns the cgroup of the attempt id.
@@ -64,9 +77,56 @@ func (c *containment) create(id string) (*os.File, error) {
 	return f, nil
 }
 
+// usage returns what the attempt id's processes have used, as its cgroup counts it: its CPU time, always counted, and
+// its peak memory, if the memory controller reaches it; nil if the cgroup can tell nothing.
+func (c *containment) usage(id string) *remote.Usage {
+	var u remote.Usage
+	if stat, err := os.ReadFile(filepath.Join(c.path(id), "cpu.stat")); err == nil {
+		for line := range strings.SplitSeq(string(stat), "\n") {
+			if v, ok := strings.CutPrefix(line, "usage_usec "); ok {
+				if n, err := strconv.ParseInt(strings.TrimSpace(v), 10, 64); err == nil && n >= 0 {
+					u.CPUMicros = &n
+				}
+			}
+		}
+	}
+	if peak, err := os.ReadFile(filepath.Join(c.path(id), "memory.peak")); err == nil {
+		if n, err := strconv.ParseInt(strings.TrimSpace(string(peak)), 10, 64); err == nil && n >= 0 {
+			u.MemoryPeak = &n
+		}
+	}
+	if u.CPUMicros == nil && u.MemoryPeak == nil {
+		return nil
+	}
+	return &u
+}
+
+// errStuck says that an attempt's processes didn't exit once killed.
+var errStuck = errors.New("the attempt's processes didn't exit")
+
 // kill kills every process in the attempt's cgroup and waits for it to empty, for at most wait,
 // then removes the cgroup.
 func (c *containment) kill(id string, wait time.Duration) error {
+	if err := c.stop(id, wait); err != nil {
+		return err
+	}
+	return c.remove(id)
+}
+
+// holds reports whether the attempt's cgroup holds the process pid, which it does until the process has exited,
+// zombie or not, and never once its pid is another's, which another cgroup holds; a cgroup that is there but can't
+// be read is taken to hold it, as the process hasn't been waited for, and one that is gone holds nothing.
+func (c *containment) holds(id string, pid int) bool {
+	procs, err := os.ReadFile(filepath.Join(c.path(id), "cgroup.procs"))
+	if err != nil {
+		return !errors.Is(err, os.ErrNotExist)
+	}
+	return slices.Contains(strings.Fields(string(procs)), strconv.Itoa(pid))
+}
+
+// stop kills every process in the attempt's cgroup and waits for it to empty, for at most wait, leaving the cgroup,
+// so that what its processes used can still be read.
+func (c *containment) stop(id string, wait time.Duration) error {
 	dir := c.path(id)
 	if _, err := os.Stat(dir); errors.Is(err, os.ErrNotExist) {
 		return nil
@@ -84,12 +144,12 @@ func (c *containment) kill(id string, wait time.Duration) error {
 			break
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("the attempt's processes didn't exit within %s of being killed: %s", wait,
+			return fmt.Errorf("%w within %s of being killed: %s", errStuck, wait,
 				strings.Join(strings.Fields(string(procs)), ", "))
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	return c.remove(id)
+	return nil
 }
 
 // remove removes the attempt's cgroup, which must be empty.

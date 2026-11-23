@@ -305,6 +305,48 @@ func TestMetrics_HistogramsCarryExemplars(t *testing.T) {
 	})
 }
 
+// TestMetrics_AttemptsReportTheirResources specifies that a worker reports what an attempt's processes used, read from
+// its cgroup, which the attempt's try span carries and the coordinator measures: its CPU time, and its peak memory
+// where the worker's cgroups count it, as this machine's may not.
+func TestMetrics_AttemptsReportTheirResources(t *testing.T) {
+	parallelRule(t)
+	t.Run("A busy step's CPU time is reported", func(t *testing.T) {
+		w := newMetricsWorld(t)
+		w.GivenTheCoordinatorServesPrometheusMetrics()
+		w.GivenARegistry()
+		w.GivenACoordinatorWithAWorker()
+		w.GivenTheBuildFileDeclares(`layer(name="app", base="busybox", steps=[env(NONCE="` + testenv.NewNonce() +
+			`"), run(["sh", "-c", "timeout 2 sh -c 'while :; do :; done' || true"])])`)
+		w.WhenIBuild("app", onTheCoordinator("<coordinator>"), traced())
+		w.ThenItSucceeds()
+		w.ThenTheTraceSpansSayAtLeast("executor", "try", traceArgs{"kind": "pull"},
+			traceArgs{"kind": "layer", "cpu": atLeast(0.5)})
+		w.WhenIScrapeTheMetrics()
+		w.ThenTheMetricIs("vamos_attempts_cpu_seconds_count", 1, "kind", "layer")
+	})
+}
+
+// TestMetrics_WorkersExportOverOTLP specifies that a worker exports its own counters over OTLP, as the standard
+// variables say, and refuses Prometheus, which it can't serve.
+func TestMetrics_WorkersExportOverOTLP(t *testing.T) {
+	parallelRule(t)
+	t.Run("A worker's counters reach the collector", func(t *testing.T) {
+		w := newMetricsWorld(t)
+		w.GivenAnOTLPCollector()
+		w.GivenTheWorkerExportsMetricsToTheCollector(200 * time.Millisecond)
+		w.GivenARegistry()
+		w.GivenACoordinatorWithAWorker()
+		w.ThenTheCollectorReceivedTheMetricAt("vamos.worker.fenced", 0)
+	})
+
+	t.Run("A worker refuses Prometheus", func(t *testing.T) {
+		w := newMetricsWorld(t)
+		w.GivenTheWorkerEnvironmentSets("OTEL_METRICS_EXPORTER", "prometheus")
+		w.WhenIStartAWorker()
+		w.ThenItFailsWith("OTEL_METRICS_EXPORTER=prometheus", "workers export metrics over OTLP")
+	})
+}
+
 // TestMetrics_FlushedOnShutdown specifies that a coordinator that shuts down exports what it holds before it exits.
 func TestMetrics_FlushedOnShutdown(t *testing.T) {
 	parallelRule(t)
@@ -324,8 +366,8 @@ func TestMetrics_FlushedOnShutdown(t *testing.T) {
 
 // TestMetrics_TheReferenceListsEveryMetric checks that the table of metrics in docs/design/observability.md lists
 // exactly the vamos and HTTP metrics a coordinator's Prometheus scrape shows once it has run a build, each exported
-// from zero, or recorded by the build. The worker's usage, CPU and memory, which workers don't report yet, is listed
-// but not yet scraped.
+// from zero, or recorded by the build, but for the peak memory of attempts, which a worker reports only where its
+// cgroup has the memory controller, as this machine's may not.
 func TestMetrics_TheReferenceListsEveryMetric(t *testing.T) {
 	parallelRule(t)
 	t.Run("The reference lists what a scrape shows", func(t *testing.T) {
@@ -338,6 +380,6 @@ func TestMetrics_TheReferenceListsEveryMetric(t *testing.T) {
 		w.ThenItSucceeds()
 		w.WhenIScrapeTheMetrics()
 		w.ThenTheReferenceListsTheScrapedMetrics("../../docs/design/observability.md",
-			"vamos_attempts_cpu_seconds", "vamos_attempts_memory_peak_bytes")
+			"vamos_attempts_memory_peak_bytes")
 	})
 }

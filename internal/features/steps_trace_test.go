@@ -220,6 +220,9 @@ type traceArgs map[string]any
 // such as how many spans a trace cut short dropped, which depends on how long each span's encoding is.
 var aCount = positiveCount{}
 
+// atLeast, as a value of traceArgs, matches any number no less than it.
+type atLeast float64
+
 // positiveCount is the type of aCount.
 type positiveCount struct{}
 
@@ -261,6 +264,10 @@ func (w *world) spanSaysAtLeast(s *traceSlice, want traceArgs) {
 		case positiveCount:
 			if n, isNumber := got.(float64); !isNumber || n < 1 || n != math.Trunc(n) { // as JSON decodes it
 				w.t.Errorf("%q says %s = %#v, want a count above zero", s.Name, key, got)
+			}
+		case atLeast:
+			if n, isNumber := got.(float64); !isNumber || n < float64(v) {
+				w.t.Errorf("%q says %s = %#v, want at least %v", s.Name, key, got, float64(v))
 			}
 		case int:
 			if got != float64(v) { // as JSON decodes it

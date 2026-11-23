@@ -81,8 +81,8 @@ The metrics, as Prometheus names them; OpenTelemetry's names are the same with d
 | --- | --- | --- | --- |
 | `vamos_attempts_wait_seconds` | histogram | | How long each try of an attempt waited for a worker |
 | `vamos_attempts_duration_seconds` | histogram | `platform`, `kind`, `outcome` | How long each try ran on its worker, from its assignment to its report, its loss, or the kill the coordinator decided on, before the worker hears of it; `outcome` is `succeeded`, `failed`, `lost` or `killed`, as a try the coordinator's shutdown ended is, and `platform` the worker's, or `any` for work that runs no command |
-| `vamos_attempts_cpu_seconds` | histogram | `platform`, `kind` | The CPU time a try's commands used, as its worker's cgroup read it, once workers report it |
-| `vamos_attempts_memory_peak_bytes` | histogram | `platform`, `kind` | The peak memory a try's commands used, as its worker's cgroup read it, once workers report it |
+| `vamos_attempts_cpu_seconds` | histogram | `platform`, `kind` | The CPU time a try's processes used, as its worker read its cgroup once its subprocess exited |
+| `vamos_attempts_memory_peak_bytes` | histogram | `platform`, `kind` | The peak memory a try's processes used, where the memory controller reaches the worker's cgroups, which it must have been given |
 | `vamos_jobs_duration_seconds` | histogram | `kind`, `outcome` | How long each run of a job took; `outcome` is `succeeded`, `failed` or `cancelled` |
 | `vamos_cache_hits_total` | counter | `kind` | Targets whose cached result was reused |
 | `vamos_cache_misses_total` | counter | `kind`, `cause` | Targets that missed, whether or not their run then succeeded, but for those that joined another's attempt and those retried, counted as their retry, by why: `forced`, `new`, `lost`, `own-inputs`, `upstream`, `dependency`, or `unknown`, as a pull's, which is counted only if it succeeds |
@@ -109,6 +109,17 @@ The metrics, as Prometheus names them; OpenTelemetry's names are the same with d
 
 `kind` is a target's, `layer`, `task` or `pull`, or a try's, those and `push`, `upload` or `tag`. The Go runtime's
 metrics, `go_*`, come from OpenTelemetry's runtime instrumentation, and aren't listed.
+
+## Worker metrics
+
+A worker exports its own counters over OTLP, or to its console, from zero; it exports no spans, which its coordinator
+does, and serves no Prometheus, since a fleet of workers would be scraped one by one.
+
+| Metric | Type | What it says |
+| --- | --- | --- |
+| `vamos.worker.fenced` | counter | Attempts the worker killed as their lease couldn't be renewed, whose subprocess was still running as the fence came |
+| `vamos.worker.events.dropped` | counter | Batches of an attempt's output and spans the coordinator didn't take, which aren't sent again, but for those of an attempt it no longer counts, cancelled or lost |
+| `vamos.worker.cgroups.stuck` | counter | Attempts' cgroups that a kill couldn't empty in time, once each |
 
 ## Configuration
 

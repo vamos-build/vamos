@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -29,7 +30,7 @@ type otlpCollector struct {
 	url     string
 	mu      sync.Mutex
 	got     []collectedSpan
-	metrics map[string]bool // the names of the metrics it received
+	metrics map[string]float64 // the metrics it received, by name, each a sum's last value, or 0
 }
 
 // collectedSpan is a span the collector received, its IDs in hex, and its links' as trace/span.
@@ -77,12 +78,18 @@ func (c *otlpCollector) serveHTTP(rw http.ResponseWriter, r *http.Request) {
 		}
 		c.mu.Lock()
 		if c.metrics == nil {
-			c.metrics = map[string]bool{}
+			c.metrics = map[string]float64{}
 		}
 		for _, rm := range req.GetResourceMetrics() {
 			for _, sm := range rm.GetScopeMetrics() {
 				for _, m := range sm.GetMetrics() {
-					c.metrics[m.GetName()] = true
+					// A sum is kept by the value of its last point, and anything else as received alone.
+					if points := m.GetSum().GetDataPoints(); len(points) > 0 {
+						last := points[len(points)-1]
+						c.metrics[m.GetName()] = float64(last.GetAsInt()) + last.GetAsDouble()
+					} else if _, kept := c.metrics[m.GetName()]; !kept {
+						c.metrics[m.GetName()] = math.NaN()
+					}
 				}
 			}
 		}
@@ -146,9 +153,17 @@ func valueText(v *commonpb.AnyValue) string {
 
 // hasMetric reports whether the collector has received a metric named name.
 func (c *otlpCollector) hasMetric(name string) bool {
+	_, ok := c.metric(name)
+	return ok
+}
+
+// metric returns the last value of the sum named name that the collector received, NaN for another kind of metric
+// or a sum with no point, and whether it received one.
+func (c *otlpCollector) metric(name string) (float64, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.metrics[name]
+	v, ok := c.metrics[name]
+	return v, ok
 }
 
 // spans returns what the collector has received.
@@ -162,6 +177,20 @@ func (c *otlpCollector) spans() []collectedSpan {
 // nothing of the process's.
 func (w *world) telemetryGetenv(name string) string {
 	return w.telemetryEnv[name]
+}
+
+// workerTelemetryGetenv is the scenario's workers' Getenv, as telemetryGetenv is the coordinator's.
+func (w *world) workerTelemetryGetenv(name string) string {
+	return w.workerTelemetryEnv[name]
+}
+
+// GivenTheWorkerEnvironmentSets sets the variable name of the scenario's workers, which a later step starts, to value.
+func (w *world) GivenTheWorkerEnvironmentSets(name, value string) {
+	w.t.Helper()
+	if w.workerTelemetryEnv == nil {
+		w.workerTelemetryEnv = map[string]string{}
+	}
+	w.workerTelemetryEnv[name] = value
 }
 
 // setTelemetryEnv sets the variable name of the scenario's coordinator to value.

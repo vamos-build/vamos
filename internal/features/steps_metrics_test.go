@@ -396,6 +396,39 @@ func (w *world) ThenTheCollectorReceivedTheMetric(name string) {
 	}
 }
 
+// ThenTheCollectorReceivedTheMetricAt checks that the collector has received, by now or within its export interval,
+// the sum named name, at want.
+func (w *world) ThenTheCollectorReceivedTheMetricAt(name string, want float64) {
+	w.t.Helper()
+	w.ThenTheCollectorReceivedTheMetric(name)
+	if got, _ := w.collector.metric(name); got != want {
+		w.t.Errorf("the collector received %s at %v; want %v", name, got, want)
+	}
+}
+
+// WhenIStartAWorker runs `vamos worker`, with the workers' telemetry environment, for a coordinator that nothing
+// serves, so that it either fails as it starts or is interrupted once it has tried for a while.
+func (w *world) WhenIStartAWorker() {
+	w.t.Helper()
+	w.sendsNothing("WhenIStartAWorker")
+	interruptedAfter(5*time.Second).apply(w, &commandLine{})
+	coordinators := w.telemetryEnv
+	w.telemetryEnv = w.workerTelemetryEnv // which the command reads, as the commands' Getenv is the coordinator's
+	defer func() { w.telemetryEnv = coordinators }()
+	w.run("worker", "--coordinator", "http://127.0.0.1:1")
+}
+
+// GivenTheWorkerExportsMetricsToTheCollector has the scenario's workers export their metrics to GivenAnOTLPCollector's
+// collector, every interval.
+func (w *world) GivenTheWorkerExportsMetricsToTheCollector(interval time.Duration) {
+	w.t.Helper()
+	if w.collector == nil {
+		w.t.Fatal("no GivenAnOTLPCollector step started a collector")
+	}
+	w.GivenTheWorkerEnvironmentSets("OTEL_EXPORTER_OTLP_ENDPOINT", w.collector.url)
+	w.GivenTheWorkerEnvironmentSets("OTEL_METRIC_EXPORT_INTERVAL", strconv.FormatInt(interval.Milliseconds(), 10))
+}
+
 // GivenTheBlobsOfTheCoordinatorsBuildCacheAreRemoved removes every blob that the coordinator's build cache holds, as
 // a bad disk might, leaving the results that name them.
 func (w *world) GivenTheBlobsOfTheCoordinatorsBuildCacheAreRemoved() {

@@ -746,6 +746,14 @@ func (p *pool) Report(_ context.Context, id string, report remote.AttemptReport)
 			"and the cache is at %d; run the command again", at.generation, current))
 		return remote.ErrStaleAttempt
 	}
+	if u := report.Usage; u != nil { // what the try's processes used, which an older worker doesn't report
+		if u.CPUMicros != nil && *u.CPUMicros >= 0 {
+			at.try.Set("cpu", float64(*u.CPUMicros)/1e6) // in seconds, as the metric is
+		}
+		if u.MemoryPeak != nil && *u.MemoryPeak >= 0 {
+			at.try.Set("memory peak", *u.MemoryPeak) // in bytes
+		}
+	}
 	if report.Report != nil {
 		// The run that made the result is this try, by the coordinator's clock: from its assignment to its report,
 		// so that waiting for a worker, and the tries before, aren't counted as what the result took.

@@ -151,15 +151,15 @@
 
 ## 7. Workers
 
-- [ ] 7.1 Read `cpu.stat`'s `usage_usec` and `memory.peak` after an attempt's subprocess exits and before its cgroup is
+- [x] 7.1 Read `cpu.stat`'s `usage_usec` and `memory.peak` after an attempt's subprocess exits and before its cgroup is
   removed, send them in `AttemptReport.Usage`, and have the pool set `cpu` and `memory peak` on the try's span. Verify
   with a `worker_test.go` case whose step burns CPU, its worker started with `testenv.CgroupRoot(t)` as its
   `CgroupRoot`, and a `coord` test that an older report without usage leaves them
   out
-- [ ] 7.2 Have `inv.worker` call `telemetry.HandleErrors(inv.warn)` and `telemetry.Setup` for the worker role, and count
+- [x] 7.2 Have `inv.worker` call `telemetry.HandleErrors(inv.warn)` and `telemetry.Setup` for the worker role, and count
   fenced attempts, event batches the coordinator refused and cgroups that `kill` couldn't empty. Verify with `worker`
   tests on a `ManualReader`, and the worker scenarios of `metrics_test.go`
-- [ ] 7.3 Update `internal/worker/doc.go` and `docs/user/reference/cli/worker.md` with the usage report and the
+- [x] 7.3 Update `internal/worker/doc.go` and `docs/user/reference/cli/worker.md` with the usage report and the
   variables a worker reads, and verify `go doc ./internal/worker` and the link check
 
 ## 8. Helm chart
