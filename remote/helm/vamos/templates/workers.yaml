@@ -37,10 +37,11 @@ spec:
         {{- toYaml . | nindent 8 }}
         {{- end }}
       annotations:
-        checksum/registries: {{ include (print $.Template.BasePath "/registries-configmap.yaml") $ | sha256sum }}
-        {{- with $w.podAnnotations }}
-        {{- toYaml . | nindent 8 }}
-        {{- end }}
+        {{- /* The pool's own annotations, and the registries' checksum, which a change of them restarts the pool by. */}}
+        {{- $annotations := deepCopy ($w.podAnnotations | default dict) }}
+        {{- $_ := set $annotations "checksum/registries"
+              (include (print $.Template.BasePath "/registries-configmap.yaml") $ | sha256sum) }}
+        {{- toYaml $annotations | nindent 8 }}
     spec:
       automountServiceAccountToken: false
       {{- with $.Values.imagePullSecrets }}
@@ -79,6 +80,9 @@ spec:
               value: /etc/vamos/registries.conf
             {{- if $w.authSecret }}
             {{- include "vamos.authEnv" (dict "secret" $w.authSecret) | nindent 12 }}
+            {{- end }}
+            {{- with include "vamos.telemetryEnv" (dict "root" $ "role" "worker" "extraEnv" $w.extraEnv) | trim }}
+            {{- . | nindent 12 }}
             {{- end }}
             {{- with $w.extraEnv }}
             {{- toYaml . | nindent 12 }}

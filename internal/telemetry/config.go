@@ -202,6 +202,11 @@ func readSettings(role Role, getenv func(string) string) (settings, []string, er
 		return s, nil, fmt.Errorf("OTEL_EXPORTER_PROMETHEUS_PORT=%s: not a port; it takes a number from 0 to 65535",
 			port)
 	}
+	if ip := net.ParseIP(host); ip != nil && ip.Equal(net.IPv6unspecified) {
+		// Every address, as a listener with no host takes, which Go makes IPv6's and IPv4's together, or IPv4's alone
+		// where the host has no IPv6, where a socket of the IPv6 wildcard itself couldn't be made.
+		host = ""
+	}
 	s.prometheusAddr = net.JoinHostPort(host, port)
 	return s, warnings, nil
 }

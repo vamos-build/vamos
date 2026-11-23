@@ -95,6 +95,7 @@ type world struct {
 	workerTelemetryEnv map[string]string
 	collector          *otlpCollector  // the OTLP collector that GivenAnOTLPCollector started, if one did
 	metrics            *metricsScrapes // where the coordinator serves Prometheus, and what was scraped, if it does
+	chart              []string        // the objects WhenIRenderTheChart rendered
 	// workerLines are the connections of GivenACoordinatorWithTwoWorkers's workers to the coordinator, which a step
 	// cuts.
 	workerLines      []*workerLine

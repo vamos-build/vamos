@@ -265,6 +265,31 @@ sleep 15; kill -INT $B; wait $B; sleep 5
 for p in $(kubectl -n vamos get pods -o name | grep worker); do
   kubectl -n vamos exec $p -- nsenter -t 1 -C -m ls /sys/fs/cgroup/vamos | grep attempt
 done
+
+# K5. Prometheus on: with the release upgraded, keeping its values and taking the chart's new defaults, its coordinator
+# serves its metrics through the Service's `metrics` port, apart from the API's; after a build, expect each of a job
+# counted, the pool's two workers of its platform and the API's requests by route, and a 404 for /metrics on the API's
+# port; the script fails if any is missing.
+K5=ok
+helm upgrade vamos remote/helm/vamos -n vamos --wait --reset-then-reuse-values --set telemetry.prometheus.enabled=true \
+  || K5=failed
+kubectl -n vamos wait --for=condition=Ready pod/vamos-coordinator-0 --timeout=120s || K5=failed
+pkill -f "port-forward svc/vamos-coordinator"
+kubectl -n vamos port-forward svc/vamos-coordinator 18080:8080 >/dev/null 2>&1 & P=$!
+sleep 2; ./vamos build slow -C "$TMP/slow" --coordinator http://127.0.0.1:18080 || K5=failed
+# Scraped as Prometheus would, from a pod, through the Service's metrics port, rather than through a port-forward.
+M=$(kubectl -n vamos get svc vamos-coordinator -o jsonpath='{.spec.ports[?(@.name=="metrics")].port}')
+test -n "$M" || { echo "K5: no metrics port on the Service"; K5=failed; }
+kubectl -n vamos delete pod k5-scrape --ignore-not-found
+kubectl -n vamos run k5-scrape --rm -i --restart=Never --image=curlimages/curl -- \
+  curl -s --max-time 30 "http://vamos-coordinator:$M/metrics" > "$TMP/k5.txt" || K5=failed
+for want in '^vamos_jobs_duration_seconds_count\{[^}]*outcome="succeeded"[^}]*\} [1-9]' \
+    '^vamos_workers\{[^}]*platform="linux/[a-z0-9]+"[^}]*\} 2$' 'http_route="/v1/jobs/\{id\}/events"'; do
+  grep -qE "$want" "$TMP/k5.txt" || { echo "K5: no $want"; K5=failed; }
+done
+test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/metrics)" = 404 \
+  || { echo "K5: /metrics on the API"; K5=failed; }
+kill $P; test "$K5" = ok
 ```
 
 Remove the temporary artifacts after the checks: `rm -rf -- "$TMP"`.

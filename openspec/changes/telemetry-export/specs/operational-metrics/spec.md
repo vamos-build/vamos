@@ -241,4 +241,4 @@ named `metrics`, on its Service. With the defaults it SHALL set no `OTEL_*` vari
 
 - **WHEN** I render the chart with `telemetry.prometheus.enabled=true`
 - **THEN** the coordinator sets `OTEL_METRICS_EXPORTER` to include `prometheus`, `OTEL_EXPORTER_PROMETHEUS_HOST` to
-  `0.0.0.0`, and its Service exposes the metrics port, named `metrics`
+  `::`, every address, and its Service exposes the metrics port, named `metrics`

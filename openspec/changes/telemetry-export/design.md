@@ -366,8 +366,10 @@ telemetry:
 ```
 
 With `otlp.endpoint` set, both roles get it. With Prometheus enabled, the coordinator gets `OTEL_METRICS_EXPORTER` with
-`prometheus`, and `otlp` too if an endpoint is set, `OTEL_EXPORTER_PROMETHEUS_HOST=0.0.0.0` and the port, a
-`containerPort` and a Service port named `metrics`. The defaults set nothing. `extraEnv` still overrides.
+`prometheus`, and `otlp` too if an endpoint is set, `OTEL_EXPORTER_PROMETHEUS_HOST=::`, every address, and the port, a
+`containerPort` and a Service port named `metrics`. The defaults set nothing. `extraEnv` still overrides, but for the
+exporters, the Prometheus host and port, which the chart sets alone with Prometheus on, and an OTLP endpoint there,
+literal or from a reference, counts as one when the chart chooses the exporters.
 
 ## Risks / Trade-offs
 

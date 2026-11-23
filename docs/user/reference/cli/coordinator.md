@@ -52,7 +52,7 @@ It exports metrics of its capacity, its speed, its cache and what degrades quiet
 | `OTEL_METRICS_EXPORTER` | `otlp`, `prometheus`, `console` or `none`, or several, comma-separated; unset, `otlp` if an OTLP endpoint is set, and `none` otherwise |
 | `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` | The collector of metrics alone |
 | `OTEL_METRIC_EXPORT_INTERVAL`, `OTEL_METRIC_EXPORT_TIMEOUT` | How often, in milliseconds, metrics are exported over OTLP, a minute by default, and how long an export may take |
-| `OTEL_EXPORTER_PROMETHEUS_HOST`, `OTEL_EXPORTER_PROMETHEUS_PORT` | Where Prometheus scrapes `/metrics`, `localhost:9464` by default: an address of its own, never the API's |
+| `OTEL_EXPORTER_PROMETHEUS_HOST`, `OTEL_EXPORTER_PROMETHEUS_PORT` | Where Prometheus scrapes `/metrics`, `localhost:9464` by default: an address of its own, never the API's; `::` is every address, IPv4's alone where the host has no IPv6 |
 
 An OTLP endpoint that isn't a signal's own, `OTEL_EXPORTER_OTLP_ENDPOINT`, turns metrics on too, unless
 `OTEL_METRICS_EXPORTER` says otherwise. An address Prometheus can't be served on fails the start, naming it.

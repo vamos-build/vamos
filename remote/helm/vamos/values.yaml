@@ -43,6 +43,10 @@ coordinator:
   defaultExecPlatform: ""
   extraArgs: []
   extraEnv: []
+  # How long the coordinator has to stop once told to: its API drains for up to ten seconds, then its jobs stop, then
+  # its telemetry sends what it holds, for up to ten seconds more, so that the last jobs' spans and metrics are sent
+  # before the pod is killed.
+  terminationGracePeriodSeconds: 45
 
   # Registry credentials of the coordinator, which needs read and delete access to the cache repository:
   # the name of a kubernetes.io/dockerconfigjson Secret, mounted as $REGISTRY_AUTH_FILE.
@@ -188,3 +192,33 @@ pullThrough:
 
 # Extra registries.conf content, appended to the entries the chart writes for the registries above.
 registriesConf: ""
+
+# Telemetry, as the standard OTEL_* variables the chart sets from these values configure it; see
+# docs/user/reference/cli/coordinator.md and worker.md. The defaults set none, and export nothing. A pool's or the
+# coordinator's extraEnv, which comes after, overrides what these set, but for what the chart sets alone with
+# Prometheus on, as prometheus says below.
+telemetry:
+  otlp:
+    # OTEL_EXPORTER_OTLP_ENDPOINT, of the coordinator, which exports traces and metrics there, and of the workers,
+    # which export their metrics there, such as http://otel-collector:4318.
+    endpoint: ""
+    protocol: ""        # OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf, the default, or grpc
+    # A Secret whose key `headers` becomes OTEL_EXPORTER_OTLP_HEADERS, such as credentials for the collector.
+    headersSecret: ""
+  traces:
+    sampler: ""         # OTEL_TRACES_SAMPLER of the coordinator, parentbased_always_on if unset
+    samplerArg: ""      # OTEL_TRACES_SAMPLER_ARG
+  prometheus:
+    # Serve the coordinator's metrics for Prometheus to scrape, at /metrics on a port of its own, on every address,
+    # which its Service exposes as `metrics`, as widely as the Service is, a NodePort's or a LoadBalancer's too, and
+    # unauthenticated; alongside OTLP if an endpoint is set, here or in the coordinator's extraEnv, where one from a
+    # valueFrom is taken to be set. The port can't be the API's, and one below 1024 may fail to bind on runtimes that
+    # keep those for root, which the coordinator isn't; a coordinator's extraArgs that move its --listen, or make it
+    # --local, which exports nothing, are its own to square with it. Its extraEnv then can't set
+    # OTEL_METRICS_EXPORTER, OTEL_EXPORTER_PROMETHEUS_HOST or OTEL_EXPORTER_PROMETHEUS_PORT, which the chart sets: remove
+    # any such entries before turning Prometheus on.
+    enabled: false
+    port: 9464
+    # prometheus.io/scrape, port and path annotations on the coordinator's pod, for a Prometheus that discovers
+    # pods by them.
+    podAnnotations: false

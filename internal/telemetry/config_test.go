@@ -592,8 +592,8 @@ func TestReadSettingsValues(t *testing.T) {
 	if s.batch != wantBatch || s.metricInterval != 100*time.Millisecond {
 		t.Errorf("batch = %+v, metric interval %s; want %+v, 100ms", s.batch, s.metricInterval, wantBatch)
 	}
-	if s.prometheusAddr != "[::]:9000" {
-		t.Errorf("Prometheus address = %s, want [::]:9000", s.prometheusAddr)
+	if s.prometheusAddr != ":9000" { // [::], every address, as a listener with no host takes them
+		t.Errorf("Prometheus address = %s, want :9000", s.prometheusAddr)
 	}
 	if !reflect.DeepEqual(s.resource, map[string]string{"deployment.environment": "ci", "team": " build ",
 		"team%2Fname": "a"}) {
@@ -629,4 +629,17 @@ func tlsFiles(t *testing.T) (ca, certificate, key string) {
 	write(ca, "CERTIFICATE", der)
 	write(key, "PRIVATE KEY", keyDER)
 	return ca, ca, key // the CA is its own client certificate
+}
+
+// TestPrometheusEveryAddress checks that each spelling of the IPv6 unspecified address is taken as every address, a
+// listener with no host, and that any other host is kept.
+func TestPrometheusEveryAddress(t *testing.T) {
+	for host, want := range map[string]string{"::": ":9464", "[::]": ":9464", "::0": ":9464",
+		"0:0:0:0:0:0:0:0": ":9464", "0.0.0.0": "0.0.0.0:9464", "::1": "[::1]:9464", "": "localhost:9464"} {
+		s, _, err := readSettings(Coordinator, envOf(map[string]string{"OTEL_METRICS_EXPORTER": "prometheus",
+			"OTEL_EXPORTER_PROMETHEUS_HOST": host}))
+		if err != nil || s.prometheusAddr != want {
+			t.Errorf("OTEL_EXPORTER_PROMETHEUS_HOST=%q: listens at %q, %v; want %q", host, s.prometheusAddr, err, want)
+		}
+	}
 }

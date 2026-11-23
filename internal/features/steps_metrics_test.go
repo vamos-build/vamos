@@ -6,13 +6,16 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -583,5 +586,80 @@ func (w *world) ThenTheReferenceListsTheScrapedMetrics(path string, unscraped ..
 		if !scraped[name] && !slices.Contains(unscraped, name) {
 			w.t.Errorf("%s lists %s, which the scrape doesn't show", path, name)
 		}
+	}
+}
+
+// WhenIRenderTheChart renders the Helm chart, remote/helm/vamos, with each of sets as a --set, keeping its objects.
+func (w *world) WhenIRenderTheChart(sets ...string) {
+	w.t.Helper()
+	helm, err := exec.LookPath("helm")
+	if err != nil {
+		testenv.Unavailable(w.t, "helm", err)
+	}
+	chart := filepath.Join("..", "..", "remote", "helm", "vamos")
+	// Read here too, so that Go's test cache, which sees only what the test process opens, knows the chart's files.
+	if err := filepath.WalkDir(chart, func(path string, d fs.DirEntry, err error) error {
+		if err == nil && !d.IsDir() {
+			_, err = os.ReadFile(path)
+		}
+		return err
+	}); err != nil {
+		w.t.Fatal(err)
+	}
+	args := []string{"template", "v", chart}
+	for _, s := range sets {
+		args = append(args, "--set", s)
+	}
+	out, err := exec.CommandContext(w.t.Context(), helm, args...).CombinedOutput()
+	if err != nil {
+		w.t.Fatalf("rendering the chart: %v:\n%s", err, out)
+	}
+	w.chart = strings.Split(string(out), "\n---\n")
+}
+
+// chartObject returns the rendered object of kind whose name ends in suffix.
+func (w *world) chartObject(kind, suffix string) string {
+	w.t.Helper()
+	for _, o := range w.chart {
+		if strings.Contains(o, "\nkind: "+kind+"\n") && regexp.MustCompile(`(?m)^  name: \S*`+
+			regexp.QuoteMeta(suffix)+`$`).MatchString(o) {
+			return o
+		}
+	}
+	w.t.Fatalf("the chart rendered no %s named *%s", kind, suffix)
+	return ""
+}
+
+// ThenTheChartSetsNoOTELVariable checks that no object the chart rendered sets an OTEL_* variable.
+func (w *world) ThenTheChartSetsNoOTELVariable() {
+	w.t.Helper()
+	for _, o := range w.chart {
+		if strings.Contains(o, "name: OTEL_") {
+			w.t.Errorf("the chart sets an OTEL_* variable in:\n%s", o)
+		}
+	}
+}
+
+// ThenTheCoordinatorServiceExposesTheMetricsPort checks whether the coordinator's Service has a port named metrics,
+// to the container's port of that name, which the container then has.
+func (w *world) ThenTheCoordinatorServiceExposesTheMetricsPort(want bool) {
+	w.t.Helper()
+	service := regexp.MustCompile(`- name: metrics\n\s+port: 9464\n\s+targetPort: metrics\n`)
+	container := regexp.MustCompile(`- name: metrics\n\s+containerPort: 9464\n`)
+	if got := service.MatchString(w.chartObject("Service", "-coordinator")); got != want {
+		w.t.Errorf("the coordinator's Service exposes port 9464, named metrics: %t; want %t", got, want)
+	}
+	if got := container.MatchString(w.chartObject("StatefulSet", "-coordinator")); got != want {
+		w.t.Errorf("the coordinator's container has port 9464, named metrics: %t; want %t", got, want)
+	}
+}
+
+// ThenTheCoordinatorSets checks that the coordinator's container sets the variable name to want, exactly.
+func (w *world) ThenTheCoordinatorSets(name, want string) {
+	w.t.Helper()
+	m := regexp.MustCompile(`- name: ` + regexp.QuoteMeta(name) + `\n\s+value: ["']?([^"'\n]*)["']?\n`).
+		FindStringSubmatch(w.chartObject("StatefulSet", "-coordinator"))
+	if m == nil || m[1] != want {
+		w.t.Errorf("the coordinator sets %s to %v; want %q", name, m, want)
 	}
 }

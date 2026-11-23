@@ -347,6 +347,27 @@ func TestMetrics_WorkersExportOverOTLP(t *testing.T) {
 	})
 }
 
+// TestMetrics_TheHelmChartExposesTelemetry specifies that the chart's defaults set no OTEL_* variable and expose no
+// metrics port, and that with Prometheus on it serves the coordinator's metrics on every address, behind its Service's
+// port named metrics.
+func TestMetrics_TheHelmChartExposesTelemetry(t *testing.T) {
+	parallelRule(t)
+	t.Run("The chart's defaults export nothing", func(t *testing.T) {
+		w := newWorld(t)
+		w.WhenIRenderTheChart()
+		w.ThenTheChartSetsNoOTELVariable()
+		w.ThenTheCoordinatorServiceExposesTheMetricsPort(false)
+	})
+
+	t.Run("Prometheus on in the chart", func(t *testing.T) {
+		w := newWorld(t)
+		w.WhenIRenderTheChart("telemetry.prometheus.enabled=true")
+		w.ThenTheCoordinatorSets("OTEL_METRICS_EXPORTER", "prometheus")
+		w.ThenTheCoordinatorSets("OTEL_EXPORTER_PROMETHEUS_HOST", "::")
+		w.ThenTheCoordinatorServiceExposesTheMetricsPort(true)
+	})
+}
+
 // TestMetrics_FlushedOnShutdown specifies that a coordinator that shuts down exports what it holds before it exits.
 func TestMetrics_FlushedOnShutdown(t *testing.T) {
 	parallelRule(t)

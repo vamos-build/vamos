@@ -164,7 +164,7 @@
 
 ## 8. Helm chart
 
-- [ ] 8.1 Size the coordinator's `terminationGracePeriodSeconds` from a value, defaulting past the API's drain and
+- [x] 8.1 Size the coordinator's `terminationGracePeriodSeconds` from a value, defaulting past the API's drain and
   telemetry's ten-second shutdown, so that the last jobs' spans are sent before the pod is killed. Add the `telemetry`
   values, the coordinator's and workers' `OTEL_*` environment from them, the headers Secret, and with Prometheus on, the
   coordinator's `containerPort`, Service port named `metrics` and optional scrape annotations. Verify with `helm lint
