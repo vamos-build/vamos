@@ -121,31 +121,31 @@
 
 ## 6. Coordinator metrics
 
-- [ ] 6.1 Have the pool record a `wait for a worker` span (`role` `wait`) and a `try` span (`role` `try`, with
+- [x] 6.1 Have the pool record a `wait for a worker` span (`role` `wait`) and a `try` span (`role` `try`, with
   `platform`, `kind` and `outcome`) per try, replacing the `retry N` argument. Verify with `coord` tests that a retried
   attempt's stored trace shows both tries, and that `go test ./internal/features -run TestTrace_` still passes
-- [ ] 6.2 Derive `vamos.attempts.wait`, `.duration`, `.cpu`, `.memory.peak`, `vamos.jobs.duration` and the
+- [x] 6.2 Derive `vamos.attempts.wait`, `.duration`, `.cpu`, `.memory.peak`, `vamos.jobs.duration` and the
   `vamos.cache.*` counters from converted spans in the bridge, recorded under the span's `SpanContext` so that sampled
   spans carry exemplars. Verify with `telemetry` tests on an `sdkmetric.ManualReader`: values, labels, an exemplar for a
   sampled span and none for a dropped one
-- [ ] 6.3 Add `coord.Metrics`, created at start so that every counter is exported from zero, and increment it where jobs
+- [x] 6.3 Add `coord.Metrics`, created at start so that every counter is exported from zero, and increment it where jobs
   are refused, leases expire, attempts are killed or retried, reports are rejected, the journal fails to write and event
   streams gap. Register the gauges' callbacks for attempts, workers, slots, waiting builds and open jobs. Verify with
   `coord` tests on a `ManualReader` for each counter's site and each gauge
-- [ ] 6.4 Keep `cache.Directory`'s content and record sizes as running counts after a background walk at open, expose
+- [x] 6.4 Keep `cache.Directory`'s content and record sizes as running counts after a background walk at open, expose
   them with `Size()`, and observe them as `vamos.store.size`. Verify with `cachetest.Content` cases for puts, duplicate
   puts, removals of corrupt blobs and clears, and a `Directory` test that the walk counts what was there before
-- [ ] 6.5 Wrap the coordinator's API's mux in `otelhttp` through `Server.Instrument`, inside `Server.Middleware`,
+- [x] 6.5 Wrap the coordinator's API's mux in `otelhttp` through `Server.Instrument`, inside `Server.Middleware`,
   with a view that keeps only the method, route and status code on each of `otelhttp`'s instruments,
   and add `Server.Transferred` for `vamos.transfer.bytes`. Move 1.3's test onto `Server.Instrument`, and verify with
   `remote` tests that the route survives a middleware that passes on `r.WithContext`, that requests with other `Host`s
   and ports add no series to any HTTP metric, that a 200 and a 404 on one route are separate series, and the bytes
   counted for puts and reads
-- [ ] 6.6 Add Prometheus scrape steps to `steps_telemetry_test.go`, plain and OpenMetrics, and
+- [x] 6.6 Add Prometheus scrape steps to `steps_telemetry_test.go`, plain and OpenMetrics, and
   `internal/features/metrics_test.go` with a rule for each coordinator requirement of `operational-metrics` and its
   scenarios, parallel or alone as in 5.3. The lost worker's scenario keeps its step running with `GivenABarrier`.
   Verify with `go test ./internal/features -run TestMetrics_`
-- [ ] 6.7 Document every metric, its unit, labels and meaning in `docs/design/observability.md`, and the Prometheus
+- [x] 6.7 Document every metric, its unit, labels and meaning in `docs/design/observability.md`, and the Prometheus
   variables in `coordinator.md`. Verify that the doc lists exactly the instruments a test scrape shows, with a Go test
   that compares the two
 

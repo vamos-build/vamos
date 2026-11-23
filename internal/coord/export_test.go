@@ -58,7 +58,7 @@ func newExporting(t *testing.T) *exporting {
 }
 
 // telemetry is a Config.Telemetry.
-func (e *exporting) telemetry(instance string) (*telemetry.Bridge, error) {
+func (e *exporting) telemetry(instance string) (*telemetry.Telemetry, error) {
 	console := &lockedBuffer{}
 	tel, err := telemetry.Setup(telemetry.Config{Role: telemetry.Coordinator, Instance: instance,
 		Getenv: func(name string) string {
@@ -72,7 +72,7 @@ func (e *exporting) telemetry(instance string) (*telemetry.Bridge, error) {
 	defer e.mu.Unlock()
 	e.consoles = append(e.consoles, console)
 	e.shutdown = append(e.shutdown, tel.Shutdown)
-	return tel.Bridge, nil
+	return tel, nil
 }
 
 // shutdownAll shuts down every bridge made, so that what they hold is written.
@@ -259,7 +259,7 @@ func TestMalformedTraceparentIgnored(t *testing.T) {
 func TestTelemetryFailureFreesState(t *testing.T) {
 	state := t.TempDir()
 	m := cache.NewMemory()
-	failing := func(string) (*telemetry.Bridge, error) { return nil, errors.New("OTEL_TRACES_EXPORTER=zipkin") }
+	failing := func(string) (*telemetry.Telemetry, error) { return nil, errors.New("OTEL_TRACES_EXPORTER=zipkin") }
 	if _, err := New(m, m, Config{State: state, Telemetry: failing}); err == nil {
 		t.Fatal("a coordinator whose telemetry failed started")
 	}
@@ -475,7 +475,7 @@ func TestMalformedTracestateDropped(t *testing.T) {
 func TestMetricsOnlyIgnoresOuterTrace(t *testing.T) {
 	var mu sync.Mutex
 	var warnings []string
-	metricsOnly := func(instance string) (*telemetry.Bridge, error) {
+	metricsOnly := func(instance string) (*telemetry.Telemetry, error) {
 		tel, err := telemetry.Setup(telemetry.Config{Role: telemetry.Coordinator, Instance: instance,
 			Getenv: func(name string) string {
 				return map[string]string{"OTEL_TRACES_EXPORTER": "none", "OTEL_METRICS_EXPORTER": "console"}[name]
@@ -485,7 +485,7 @@ func TestMetricsOnlyIgnoresOuterTrace(t *testing.T) {
 			return nil, err
 		}
 		t.Cleanup(func() { _ = tel.Shutdown(context.Background()) })
-		return tel.Bridge, nil
+		return tel, nil
 	}
 	r := newRestartable(t, Config{Telemetry: metricsOnly, Warn: func(err error) {
 		mu.Lock()

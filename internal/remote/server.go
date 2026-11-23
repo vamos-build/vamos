@@ -29,6 +29,12 @@ type Server struct {
 	Content  cache.ContentStore
 	// Middleware wraps every handler, so that one place can authenticate requests; nil wraps nothing.
 	Middleware func(http.Handler) http.Handler
+	// Instrument, if set, wraps the routes' ServeMux itself, inside Middleware, so that what measures requests reads
+	// the route that served each, which the mux sets on the request it is handed: a middleware between them that
+	// passed on a copy would hide it. A request Middleware refuses isn't measured.
+	Instrument func(http.Handler) http.Handler
+	// Transferred, if set, is told the bytes of each blob received, in, and sent, out.
+	Transferred func(direction string, n int64)
 	// GracePeriod is reported in the capabilities when the executor reports none: how long a client may be gone
 	// and still find its build; an executor that keeps jobs until it closes may report any.
 	GracePeriod time.Duration
@@ -119,6 +125,9 @@ func (s *Server) Handler() http.Handler {
 		s.registerWorkers(mux, s.Workers)
 	}
 	var h http.Handler = mux
+	if s.Instrument != nil {
+		h = s.Instrument(h)
+	}
 	if s.Middleware != nil {
 		h = s.Middleware(h)
 	}
@@ -476,7 +485,9 @@ func (s *Server) get(w http.ResponseWriter, r *http.Request) {
 	} else {
 		w.WriteHeader(http.StatusOK)
 	}
-	if _, err := io.Copy(w, rc); err != nil {
+	n, err := io.Copy(w, rc)
+	s.transferred("out", n)
+	if err != nil {
 		if we, _ := encodeError(err); we.Code != "" {
 			w.Header().Set(headerErrorCode, string(we.Code))
 		}
@@ -495,6 +506,7 @@ func (s *Server) put(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
+	s.transferred("in", b.Size)
 	writeJSON(w, http.StatusCreated, b)
 }
 
@@ -508,7 +520,15 @@ func (s *Server) importBlob(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
+	s.transferred("in", b.Size)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// transferred tells Transferred, if set, of n bytes of blobs moved in direction.
+func (s *Server) transferred(direction string, n int64) {
+	if s.Transferred != nil && n > 0 {
+		s.Transferred(direction, n)
+	}
 }
 
 // missing answers which of the blobs in the body the store lacks.
@@ -574,8 +594,12 @@ func (s *Server) readMany(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Length", strconv.FormatInt(total, 10))
 	w.WriteHeader(http.StatusOK)
+	sent := int64(0)
+	defer func() { s.transferred("out", sent) }()
 	for _, c := range contents {
-		if _, err := w.Write(c); err != nil {
+		n, err := w.Write(c)
+		sent += int64(n)
+		if err != nil {
 			return
 		}
 	}

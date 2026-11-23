@@ -36,6 +36,15 @@ type pool struct {
 	// settling holds the leases of attempts ended when their workers were told to kill them, by ID: a worker that
 	// missed the answer runs on until its fence, which comes before the lease would have passed.
 	settling map[string]time.Time
+	metrics  *Metrics // which New replaces before the pool is used
+	// shuttingDown is set as the coordinator starts to close, before it cancels its jobs.
+	shuttingDown bool
+	// staleKilled holds the IDs of the attempts counted as stale kills, the most recent, so that a heartbeat its worker
+	// sends again, as when it missed the answer, isn't counted again; only IDs of the pool's form are kept.
+	staleKilled *boundedSet
+	// withdrawn holds the IDs of the attempts withdrawn, the most recent, the pool's own, so that a heartbeat of one,
+	// counted as it was withdrawn, isn't counted again as stale once it has settled.
+	withdrawn *boundedSet
 }
 
 // worker is a registered worker.
@@ -65,9 +74,71 @@ type attempt struct {
 	report   *remote.AttemptReport
 	err      error
 	clock    *tracing.Offset // how far the worker's clock is ahead of the coordinator's, as its heartbeats say
+	// wait is the span of the attempt's wait for a worker, from its queuing to its assignment, and try that of its
+	// run on the worker, from its assignment to its end, under which the worker's spans go; nil without a trace.
+	wait, try *tracing.Active
 	// generation is the cache generation the attempt started in; a report from an earlier one than the current is
 	// refused, since what it published may name what a prune removed.
 	generation uint64
+	number     int // which try of its work it is, from 1
+}
+
+// ended reports whether at has ended.
+func (at *attempt) ended() bool {
+	select {
+	case <-at.done:
+		return true
+	default:
+		return false
+	}
+}
+
+// kind returns what the attempt does, as its try's span names it: layer, task, pull, push, upload or tag.
+func (at *attempt) kind() string {
+	switch {
+	case at.push != nil && at.push.Mode == remote.ModeUpload:
+		return "upload"
+	case at.push != nil && at.push.Mode == remote.ModeTag:
+		return "tag"
+	case at.push != nil:
+		return "push"
+	case at.req != nil && at.req.Action != nil && at.req.Action.Kind == sched.KindResolve:
+		return "pull"
+	case at.req != nil && at.req.Action != nil:
+		return at.req.Action.Kind
+	}
+	return ""
+}
+
+// tryOutcome returns how the try ended, as its span says: succeeded, failed, lost or killed.
+func (at *attempt) tryOutcome(report *remote.AttemptReport, err error) string {
+	switch {
+	case at.lost:
+		return "lost"
+	case at.killed, errors.Is(err, errPoolClosed), errors.Is(err, context.Canceled):
+		return "killed" // or ended by the coordinator's shutdown, which is no failure of the try's
+	case err != nil || report == nil || report.Failure != nil:
+		return "failed"
+	case at.push != nil && at.push.Mode == remote.ModeTag && report.Tagged != nil && report.Tagged.Failure != nil:
+		return "failed" // a tagging that failed a destination too, as a push that fails its write is
+	case !at.reports(report):
+		return "failed" // it reported no outcome of its work, which the job then refuses
+	}
+	return "succeeded"
+}
+
+// reports reports whether report holds the outcome that at's work reports: a build's result, or a push's, an
+// upload's or a tagging's.
+func (at *attempt) reports(report *remote.AttemptReport) bool {
+	switch {
+	case at.push == nil:
+		return report.Report != nil
+	case at.push.Mode == remote.ModeUpload:
+		return report.Uploaded != nil
+	case at.push.Mode == remote.ModeTag:
+		return report.Tagged != nil
+	}
+	return report.Pushed != nil
 }
 
 // buildInfo is what the pool knows of the build an attempt serves: for fairness and platform matching.
@@ -99,20 +170,26 @@ var (
 // newPool returns an empty pool, whose attempts belong to the cache generation that generation reports.
 func newPool(cfg Config, instance string, generation func() (uint64, error)) *pool {
 	return &pool{
-		cfg:        cfg,
-		instance:   instance,
-		now:        time.Now,
-		generation: generation,
-		workers:    map[string]*worker{},
-		attempts:   map[string]*attempt{},
-		settling:   map[string]time.Time{},
-		changed:    make(chan struct{}),
+		cfg:         cfg,
+		instance:    instance,
+		now:         time.Now,
+		generation:  generation,
+		workers:     map[string]*worker{},
+		attempts:    map[string]*attempt{},
+		settling:    map[string]time.Time{},
+		changed:     make(chan struct{}),
+		metrics:     noMetrics(),
+		withdrawn:   newBoundedSet(maxRemembered),
+		staleKilled: newBoundedSet(maxRemembered),
 	}
 }
 
+// idLen is the length of an ID newID returns.
+const idLen = 16
+
 // newID returns a fresh identifier.
 func newID() string {
-	var b [8]byte
+	var b [idLen / 2]byte
 	rand.Read(b[:])
 	return hex.EncodeToString(b[:])
 }
@@ -230,7 +307,7 @@ func (p *pool) attempt(ctx context.Context, req *sched.Request, push *remote.Pus
 			return nil, fmt.Errorf("reading the build cache's generation: %w", err)
 		}
 		at := &attempt{id: newID(), build: build, req: req, push: push, out: out, trace: ctx, done: make(chan struct{}),
-			generation: generation}
+			generation: generation, number: try + 1}
 		p.mu.Lock()
 		if p.closed {
 			p.mu.Unlock()
@@ -238,6 +315,10 @@ func (p *pool) attempt(ctx context.Context, req *sched.Request, push *remote.Pus
 				return nil, ctx.Err()
 			}
 			return nil, errPoolClosed
+		}
+		_, at.wait = tracing.Start(ctx, "wait for a worker", tracing.Role, tracing.RoleWait) // as it is queued
+		if try > 0 {
+			p.metrics.count(p.metrics.retries) // as it is queued again
 		}
 		p.attempts[at.id] = at
 		p.pending = append(p.pending, at)
@@ -266,7 +347,6 @@ func (p *pool) attempt(ctx context.Context, req *sched.Request, push *remote.Pus
 			}
 			return nil, at.err
 		}
-		tracing.Current(ctx).Set(fmt.Sprintf("retry %d", try+1), at.err.Error())
 	}
 }
 
@@ -283,7 +363,7 @@ func (p *pool) await(ctx context.Context, at *attempt) error {
 		case <-at.done:
 			return nil
 		case <-ctx.Done():
-			p.withdraw(at)
+			p.withdraw(at, killWithdrawn)
 			return ctx.Err()
 		case <-ticker.C:
 			if !p.waiting(at) {
@@ -291,10 +371,10 @@ func (p *pool) await(ctx context.Context, at *attempt) error {
 			}
 			switch {
 			case !sched.Demanded(ctx):
-				p.withdraw(at)
+				p.withdraw(at, killDemand)
 				return sched.ErrWithdrawn
 			case at.req != nil && at.req.Emulated && !sched.Permitted(ctx):
-				p.withdraw(at)
+				p.withdraw(at, killDemand)
 				return sched.ErrEmulationNeeded
 			}
 			if platform, waiting := p.unserved(at); waiting && !told {
@@ -377,12 +457,24 @@ func emulates(info remote.WorkerInfo, name string) bool {
 	return false
 }
 
-// withdraw takes at back, because no build needs it: a pending attempt is forgotten, and a running one is marked
-// killed, which its worker learns at its next heartbeat.
-func (p *pool) withdraw(at *attempt) {
+// withdraw takes at back, because no build needs it, for reason, which it counts: a pending attempt is forgotten, and
+// a running one is marked killed, which its worker learns at its next heartbeat.
+func (p *pool) withdraw(at *attempt, reason string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if !at.killed && !at.ended() {
+		if !p.shuttingDown {
+			p.metrics.kill(reason)
+		}
+		p.withdrawn.add(at.id)
+	}
 	at.killed = true
+	// The try ends now, killed, rather than once its worker hears of it, since the job that wanted it returns at once,
+	// and its trace with it.
+	if at.try != nil {
+		at.try.Set("outcome", "killed")
+		at.try.EndWith(context.Canceled)
+	}
 	for i, pending := range p.pending {
 		if pending == at {
 			p.pending = append(p.pending[:i], p.pending[i+1:]...)
@@ -402,6 +494,12 @@ func (p *pool) end(at *attempt, report *remote.AttemptReport, err error) {
 	default:
 	}
 	at.report, at.err = report, err
+	if at.try != nil {
+		at.try.Set("outcome", at.tryOutcome(report, err))
+		at.try.EndWith(err)
+	} else {
+		at.wait.EndWith(err) // it ended before a worker took it
+	}
 	if at.worker != nil {
 		at.worker.running--
 	}
@@ -428,6 +526,9 @@ func (p *pool) NextAssignment(ctx context.Context, id string) (*remote.Assignmen
 				at.assigned = p.now()
 				at.lease = at.assigned.Add(p.cfg.Lease)
 				w.running++
+				at.wait.End()
+				at.trace, at.try = tracing.Start(at.trace, "try", tracing.Role, tracing.RoleTry, "try", at.number,
+					"platform", at.tryPlatform(w), "kind", at.kind())
 				// Always traced, since an attempt always records its spans, which the worker sends.
 				trace := tracing.Call(at.trace)
 				if trace == nil {
@@ -544,6 +645,7 @@ func (p *pool) live(id string) (*attempt, error) {
 
 // lose ends at, whose lease has passed, as lost, so that its work is tried again elsewhere; p.mu must be held.
 func (p *pool) lose(at *attempt) {
+	p.metrics.count(p.metrics.expired)
 	at.lost = true
 	p.end(at, nil, fmt.Errorf("%w: worker %s didn't renew its lease", errWorkerLost, at.worker.id))
 }
@@ -556,8 +658,17 @@ func (p *pool) Heartbeat(_ context.Context, id string, beat remote.Heartbeat) (r
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	now := p.now()
+	_, settling := p.settling[id]
 	at, err := p.live(id)
 	if err != nil {
+		// An attempt no longer live is killed, as one lost to its lease or one an earlier instance ran: counted, but
+		// for one withdrawn, counted as it was. Its worker stops at the answer, so each is counted about once.
+		if !settling && !p.withdrawn.has(id) && !p.staleKilled.has(id) {
+			p.metrics.kill(killStale)
+			if len(id) == idLen { // one of the pool's form, not whatever a worker sends
+				p.staleKilled.add(id)
+			}
+		}
 		return remote.HeartbeatAnswer{Kill: true, Clock: now}, err
 	}
 	at.worker.lastSeen = now
@@ -612,20 +723,25 @@ func (p *pool) Report(_ context.Context, id string, report remote.AttemptReport)
 	defer p.mu.Unlock()
 	if _, ok := p.settling[id]; ok {
 		delete(p.settling, id) // the worker has stopped it, missing the kill
+		p.metrics.reject(rejectedStale)
 		return remote.ErrStaleAttempt
 	}
 	at, err := p.live(id)
 	if err != nil {
+		p.metrics.reject(rejectedStale)
 		return err
 	}
 	switch {
 	case at.killed:
 		p.end(at, nil, context.Canceled) // the worker is done with it, whatever it reports
+		p.metrics.reject(rejectedStale)
 		return remote.ErrStaleAttempt
 	case generationErr != nil:
 		p.end(at, nil, fmt.Errorf("reading the build cache's generation: %w", generationErr))
+		p.metrics.reject(rejectedGeneration)
 		return remote.ErrStaleAttempt
 	case at.generation != current:
+		p.metrics.reject(rejectedGeneration)
 		p.end(at, nil, fmt.Errorf("the build cache was pruned while the attempt ran: it started in generation %d, "+
 			"and the cache is at %d; run the command again", at.generation, current))
 		return remote.ErrStaleAttempt
@@ -656,6 +772,7 @@ func (p *pool) expire() {
 			delete(p.settling, id)
 		}
 	}
+
 	forgot := false
 	for id, w := range p.workers {
 		if w.running == 0 && w.polling == 0 && now.Sub(w.lastSeen) > p.cfg.Lease {
@@ -698,14 +815,58 @@ func (p *pool) liveAttempts() int {
 	return n
 }
 
+// closing says that the coordinator is shutting down, so that what it takes back meanwhile, as the jobs it cancels
+// withdraw their attempts, isn't counted as taken back for its own reasons.
+func (p *pool) closing() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.shuttingDown = true
+}
+
 // close ends every attempt as the coordinator shuts down, and accepts no more.
 func (p *pool) close() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.closed = true
 	for _, at := range p.attempts {
+		p.withdrawn.add(at.id) // so that its worker's late heartbeat isn't counted as a stale kill
 		p.end(at, nil, errPoolClosed)
 	}
 	p.pending = nil
 	p.wake()
+}
+
+// maxRemembered bounds how many withdrawn attempts the pool remembers, for its stale kills alone.
+const maxRemembered = 1 << 14
+
+// boundedSet is a set of strings that forgets the oldest once it holds max; not safe for concurrent use.
+type boundedSet struct {
+	members map[string]bool
+	order   []string // a ring of the members, oldest at next
+	next    int
+}
+
+// newBoundedSet returns an empty set of at most max members.
+func newBoundedSet(max int) *boundedSet {
+	return &boundedSet{members: map[string]bool{}, order: make([]string, 0, max)}
+}
+
+// add adds s, forgetting the oldest member if the set is full.
+func (b *boundedSet) add(s string) {
+	if b.members[s] {
+		return
+	}
+	if len(b.order) < cap(b.order) {
+		b.order = append(b.order, s)
+	} else {
+		delete(b.members, b.order[b.next])
+		b.order[b.next] = s
+		b.next = (b.next + 1) % len(b.order)
+	}
+	b.members[s] = true
+}
+
+// has reports whether s is a member.
+func (b *boundedSet) has(s string) bool {
+	return b.members[s]
 }

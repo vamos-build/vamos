@@ -23,7 +23,7 @@ func implementations(t *testing.T) map[string]cachetest.Fixture {
 			return cachetest.Stores{Content: d, Records: d, Corrupt: func(t *testing.T, b cache.Blob, data []byte) {
 				path := filepath.Join(dir, "cas", b.Digest.Algorithm().String(), b.Digest.Encoded())
 				testenv.Must(t, os.WriteFile(path, data, 0o600))
-			}}
+			}, Size: d.Size}
 		}},
 		"memory": {New: func(t *testing.T) cachetest.Stores {
 			m := cache.NewMemory()

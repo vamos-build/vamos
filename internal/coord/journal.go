@@ -40,7 +40,8 @@ type journal struct {
 	dir  string
 	lock *os.File
 
-	io sync.Mutex // held across each write, and taken before mu
+	io     sync.Mutex // held across each write, and taken before mu
+	failed func()     // called for each write that fails, if not nil; under io
 
 	mu          sync.Mutex
 	records     map[api.JobID]*record
@@ -312,7 +313,7 @@ func (j *journal) remove(id api.JobID) error {
 	if !ok {
 		return nil
 	}
-	if err := j.removeFile(j.path(id)); err != nil {
+	if err := j.fail(j.removeFile(j.path(id))); err != nil {
 		return err
 	}
 	j.mu.Lock()
@@ -363,7 +364,7 @@ func (j *journal) trim() error {
 		}
 		id := j.tombstones[0]
 		j.mu.Unlock()
-		if err := j.removeFile(j.path(id)); err != nil {
+		if err := j.fail(j.removeFile(j.path(id))); err != nil {
 			return err
 		}
 		j.mu.Lock()
@@ -412,8 +413,31 @@ func (j *journal) path(id api.JobID) string {
 	return filepath.Join(j.dir, "jobs", string(id)+".json")
 }
 
+// countFailures has failed called for every write or removal of a record that fails.
+func (j *journal) countFailures(failed func()) {
+	if j == nil {
+		return
+	}
+	j.io.Lock()
+	defer j.io.Unlock()
+	j.failed = failed
+}
+
+// fail returns err, counting it if it isn't nil; j.io must be held.
+func (j *journal) fail(err error) error {
+	if err != nil && j.failed != nil {
+		j.failed()
+	}
+	return err
+}
+
 // store writes r at its path, refusing a record larger than one can be read back; j.io must be held.
 func (j *journal) store(r *record) error {
+	return j.fail(j.storeRecord(r))
+}
+
+// storeRecord is store's, uncounted.
+func (j *journal) storeRecord(r *record) error {
 	data, err := json.Marshal(r)
 	if err != nil {
 		return err

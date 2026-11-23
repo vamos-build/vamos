@@ -31,7 +31,7 @@ func BenchmarkConvertAttempt(b *testing.B) {
 		sdktrace.WithSampler(sdktrace.ParentBased(sdktrace.AlwaysSample())),
 		sdktrace.WithSyncer(tracetest.NewNoopExporter()))
 	b.Cleanup(func() { _ = provider.Shutdown(context.Background()) })
-	bridge := newBridge(provider.Tracer("bench"), sampler{Sampler: sdktrace.AlwaysSample()}, "i")
+	bridge := mustBridge(b, provider.Tracer("bench"), sampler{Sampler: sdktrace.AlwaysSample()}, "i", nil)
 	b.Cleanup(func() { _ = bridge.close(context.Background()) })
 	ctx := bridge.StartJob(context.Background(), JobInfo{ID: "job-1", Kind: "build"})
 	b.ReportAllocs()

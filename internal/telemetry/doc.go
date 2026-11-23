@@ -51,4 +51,6 @@
 // BenchmarkConvertAttempt measures it.
 // setup.go builds the exporters and serves Prometheus; errors.go limits the error handler.
 // outer.go holds OuterTrace, the one check of an outer trace that the CLI and the coordinator make.
+// spanmetrics.go measures the spans the bridge is given, whether or not their trace is kept, each under its span's
+// context, for exemplars; http.go wraps the API's routes in otelhttp, and holds the view that bounds its labels.
 package telemetry

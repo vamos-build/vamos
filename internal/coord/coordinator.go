@@ -23,6 +23,7 @@ import (
 	"github.com/containerd/platforms"
 	"github.com/opencontainers/go-digest"
 	imgspecv1 "github.com/opencontainers/image-spec/specs-go/v1"
+	"go.opentelemetry.io/otel/metric"
 )
 
 // Config says how a coordinator runs.
@@ -71,10 +72,11 @@ type Config struct {
 	State string
 	// Warn is told what goes wrong without failing a job, such as a job's record that can't be written; nil drops it.
 	Warn func(error)
-	// Telemetry, if set, returns the bridge that exports the jobs' traces, given the coordinator's instance, which
-	// New reads from State before it resumes any job, and which every exported ID derives from; nil exports nothing.
+	// Telemetry, if set, returns the telemetry that exports the jobs' traces and the coordinator's metrics, given the
+	// coordinator's instance, which New reads from State before it resumes any job, and which every exported ID
+	// derives from; nil, or a nil result, exports nothing.
 	// What it makes is its caller's to shut down, whether or not New then succeeds, once the coordinator is closed.
-	Telemetry func(instance string) (*telemetry.Bridge, error)
+	Telemetry func(instance string) (*telemetry.Telemetry, error)
 }
 
 // NoRetries is the Config.Retries that tries no work again when its worker is lost.
@@ -129,9 +131,11 @@ type Coordinator struct {
 	pool     *pool
 	sharing  *sched.Sharing
 	bridge   *telemetry.Bridge // exports the jobs' traces; nil for none
-	// cancels are those of the jobs running, which Close calls itself before it closes the pool; nil once it has.
+	metrics  *Metrics
+	// cancels are those of the jobs running, with each one's kind, which Close calls itself before it closes the
+	// pool; nil once it has.
 	cancelsMu sync.Mutex
-	cancels   map[*context.CancelFunc]struct{}
+	cancels   map[*context.CancelFunc]string
 	closed    bool // Close has cancelled the jobs: one that starts now is cancelled at once
 	checker   *checker
 	stop      context.CancelFunc
@@ -185,17 +189,32 @@ func New(content cache.ContentStore, records cache.RecordStore, cfg Config) (*Co
 		return c.generation(context.Background())
 	})
 	var sharing []sched.SharingOption
+	var meter metric.Meter
 	if cfg.Telemetry != nil {
-		bridge, err := cfg.Telemetry(c.instance)
+		tel, err := cfg.Telemetry(c.instance)
 		if err != nil {
 			c.journal.close() // so that the state's lock is free for a coordinator started again
 			return nil, err
 		}
-		if bridge != nil { // as an interface, a nil *Bridge isn't nil
-			c.bridge = bridge
-			sharing = append(sharing, sched.WithSpanSink(bridge))
+		if tel != nil && tel.Bridge != nil { // as an interface, a nil *Bridge isn't nil
+			c.bridge = tel.Bridge
+			sharing = append(sharing, sched.WithSpanSink(tel.Bridge))
+		}
+		// A meter that exports nothing is left out, so that the stores aren't counted for nothing.
+		if tel.ExportsMetrics() {
+			meter = tel.Meter.Meter(meterName)
 		}
 	}
+	metrics, err := newMetrics(meter)
+	if err == nil {
+		err = metrics.register(c)
+	}
+	if err != nil {
+		c.journal.close()
+		return nil, err
+	}
+	c.metrics, c.pool.metrics = metrics, metrics
+	c.journal.countFailures(func() { metrics.count(metrics.journalFailures) })
 	c.sharing = sched.NewSharing(c.pool, content, records, sharing...)
 	c.checker = &checker{content: content, images: cfg.Images}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -203,6 +222,7 @@ func New(content cache.ContentStore, records cache.RecordStore, cfg Config) (*Co
 	c.started = time.Now()
 	if err := c.recover(kept); err != nil {
 		c.Close()
+		c.metrics.unregister()
 		return nil, fmt.Errorf("resuming the jobs recorded in %s: %w", cfg.State, err)
 	}
 	// The jobs' sweep runs apart from the leases', since its evictions write records, so that no write delays the
@@ -350,6 +370,7 @@ func (c *Coordinator) RetainEvents(n int) {
 // so that the next run resumes it rather than finding it ended by the shutdown.
 func (c *Coordinator) Close() error {
 	c.journal.close()
+	c.pool.closing() // so that the jobs the shutdown cancels aren't counted as withdrawn by their clients
 	c.cancelJobs()
 	c.stop()
 	c.pool.close()
@@ -459,10 +480,12 @@ func (c *Coordinator) Submit(ctx context.Context, req api.Request) (api.JobID, e
 	}
 	g := req.Graph
 	if g.Version != graph.Version {
+		c.metrics.refuse(refusedVersion)
 		return "", fmt.Errorf("graph version %d isn't supported; this coordinator runs version %d", g.Version,
 			graph.Version)
 	}
 	if !c.offered(g.Platform) {
+		c.metrics.refuse(refusedPlatform)
 		return "", fmt.Errorf("the graph was configured for an executor on %s, which this coordinator doesn't offer; "+
 			"it offers %v", platforms.Format(platforms.Normalize(g.Platform)), c.platformNames())
 	}
@@ -483,6 +506,9 @@ func (c *Coordinator) build(request *api.GraphRequest, native []string, run int6
 			// The generation is checked once the build is open, since no prune starts then: checked before, a prune
 			// could run between the check and the build's start.
 			if err := c.checkGeneration(ctx, g.Generation); err != nil {
+				if errors.Is(err, errPruned) { // not a failure to read the generation
+					c.metrics.refuse(refusedGeneration)
+				}
 				return sched.Failed(err)
 			}
 			results, err := c.run(ctx, g, native, ev)
@@ -518,7 +544,7 @@ func (c *Coordinator) reportOuterTrace(id api.JobID, problem error) {
 
 // cancelOnClose registers cancel, a job's, for Close to call before it closes the pool, or calls it now if Close has,
 // and returns what unregisters it.
-func (c *Coordinator) cancelOnClose(cancel *context.CancelFunc) func() {
+func (c *Coordinator) cancelOnClose(cancel *context.CancelFunc, kind string) func() {
 	c.cancelsMu.Lock()
 	defer c.cancelsMu.Unlock()
 	if c.closed {
@@ -526,14 +552,25 @@ func (c *Coordinator) cancelOnClose(cancel *context.CancelFunc) func() {
 		return func() {}
 	}
 	if c.cancels == nil {
-		c.cancels = map[*context.CancelFunc]struct{}{}
+		c.cancels = map[*context.CancelFunc]string{}
 	}
-	c.cancels[cancel] = struct{}{}
+	c.cancels[cancel] = kind
 	return func() {
 		c.cancelsMu.Lock()
 		defer c.cancelsMu.Unlock()
 		delete(c.cancels, cancel)
 	}
+}
+
+// openJobs returns how many jobs run, by kind.
+func (c *Coordinator) openJobs() map[string]int {
+	c.cancelsMu.Lock()
+	defer c.cancelsMu.Unlock()
+	open := map[string]int{}
+	for _, kind := range c.cancels {
+		open[kind]++
+	}
+	return open
 }
 
 // cancelJobs cancels every job running, synchronously, so that each sees its context end before the pool closes; a
@@ -566,7 +603,7 @@ func (c *Coordinator) traced(ctx context.Context, info telemetry.JobInfo,
 	// whose work returned failed before Close began is failed still, as RunJob decides as the work returns.
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	defer c.cancelOnClose(&cancel)()
+	defer c.cancelOnClose(&cancel, info.Kind)()
 	return sched.RunJob(ctx, func() (cache.ContentStore, error) { return c.content, nil },
 		func(err error) { c.cfg.Warn(fmt.Errorf("the job %s: %w", id, err)) }, sink, work)
 }
@@ -579,6 +616,9 @@ func (c *Coordinator) begin(ctx context.Context, r record, spec sched.Spec,
 	spec.ID = sched.NewJobID()
 	spec.Ending = c.ending(spec.ID)
 	reserved, err := c.jobs.Reserve(spec)
+	if errors.Is(err, sched.ErrBusy) {
+		c.metrics.refuse(refusedBusy)
+	}
 	if err != nil {
 		return "", err
 	}
@@ -641,11 +681,14 @@ func (c *Coordinator) checkGeneration(ctx context.Context, captured uint64) erro
 		return err
 	}
 	if captured != current {
-		return errors.New("the build cache was pruned while the build's sources were being captured, so what " +
-			"was captured may be gone; run the command again")
+		return errPruned
 	}
 	return nil
 }
+
+// errPruned refuses a graph captured against a generation other than the current one.
+var errPruned = errors.New("the build cache was pruned while the build's sources were being captured, so what " +
+	"was captured may be gone; run the command again")
 
 // platforms returns the platforms the deployment offers: by configuration, and those of the workers registered now.
 func (c *Coordinator) platforms() []imgspecv1.Platform {
@@ -745,7 +788,12 @@ func (c *Coordinator) Watch(ctx context.Context, id api.JobID, from int64, fn fu
 	if err != nil {
 		return err
 	}
-	return j.Watch(ctx, from, fn)
+	return j.Watch(ctx, from, func(e api.Event) error {
+		if e.Kind == api.EventGap {
+			c.metrics.count(c.metrics.gaps)
+		}
+		return fn(e)
+	})
 }
 
 // Cancel asks the job id to stop: its demand is withdrawn, and attempts no build needs are killed.

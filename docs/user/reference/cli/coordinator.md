@@ -45,8 +45,19 @@ variable. A coordinator started with `--local` exports nothing, and reads none o
 | `OTEL_SDK_DISABLED` | `true` turns every export off |
 | `OTEL_SERVICE_NAME`, `OTEL_RESOURCE_ATTRIBUTES` | The resource the traces are exported as |
 
+It exports metrics of its capacity, its speed, its cache and what degrades quietly the same way, as these say:
+
+| Variable | Effect |
+| --- | --- |
+| `OTEL_METRICS_EXPORTER` | `otlp`, `prometheus`, `console` or `none`, or several, comma-separated; unset, `otlp` if an OTLP endpoint is set, and `none` otherwise |
+| `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` | The collector of metrics alone |
+| `OTEL_METRIC_EXPORT_INTERVAL`, `OTEL_METRIC_EXPORT_TIMEOUT` | How often, in milliseconds, metrics are exported over OTLP, a minute by default, and how long an export may take |
+| `OTEL_EXPORTER_PROMETHEUS_HOST`, `OTEL_EXPORTER_PROMETHEUS_PORT` | Where Prometheus scrapes `/metrics`, `localhost:9464` by default: an address of its own, never the API's |
+
 An OTLP endpoint that isn't a signal's own, `OTEL_EXPORTER_OTLP_ENDPOINT`, turns metrics on too, unless
-`OTEL_METRICS_EXPORTER` says otherwise.
+`OTEL_METRICS_EXPORTER` says otherwise. An address Prometheus can't be served on fails the start, naming it.
+A histogram measured from a span of a kept trace carries that span as its exemplar, which a Prometheus scrape shows as
+OpenMetrics. No metric is labeled with a target, a workspace, a job or a file.
 An export that fails is reported in the coordinator's log, never to a client, and never changes a build.
 A client building with `TRACEPARENT` set joins its jobs to that trace,
 as [joining a CI trace](../remote.md#joining-a-ci-trace) describes.

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/vamos-build/vamos/internal/testenv"
+	collectormetrics "go.opentelemetry.io/proto/otlp/collector/metrics/v1"
 	collectortrace "go.opentelemetry.io/proto/otlp/collector/trace/v1"
 	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
 	"google.golang.org/protobuf/proto"
@@ -25,9 +26,10 @@ import (
 
 // otlpCollector is an OTLP/HTTP receiver, in this process, that keeps the spans it is sent, decoded.
 type otlpCollector struct {
-	url string
-	mu  sync.Mutex
-	got []collectedSpan
+	url     string
+	mu      sync.Mutex
+	got     []collectedSpan
+	metrics map[string]bool // the names of the metrics it received
 }
 
 // collectedSpan is a span the collector received, its IDs in hex, and its links' as trace/span.
@@ -60,12 +62,31 @@ func (w *world) newOTLPCollector(addr string) *otlpCollector {
 	return c
 }
 
-// serveHTTP takes an export request: spans it keeps, and anything else, such as metrics, it accepts unread.
+// serveHTTP takes an export request: spans it keeps, metrics whose names it keeps, and anything else it accepts unread.
 func (c *otlpCollector) serveHTTP(rw http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		http.Error(rw, err.Error(), http.StatusBadRequest)
 		return
+	}
+	if r.URL.Path == "/v1/metrics" {
+		var req collectormetrics.ExportMetricsServiceRequest
+		if err := proto.Unmarshal(body, &req); err != nil {
+			http.Error(rw, err.Error(), http.StatusBadRequest)
+			return
+		}
+		c.mu.Lock()
+		if c.metrics == nil {
+			c.metrics = map[string]bool{}
+		}
+		for _, rm := range req.GetResourceMetrics() {
+			for _, sm := range rm.GetScopeMetrics() {
+				for _, m := range sm.GetMetrics() {
+					c.metrics[m.GetName()] = true
+				}
+			}
+		}
+		c.mu.Unlock()
 	}
 	if r.URL.Path != "/v1/traces" {
 		rw.WriteHeader(http.StatusOK)
@@ -121,6 +142,13 @@ func valueText(v *commonpb.AnyValue) string {
 		return fmt.Sprint(v.GetDoubleValue())
 	}
 	return v.String()
+}
+
+// hasMetric reports whether the collector has received a metric named name.
+func (c *otlpCollector) hasMetric(name string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.metrics[name]
 }
 
 // spans returns what the collector has received.

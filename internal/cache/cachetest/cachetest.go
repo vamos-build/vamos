@@ -36,6 +36,9 @@ type Stores struct {
 	// Corrupt makes the content store hold data under b's digest, whatever data is, however the implementation keeps
 	// blobs, so that the suite can corrupt a blob as a bad disk might.
 	Corrupt func(t *testing.T, b cache.Blob, data []byte)
+	// Size, if set, returns how many bytes the stores hold, as cache.Directory.Size does, which the suite checks
+	// follows what is put, dropped and cleared.
+	Size func() (cache.DirectorySize, bool)
 }
 
 // must fails the test at once if err isn't nil.
@@ -58,6 +61,7 @@ func Content(t *testing.T, f Fixture) {
 	t.Run("trees", func(t *testing.T) { testReadTree(t, f.New(t)) })
 	t.Run("checkout corrupt file", func(t *testing.T) { testCheckoutCorruptFile(t, f.New(t)) })
 	t.Run("stat", func(t *testing.T) { testStat(t, f.New(t)) })
+	t.Run("size", func(t *testing.T) { testSize(t, f.New(t)) })
 }
 
 // Records checks the contract of a record store: the latest result for a key is kept, a key with none has no result,
@@ -797,5 +801,56 @@ func testPruneHistory(t *testing.T, s Stores) {
 	}
 	if removed, err := s.Records.PruneHistory(ctx, cutoff); err != nil || removed != 0 {
 		t.Errorf("PruneHistory again = %d, %v; want none removed", removed, err)
+	}
+}
+
+// testSize checks that the content the stores hold, if they count it, grows by each new blob put, by nothing for a
+// blob put again, shrinks by a blob dropped once found corrupt, and is none once cleared.
+func testSize(t *testing.T, s Stores) {
+	if s.Size == nil {
+		t.Skip("the stores don't count what they hold")
+	}
+	ctx := t.Context()
+	content := func() int64 {
+		t.Helper()
+		deadline := time.Now().Add(10 * time.Second)
+		for {
+			size, walked := s.Size()
+			if walked {
+				return size.Content
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("the stores never finished counting what they held as they opened")
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}
+	empty := content()
+	b, err := s.Content.PutBytes(ctx, []byte("sixteen bytes!!!"))
+	must(t, err)
+	if got := content(); got != empty+b.Size {
+		t.Errorf("after a put of %d bytes, the content is %d bytes; want %d", b.Size, got, empty+b.Size)
+	}
+	_, err = s.Content.PutBytes(ctx, []byte("sixteen bytes!!!"))
+	must(t, err)
+	if got := content(); got != empty+b.Size {
+		t.Errorf("after the same put again, the content is %d bytes; want %d", got, empty+b.Size)
+	}
+	other, err := s.Content.PutBytes(ctx, []byte("other"))
+	must(t, err)
+	s.Corrupt(t, b, []byte("sixteen fakes!!!")) // as a bad disk might, the same size
+	if _, err := s.Content.Read(ctx, b, b.Size); !errors.Is(err, cache.ErrCorrupt) {
+		t.Fatalf("Read of a corrupt blob = %v; want %v", err, cache.ErrCorrupt)
+	}
+	if got := content(); got != empty+other.Size {
+		t.Errorf("after the corrupt blob was dropped, the content is %d bytes; want %d", got, empty+other.Size)
+	}
+	if s.Unclearable {
+		return
+	}
+	_, err = s.Content.ClearContent(ctx)
+	must(t, err)
+	if got := content(); got != 0 {
+		t.Errorf("after a clear, the content is %d bytes; want none", got)
 	}
 }

@@ -281,7 +281,8 @@ appear in stored traces, where the pool's retries become visible as tries.
 Gauges are observable instruments whose callbacks read state under the owner's lock, once per collection: the pool's
 attempts by state and platform, workers and slots by platform, and builds waiting for a platform; `sched.Jobs`'s open
 jobs by kind; and the stores' sizes. Counters of events with no span of their own are incremented where the event
-happens, through a `coord.Metrics` struct of instruments that `coord.Config` takes. Its zero value is a no-op meter's.
+happens, through a `coord.Metrics` struct of instruments that `New` makes from the meter of the telemetry
+`Config.Telemetry` returns, since that is set up only once the instance is read; without one, a no-op meter's.
 These are refused jobs by reason (`busy`, `platform`, `version`, `generation`), expired leases, kills by reason
 (`withdrawn`, `demand`, `stale`), rejected reports by reason (`stale`, `generation`), journal write failures, gaps in
 event streams, which remote's watch serves, and retries. Each is created at start and so exported from zero. The worker
@@ -311,11 +312,12 @@ derived spans.
 
 ### The stores' sizes are running counts
 
-`cache.Directory` keeps the content store's total size and blob count as atomics. They are set by one walk when the
-directory opens, which runs in the background and makes the gauge report nothing until it has finished. They are then
-adjusted by each put that created a file, each removal of a corrupt blob, and `ClearContent`. The record store is
-counted the same way. `Directory.Size()` returns both and whether the walk has finished. `cachetest.Content` checks that
-the size follows puts, duplicate puts and clears.
+`cache.Directory` keeps a running count of the bytes its blobs and its records hold. One walk counts what was there
+when the directory opens, in the background, and the gauge reports nothing until it has finished; each write and
+removal through the directory, a put, a duplicate put, a dropped corrupt blob, a cleared store, a pruned history, is
+counted as it happens, one at a time, and one that the walk hasn't reached yet is counted as written and left by the
+walk, so that nothing is counted twice. `Directory.Size()` returns both and whether the walk has finished.
+`cachetest.Content` checks that the size follows puts, duplicate puts, dropped corrupt blobs and clears.
 
 *Alternative:* walk at every collection. Rejected: a store of millions of blobs, every 60 seconds.
 

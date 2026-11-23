@@ -89,11 +89,17 @@ type world struct {
 	local              *server          // the coordinator that GivenALocalCoordinator started
 	// telemetryEnv is the OTEL_* environment of the scenario's coordinator, which it reads through cli.Config.Getenv
 	// rather than the process's, so that scenarios with collectors of their own run at once.
-	telemetryEnv   map[string]string
-	collector      *otlpCollector     // the OTLP collector that GivenAnOTLPCollector started, if one did
-	interruptLocal context.CancelFunc // interrupts it
-	localErr       error              // what it ended with, once interrupted
-	localTook      time.Duration      // how long it took to end, once interrupted
+	telemetryEnv map[string]string
+	collector    *otlpCollector  // the OTLP collector that GivenAnOTLPCollector started, if one did
+	metrics      *metricsScrapes // where the coordinator serves Prometheus, and what was scraped, if it does
+	// workerLines are the connections of GivenACoordinatorWithTwoWorkers's workers to the coordinator, which a step
+	// cuts.
+	workerLines      []*workerLine
+	coordinatorCache string             // GivenACoordinatorWithAWorker's coordinator's --cache-dir
+	stopCoordinator  func() error       // interrupts it alone, and returns what it ended with
+	interruptLocal   context.CancelFunc // interrupts it
+	localErr         error              // what it ended with, once interrupted
+	localTook        time.Duration      // how long it took to end, once interrupted
 
 	prepared   string                 // the folder the next command sends to, if Given steps have put something there
 	outside    string                 // a folder outside the project, for files that commands read, such as secrets

@@ -248,7 +248,7 @@ func TestSchedulerTargetSpans(t *testing.T) {
 }
 
 // TestSchedulerJoinedTargetSpan checks that a target that joined an attempt another target started says so, naming
-// that attempt.
+// that attempt, and is marked joined, which outlasts its outcome.
 func TestSchedulerJoinedTargetSpan(t *testing.T) {
 	g := &graph.Graph{Version: graph.Version, ExecPlatform: "linux/amd64", Roots: []graph.Ref{1, 2}}
 	step := []graph.Step{{Op: graph.OpRun, Display: `run(["make"])`, Argv: []string{"make"}}}
@@ -269,6 +269,11 @@ func TestSchedulerJoinedTargetSpan(t *testing.T) {
 		a.Args["attempt"] == nil || a.Args["attempt"] != b.Args["attempt"] {
 		t.Errorf("the layers say %v and %v; want one a miss, the other joined, both naming its attempt", a.Args,
 			b.Args)
+	}
+	for _, span := range []tracing.Span{a, b} {
+		if joined := span.Args["outcome"] == api.NodeJoined; (span.Args["joined"] == true) != joined {
+			t.Errorf("%s says %v; want it marked joined only if it joined", span.Name, span.Args)
+		}
 	}
 }
 

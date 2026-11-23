@@ -1033,6 +1033,7 @@ func (o *targetOutput) Traced(t AttemptTrace) {
 	e.Cause = o.cause
 	trace.Record(e)
 	o.span.Set("outcome", e.Outcome, "attempt", t.ID)
+	markJoined(o.span, e.Outcome)
 	switch {
 	case starter == nil:
 		tracing.Relay(o.ctx, asShared(t.Write))
@@ -1101,6 +1102,7 @@ func (o *pullOutput) Traced(t AttemptTrace) {
 	e := t.entry(o.ref, o.desc, started)
 	jobTraceOf(o.ctx).Record(e)
 	o.span.Set("outcome", e.Outcome, "attempt", t.ID)
+	markJoined(o.span, e.Outcome)
 	if started {
 		tracing.Relay(o.ctx, asShared(t.Write))
 		return
@@ -1307,6 +1309,14 @@ func lostReason(problem error) string {
 		return lostCorrupt
 	default:
 		return lostUnusable
+	}
+}
+
+// markJoined marks span, a target's, as one that joined another's attempt, if outcome says so, so that whoever counts
+// joins tells it apart from a miss whatever its outcome then becomes, as a failure of the attempt it joined makes it.
+func markJoined(span *tracing.Active, outcome string) {
+	if outcome == api.NodeJoined {
+		span.Set("joined", true)
 	}
 }
 

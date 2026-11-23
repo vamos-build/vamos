@@ -62,6 +62,16 @@ type Telemetry struct {
 	shutdown []tier // what to stop, in order
 }
 
+// ExportsMetrics reports whether t exports metrics, so that what measures only for them, as the stores' counts and
+// the API's instrumentation do, is left out otherwise; false for a nil t.
+func (t *Telemetry) ExportsMetrics() bool {
+	if t == nil || t.Meter == nil {
+		return false
+	}
+	_, off := t.Meter.(noop.MeterProvider) // as Setup leaves it with no metrics exporter
+	return !off
+}
+
 // shutdownTimeout bounds how long Shutdown waits for what the exporters hold to be sent.
 const shutdownTimeout = 10 * time.Second
 
@@ -174,7 +184,7 @@ func Setup(cfg Config) (*Telemetry, error) {
 	}
 	owned = parts
 	if len(readers) > 0 {
-		opts := []sdkmetric.Option{sdkmetric.WithResource(res)}
+		opts := []sdkmetric.Option{sdkmetric.WithResource(res), sdkmetric.WithView(HTTPView())}
 		for _, reader := range readers {
 			opts = append(opts, sdkmetric.WithReader(reader))
 		}
@@ -195,7 +205,14 @@ func Setup(cfg Config) (*Telemetry, error) {
 		if tracer != nil {
 			spans = tracer.Tracer("github.com/vamos-build/vamos/internal/telemetry")
 		}
-		t.Bridge = newBridge(spans, s.sampler, cfg.Instance)
+		var meter metric.Meter // none if no metric is exported, so that spans aren't measured for nothing
+		if t.ExportsMetrics() {
+			meter = t.Meter.Meter(meterName)
+		}
+		t.Bridge, err = newBridge(spans, s.sampler, cfg.Instance, meter)
+		if err != nil {
+			return fail(err)
+		}
 		// First, so that the processors get the spans of what the bridge still has queued; and then, once that is
 		// done or out of time, and before the processors are stopped, so that they get no more, what still waits is
 		// dropped.

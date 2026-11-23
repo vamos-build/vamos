@@ -183,17 +183,18 @@ docker compose -f remote/compose.yaml up -d --wait \
   docker compose -f remote/compose.yaml down
 
 # R4. A worker killed mid-build: the build's running target is tried again on the other worker and the build
-# succeeds, its trace naming the retry; the worker comes back, logs that it registered again, and cleans up after
+# succeeds, its trace holding the try that was lost, before the one that ran; the worker comes back, logs that it
+# registered again, and cleans up after
 # the attempt it was running. `docker restart -t 0` kills the process at once and starts the container again;
 # `docker kill` would leave it stopped, since Docker's restart policy ignores a manual kill. Workers take work as
-# they poll, so the attempt may be on worker-2: if the trace names no retry, run the check again restarting that one.
+# they poll, so the attempt may be on worker-2: if the trace holds no lost try, run the check again restarting that one.
 # Setup runs first, and only the restart's timer in the background, as in R6.
 docker compose -f remote/compose.yaml up -d --wait \
   && docker network connect remote_default "vamos_$(basename "$WORKSPACE_FOLDER")" \
   && { (sleep 15; docker restart -t 0 remote-worker-1) & \
        ./vamos build slow --rebuild -C "$TMP/slow" --coordinator http://coordinator:8080 --trace "$TMP/r4.json"; \
        wait; }; \
-  grep -o '"retry 1"' "$TMP/r4.json"; \
+  grep -oE '"outcome": *"lost"' "$TMP/r4.json"; \
   docker compose -f remote/compose.yaml logs worker | grep -i "registered\|cleaning up"; \
   docker network disconnect remote_default "vamos_$(basename "$WORKSPACE_FOLDER")"; \
   docker compose -f remote/compose.yaml down
@@ -244,7 +245,7 @@ for p in $(kubectl -n vamos get pods -o name | grep worker); do
 done
 docker exec vamos-control-plane crictl stop --timeout 0 \
   "$(kubectl -n vamos get $V -o jsonpath='{.status.containerStatuses[0].containerID}' | sed 's|containerd://||')"
-wait $B; grep -o '"retry 1"' "$TMP/k2.json"; sleep 5; kubectl -n vamos logs $V | grep -i "registered\|cleaning up"
+wait $B; grep -oE '"outcome": *"lost"' "$TMP/k2.json"; sleep 5; kubectl -n vamos logs $V | grep -i "registered\|cleaning up"
 
 # K3. The coordinator's pod deleted mid-build, as R6: the StatefulSet starts another on the same volume claim,
 # which resumes the build, and the client, reconnected through a new port-forward, sees it succeed.

@@ -27,7 +27,7 @@ func newTestBridge(t *testing.T, env map[string]string) (*Bridge, *tracetest.InM
 	if err != nil {
 		t.Fatal(err)
 	}
-	b := newBridge(tracer, s, "i")
+	b := mustBridge(t, tracer, s, "i", nil)
 	t.Cleanup(func() { _ = b.close(context.Background()) })
 	return b, exporter
 }
@@ -408,7 +408,7 @@ func TestBridgeDropsWholeSnapshots(t *testing.T) {
 	provider := sdktrace.NewTracerProvider(sdktrace.WithIDGenerator(chosenIDs{}),
 		sdktrace.WithSampler(sdktrace.ParentBased(sdktrace.AlwaysSample())), sdktrace.WithSyncer(exporter))
 	t.Cleanup(func() { _ = provider.Shutdown(context.Background()) })
-	b := newBridge(provider.Tracer("test"), sampler{Sampler: sdktrace.AlwaysSample()}, "i")
+	b := mustBridge(t, provider.Tracer("test"), sampler{Sampler: sdktrace.AlwaysSample()}, "i", nil)
 	t.Cleanup(func() { _ = b.close(context.Background()) })
 	var mu sync.Mutex
 	var warnings []string
@@ -571,7 +571,7 @@ func TestBridgeAbandonDropsWhatWaits(t *testing.T) {
 		gate: make(chan struct{})}
 	provider := sdktrace.NewTracerProvider(sdktrace.WithIDGenerator(chosenIDs{}),
 		sdktrace.WithSampler(sdktrace.ParentBased(sdktrace.AlwaysSample())), sdktrace.WithSyncer(exporter))
-	b := newBridge(provider.Tracer("test"), sampler{Sampler: sdktrace.AlwaysSample()}, "i")
+	b := mustBridge(t, provider.Tracer("test"), sampler{Sampler: sdktrace.AlwaysSample()}, "i", nil)
 	var mu sync.Mutex
 	var warnings []string
 	HandleErrors(func(w string) {

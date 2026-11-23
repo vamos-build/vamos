@@ -57,7 +57,8 @@ SHALL serve no metrics. An address it can't listen on SHALL fail its start, nami
 
 No metric SHALL be labeled with a target, a workspace, a job, an attempt, a worker's ID or a file. Labels SHALL be
 drawn from a platform, a kind of target or job, an outcome, a miss cause, a reason, a state or a store, each with a
-bounded set of values.
+bounded set of values. A platform is one the deployment offers or a registered worker runs, which the deployment
+bounds, as it trusts its workers, whose registrations and relayed spans supply a try's labels.
 
 #### Scenario: A workspace's builds add no series
 
@@ -74,9 +75,10 @@ platform; `vamos.builds.waiting` for a platform; `vamos.jobs.open`; and `vamos.j
 
 #### Scenario: A build waiting for a platform is counted
 
-- **GIVEN** a coordinator that offers `linux/arm64`, with no worker of it, serving Prometheus metrics
-- **WHEN** a client builds `app` for `linux/arm64` on the coordinator, and I scrape the metrics while it waits
-- **THEN** `vamos_builds_waiting` for `platform` `linux/arm64` is 1, and `vamos_attempts` for `state` `queued` at least 1
+- **GIVEN** a coordinator that offers a platform, such as `linux/arm64`, with no worker of it, serving Prometheus
+  metrics
+- **WHEN** a client builds `app` for that platform on the coordinator, and I scrape the metrics while it waits
+- **THEN** `vamos_builds_waiting` for that `platform` is 1, and `vamos_attempts` for `state` `queued` at least 1
 
 #### Scenario: A refused build is counted by reason
 
@@ -129,10 +131,12 @@ A coordinator SHALL export, by kind of target, `vamos.cache.hits`; `vamos.cache.
 
 #### Scenario: A result lost to a missing blob is counted
 
-- **GIVEN** a coordinator with a worker, serving Prometheus metrics, that has built `app`
-- **AND** a blob of `app`'s result removed from its build cache
+- **GIVEN** a coordinator with a worker, serving Prometheus metrics, that has built `app`, which adds the files of the
+  task `out`
+- **AND** the blobs of its build cache removed, which hold `out`'s files
 - **WHEN** I build `app` on the coordinator, and scrape the metrics
-- **THEN** `vamos_cache_lost_total` for `kind` `layer` is 1, and `vamos_cache_misses_total` for `cause` `lost` is 1
+- **THEN** `vamos_cache_lost_total` for `kind` `task` and `reason` `missing` is 1, and `vamos_cache_misses_total` for
+  `cause` `lost` is 1
 
 #### Scenario: The store's size follows what it holds
 

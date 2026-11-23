@@ -744,7 +744,16 @@ func (inv *invocation) coordinator() error {
 	listening := func() {
 		telemetry.HandleErrors(func(msg string) { fmt.Fprintf(stderr, "vamos: warning: %s\n", msg) })
 	}
-	server, closer = &remote.Server{Executor: c, Content: c.content, Workers: c.Workers()}, c
+	s := &remote.Server{Executor: c, Content: c.content, Workers: c.Workers()}
+	if c.telemetry.ExportsMetrics() {
+		transferred, err := telemetry.Transferred(c.telemetry.Meter)
+		if err != nil {
+			inv.closeExecutor(c)
+			return fmt.Errorf("counting the bytes the API moves: %w", err)
+		}
+		s.Instrument, s.Transferred = telemetry.Instrument(c.telemetry.Meter), transferred
+	}
+	server, closer = s, c
 	return inv.serve(server, closer, true, listening)
 }
 
@@ -870,14 +879,11 @@ func (inv *invocation) newCoordinator() (*coordinatorStores, error) {
 	// derive, is read from its state, and before the jobs it resumes start.
 	var tel *telemetry.Telemetry
 	var telErr error
-	setup := func(instance string) (*telemetry.Bridge, error) {
+	setup := func(instance string) (*telemetry.Telemetry, error) {
 		tel, telErr = telemetry.Setup(telemetry.Config{Role: telemetry.Coordinator, Instance: instance,
 			Version: run.Version(), Getenv: inv.app.getenv, Console: inv.stdout,
 			Warn: func(msg string) { inv.warn(errors.New(msg)) }})
-		if telErr != nil {
-			return nil, telErr
-		}
-		return tel.Bridge, nil
+		return tel, telErr
 	}
 	c, err := coord.New(directory, directory, coord.Config{
 		Platforms:       offered,

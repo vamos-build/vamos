@@ -19,6 +19,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/vamos-build/vamos/internal/tracing"
@@ -37,6 +38,7 @@ type Bridge struct {
 	tracer   trace.Tracer // nil if no trace is exported
 	sampler  sampler
 	instance string // the coordinator's, which a restart that keeps its state keeps, and every ID derives from
+	metrics  *spanMetrics
 
 	produced *lru[string, trace.SpanContext] // the exported span that made each Produces token; the converter's
 
@@ -87,9 +89,14 @@ type attemptRecord struct {
 const maxRemembered = 1 << 16
 
 // newBridge returns a bridge that exports the spans of the coordinator instance through tracer, nil for none, and
-// keeps the traces s samples. The caller stops it with close.
-func newBridge(tracer trace.Tracer, s sampler, instance string) *Bridge {
+// keeps the traces s samples, and measures them with meter, nil for none. The caller stops it with close.
+func newBridge(tracer trace.Tracer, s sampler, instance string, meter metric.Meter) (*Bridge, error) {
+	metrics, err := newSpanMetrics(meter)
+	if err != nil {
+		return nil, fmt.Errorf("making the metrics of spans: %w", err)
+	}
 	b := &Bridge{
+		metrics:  metrics,
 		tracer:   tracer,
 		sampler:  s,
 		instance: instance,
@@ -104,11 +111,11 @@ func newBridge(tracer trace.Tracer, s sampler, instance string) *Bridge {
 	if tracer == nil {
 		close(b.stopped)
 		close(b.reported)
-		return b
+		return b, nil
 	}
 	go b.convertQueue()
 	go b.reportDrops()
-	return b
+	return b, nil
 }
 
 // convertQueue converts the queued snapshots in order, until the bridge is closed and its queue empty.
@@ -156,11 +163,11 @@ func (b *Bridge) reportDrops() {
 // enqueue queues convert, which converts a snapshot of j, the attempt's if attempt isn't "", of an estimated bytes,
 // unless the bridge is closed, or the snapshot is dropped: when so many bytes or snapshots wait already that it would
 // pass the bridge's bounds, or when its job has lost one before. Drops are reported once for each burst.
-func (b *Bridge) enqueue(j *job, attempt string, bytes int, convert func()) {
+func (b *Bridge) enqueue(j *job, attempt string, bytes int, convert func()) bool {
 	b.queueMu.Lock()
 	if b.closed {
 		b.queueMu.Unlock()
-		return
+		return false
 	}
 	if j.cut || len(b.queue) > 0 && (b.waiting+bytes > b.maxBytes || len(b.queue) >= maxQueuedSnapshots) {
 		j.cut = true
@@ -170,7 +177,7 @@ func (b *Bridge) enqueue(j *job, attempt string, bytes int, convert func()) {
 		case b.report <- struct{}{}:
 		default: // the reporter is woken already
 		}
-		return
+		return false
 	}
 	if attempt != "" {
 		// Remembered for joiners to link to only once queued, as one not yet queued may still be dropped,
@@ -183,6 +190,7 @@ func (b *Bridge) enqueue(j *job, attempt string, bytes int, convert func()) {
 	b.waiting += bytes
 	b.nonEmpty.Signal()
 	b.queueMu.Unlock()
+	return true
 }
 
 // close converts what is queued, stops the converter and reports the drops not reported yet, or returns as ctx ends;
@@ -334,8 +342,12 @@ func jobOf(ctx context.Context) *job {
 // which started it, even if that job has since left it:
 // under a span of the attempt's own, itself under the span that the attempt's work is part of, its starter's target.
 func (b *Bridge) Attempt(ctx context.Context, id string, spans []tracing.Span, start, end time.Time) {
+	if b == nil {
+		return
+	}
 	j := jobOf(ctx)
-	if b == nil || j == nil || b.tracer == nil || !j.sampled {
+	if j == nil || b.tracer == nil || !j.sampled {
+		b.metrics.attempt(b.instance, j, spans, false) // whether or not the trace is kept
 		return
 	}
 	parent := j.span
@@ -343,19 +355,25 @@ func (b *Bridge) Attempt(ctx context.Context, id string, spans []tracing.Span, s
 		parent = spanIDOf(b.instance, j.info.ID, call.Parent)
 	}
 	attempt := attemptSpanIDOf(id)
-	b.enqueue(j, id, estimatedSize(spans), func() {
+	queued := b.enqueue(j, id, estimatedSize(spans), func() {
 		b.start(j, parent, attempt, "attempt", start, end, nil,
 			append(j.common(), attribute.String("vamos.attempt", id)), codes.Unset, "")
 		b.export(j, attempt, spans)
 	})
+	// Measured once the snapshot is queued, or dropped, so that an exemplar names only a span that is exported.
+	b.metrics.attempt(b.instance, j, spans, queued)
 }
 
 // Job exports the job's span, which holds the others, with how it ended, outcome, which is an error if it is
 // "failed", and then the job's own spans, which it recorded from start to end,
 // later, on the bridge's goroutine, which reads spans then, so the caller doesn't change them.
 func (b *Bridge) Job(ctx context.Context, spans []tracing.Span, start, end time.Time, outcome string) {
+	if b == nil {
+		return
+	}
 	j := jobOf(ctx)
-	if b == nil || j == nil || b.tracer == nil || !j.sampled {
+	if j == nil || b.tracer == nil || !j.sampled {
+		b.metrics.job(b.instance, j, spans, start, end, outcome, false) // whether or not the trace is kept
 		return
 	}
 	attrs := append(j.common(),
@@ -371,10 +389,11 @@ func (b *Bridge) Job(ctx context.Context, spans []tracing.Span, start, end time.
 	if j.parent.IsValid() {
 		parent = j.parent.SpanID()
 	}
-	b.enqueue(j, "", estimatedSize(spans), func() {
+	queued := b.enqueue(j, "", estimatedSize(spans), func() {
 		b.start(j, parent, j.span, j.info.Kind, start, end, nil, attrs, status, "")
 		b.export(j, j.span, spans)
 	})
+	b.metrics.job(b.instance, j, spans, start, end, outcome, queued)
 }
 
 // export exports spans, one snapshot of a job's or an attempt's, each under the span of the vamos span it is part of,

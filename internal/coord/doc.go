@@ -94,7 +94,8 @@
 // pool.go owns workers, attempts, assignment, leases, kills and reports; coordinator.go owns the executor's
 // methods, the build's context and recovery, and submitPush and submitPublish the jobs that write to registries;
 // journal.go owns the jobs on disk; checker.go checks cached results
-// against the content store and the registry.
+// against the content store and the registry; metrics.go owns the counters, counted where what they count happens,
+// and the gauges, read from the pool, the running jobs and the stores as each collection asks.
 // coord_test.go drives a coordinator with fake workers over the worker-facing API; platform_test.go does so with
 // workers of several platforms; restart_test.go restarts one over the same stores and state.
 package coord

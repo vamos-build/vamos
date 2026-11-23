@@ -62,6 +62,54 @@ Where a stored trace draws an arrow, from the span that made something to one th
 used it links to the one that made it, if that was exported before it, through a bounded index of what spans
 produced. What the client's load made isn't exported, so a step that adds a glob's files has no link.
 
+## Metrics
+
+A coordinator's metrics come from three places. Histograms and the cache's counts are measured by the bridge from the
+spans it is given, whether or not their trace is kept, each under the context of the span it measures, so that a
+sampled one is its exemplar. Gauges are read from the pool's, the jobs' and the stores' state as each collection
+asks. Counters of what has no span of its own are counted where it happens, through `coord.Metrics`. Every counter is
+exported from zero, by each of the bounded values of its labels, and no label holds a target, a workspace, a job, an
+attempt, a worker or a file. A platform label is a registered worker's, which the deployment bounds: workers are
+trusted, as they write the cache's results. A histogram's exemplar names a span only once its snapshot is queued for
+export, which a shutdown out of time may still abandon; one the bridge drops is measured without one. What is
+measured from spans is what the stored trace keeps of them, so a trace trimmed to its bound may leave some out.
+
+The metrics, as Prometheus names them; OpenTelemetry's names are the same with dots, without the unit's suffix or
+`_total`, such as `vamos.attempts.duration`.
+
+| Metric | Type | Labels | What it says |
+| --- | --- | --- | --- |
+| `vamos_attempts_wait_seconds` | histogram | | How long each try of an attempt waited for a worker |
+| `vamos_attempts_duration_seconds` | histogram | `platform`, `kind`, `outcome` | How long each try ran on its worker, from its assignment to its report, its loss, or the kill the coordinator decided on, before the worker hears of it; `outcome` is `succeeded`, `failed`, `lost` or `killed`, as a try the coordinator's shutdown ended is, and `platform` the worker's, or `any` for work that runs no command |
+| `vamos_attempts_cpu_seconds` | histogram | `platform`, `kind` | The CPU time a try's commands used, as its worker's cgroup read it, once workers report it |
+| `vamos_attempts_memory_peak_bytes` | histogram | `platform`, `kind` | The peak memory a try's commands used, as its worker's cgroup read it, once workers report it |
+| `vamos_jobs_duration_seconds` | histogram | `kind`, `outcome` | How long each run of a job took; `outcome` is `succeeded`, `failed` or `cancelled` |
+| `vamos_cache_hits_total` | counter | `kind` | Targets whose cached result was reused |
+| `vamos_cache_misses_total` | counter | `kind`, `cause` | Targets that missed, whether or not their run then succeeded, but for those that joined another's attempt and those retried, counted as their retry, by why: `forced`, `new`, `lost`, `own-inputs`, `upstream`, `dependency`, or `unknown`, as a pull's, which is counted only if it succeeds |
+| `vamos_cache_joins_total` | counter | `kind` | Targets that joined another job's attempt, whether or not it then succeeded |
+| `vamos_cache_saved_seconds_total` | counter | `kind` | What the runs that hits reused took, less the hits' own time |
+| `vamos_cache_lost_total` | counter | `kind`, `reason` | Results found but unusable: `missing`, `corrupt` or `unusable` |
+| `vamos_transfer_bytes_total` | counter | `direction` | The bytes of blobs the API accepted, `in`, and sent, `out`, as far as each read went |
+| `vamos_store_size_bytes` | gauge | `store` | What the build cache holds, `content` or `records`, once its count of what it held at start is done, which reads each directory's names at once; a directory it couldn't read holds the gauge back until a later collection reads it |
+| `vamos_attempts` | gauge | `state`, `platform` | Attempts `queued` for a worker, by the platform they run on, and `running`, by their worker's; `any` for work that runs no command, as its tries are labelled |
+| `vamos_workers` | gauge | `platform` | Registered workers |
+| `vamos_worker_slots` | gauge | `state`, `platform` | The registered workers' slots, `busy` or `free` |
+| `vamos_builds_waiting` | gauge | `platform` | Builds with an attempt that runs commands waiting for a platform no registered worker runs, by the build that started it, which builds that share it aren't; work waiting for a worker that publishes isn't counted |
+| `vamos_jobs_open` | gauge | `kind` | Jobs running: `build`, `push` or `publish` |
+| `vamos_jobs_refused_total` | counter | `reason` | Jobs refused: `busy`, `platform`, `version` or `generation` |
+| `vamos_attempts_killed_total` | counter | `reason` | Attempts taken back, queued or running: `withdrawn`, as every job that wanted it ended, `demand`, as no build demands it, or `stale`, killed at the heartbeat of an attempt no longer live, as one lost to its lease or run by an instance before a restart, but for one withdrawn, and once for a worker that heartbeats again; what the coordinator's shutdown takes back isn't counted |
+| `vamos_reports_rejected_total` | counter | `reason` | Workers' reports refused: `stale` or `generation` |
+| `vamos_leases_expired_total` | counter | | Tries lost as their worker's lease expired |
+| `vamos_attempts_retries_total` | counter | | Attempts tried again after their worker was lost |
+| `vamos_journal_failures_total` | counter | | Writes of the job journal that failed |
+| `vamos_events_gaps_total` | counter | | Gaps in a job's events that watches were served, as a watch from before what is kept is |
+| `http_server_request_duration_seconds` | histogram | `http_request_method`, `http_route`, `http_response_status_code` | How long the API's requests took, by route, never by path |
+| `http_server_request_body_size_bytes` | histogram | as above | The size of the API's requests' bodies |
+| `http_server_response_body_size_bytes` | histogram | as above | The size of the API's responses' bodies |
+
+`kind` is a target's, `layer`, `task` or `pull`, or a try's, those and `push`, `upload` or `tag`. The Go runtime's
+metrics, `go_*`, come from OpenTelemetry's runtime instrumentation, and aren't listed.
+
 ## Configuration
 
 `Setup` reads the standard `OTEL_*` variables through a `Getenv` the coordinator passes, so that tests can run
