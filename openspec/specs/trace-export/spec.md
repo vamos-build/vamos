@@ -80,8 +80,9 @@ the job, and the spans of the attempts it started, its workers' among them. The 
 ### Requirement: Exported spans keep vamos's timing and nesting
 
 Each exported span SHALL start and end when the vamos span did, on the coordinator's clock, a worker's spans shifted
-onto it as stored traces are, and SHALL have as its parent the exported span of the vamos span it was part of. A span
-of an attempt's trace that was cut short SHALL be absent, as it is from the stored trace.
+onto it as stored traces are, and SHALL have as its parent the exported span of the vamos span it was part of if that
+span is in the same snapshot, and otherwise the span of its job or attempt. A span of an attempt's trace that was cut
+short SHALL be absent, as it is from the stored trace.
 
 #### Scenario: A step's exported span lies within its target's
 
