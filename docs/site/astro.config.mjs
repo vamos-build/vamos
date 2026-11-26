@@ -28,7 +28,7 @@ export default defineConfig({
         useStarlightUiThemeColors: true,
       },
       customCss: [
-        "@fontsource-variable/bricolage-grotesque",
+        "@fontsource-variable/schibsted-grotesk",
         "@fontsource-variable/figtree",
         "@fontsource-variable/martian-mono",
         "./src/styles/vamos.css",
