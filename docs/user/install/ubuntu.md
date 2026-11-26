@@ -4,7 +4,7 @@ description: "Install Vamos directly on an Ubuntu 24.04 or later host."
 ---
 
 These steps install Vamos on an Ubuntu 24.04 or later host or virtual machine.
-Earlier releases have a glibc older than 2.34, which the binary requires.
+Earlier releases don't package `netavark`, which Vamos needs to run steps.
 
 Install the packages Vamos needs at run time:
 
