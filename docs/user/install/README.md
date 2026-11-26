@@ -9,6 +9,15 @@ a `SHA256SUMS` file, and an `install.sh` script that installs the binary.
 The binary requires glibc 2.34 or later.
 
 To follow the [fundamentals](../fundamentals.md), use the repository's devcontainer or [run Vamos with Docker](docker.md).
+The repository's [devcontainer](https://github.com/vamos-build/vamos/blob/main/.devcontainer/devcontainer.json)
+provides the build dependencies, privileges, chroot isolation and container storage Vamos needs, but not Vamos itself.
+Build it there, from the repository root:
+
+```sh
+go build -o /tmp/vamos .
+export PATH="/tmp:$PATH"
+vamos --help
+```
 
 ## Choose a setup
 
