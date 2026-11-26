@@ -229,7 +229,7 @@ pre.mermaid foreignObject hr {
 }
 
 /*
-  The tutorial's artifact grid: one small diagram per cell, so inputs, operations and outputs line up in rows,
+  The fundamentals page's artifact grid: one small diagram per cell, so inputs, operations and outputs line up in rows,
   which a single Mermaid layout cannot guarantee. The diagrams keep their natural size so all cells share a scale.
 */
 .sl-markdown-content .artifact-grid {

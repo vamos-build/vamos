@@ -1,7 +1,18 @@
 /** The sidebar, which also orders the pages in llms.txt. */
 export const sidebar = [
   { label: "User guide", link: "/" },
-  "tutorial",
+  "fundamentals",
+  {
+    label: "Install",
+    items: [
+      { label: "Overview", link: "/install/" },
+      "install/docker",
+      "install/dockerfile-ubuntu",
+      "install/dockerfile-fedora",
+      "install/ubuntu",
+      "install/fedora",
+    ],
+  },
   {
     label: "Reference",
     items: [

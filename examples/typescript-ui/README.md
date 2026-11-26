@@ -1,7 +1,7 @@
 # typescript-ui example
 
 A small TypeScript website built with Vite and served by nginx.
-This is the project used by the [introductory tutorial](../../docs/user/tutorial.md),
+This is the project used by the [fundamentals](../../docs/user/fundamentals.md) page,
 which explains its `BUILD` file and how images and filesets compose.
 
 ## Build graph
@@ -10,7 +10,9 @@ which explains its `BUILD` file and how images and filesets compose.
 ---
 config:
   flowchart:
+    minNodeWidth: 80
     padding: 6
+    wrappingWidth: 400
 ---
 flowchart TD
     nodejs[<div style="text-align:left"><i>pull nodejs</i><hr/>node:26-alpine</div>]
@@ -31,7 +33,7 @@ flowchart TD
 
 ## Build and run
 
-Set up vamos using the [tutorial](../../docs/user/tutorial.md#2-set-up-vamos).
+Set up vamos using the [install guide](../../docs/user/install/README.md).
 From the repository root:
 
 ```sh

@@ -83,21 +83,21 @@ S=examples/strawberry-react
 ```
 
 ```sh
-# 10. The introductory tutorial's TypeScript UI: build, load, serve, and export.
+# 10. The fundamentals page's TypeScript UI: build, load, serve, and export.
 # Expect the heading and bundled message over HTTP, matching the exported website.
 # The script checks inside the container, so it also works from the devcontainer.
 ./examples/typescript-ui/check.sh
 ```
 
 ```sh
-# 11. install.sh, as the release's smoke test runs it: the tutorial's devcontainer Dockerfile on Ubuntu 24.04,
+# 11. install.sh, as the release's smoke test runs it: the install guide's Ubuntu Dockerfile on Ubuntu 24.04,
 # installing this platform's release binary from a local directory rather than a release, then the MCP example.
 # Expect "vamos version v0.0.0-test", then the MCP reply.
 shellcheck -s sh install.sh && mkdir -p "$TMP/devc" \
   && docker build -q --target binary --build-arg VERSION=v0.0.0-test --output "$TMP/devc/dist" . \
   && mv "$TMP/devc/dist/vamos" "$TMP/devc/dist/vamos-linux-$(go env GOARCH)" && cp install.sh "$TMP/devc/dist/" \
   && (cd "$TMP/devc/dist" && sha256sum vamos-linux-* > SHA256SUMS) \
-  && awk '/^```dockerfile/ { f = 1; next } /^```/ { f = 0 } f' docs/user/tutorial.md \
+  && awk '/^```dockerfile/ { f = 1; next } /^```/ { f = 0 } f' docs/user/install/dockerfile-ubuntu.md \
   | sed 's#^RUN curl -fsSL -o /tmp/vamos-install.sh https://github.com/vamos-build/vamos/releases/download/[^ ]*/install.sh \\$#COPY dist /tmp/dist\nENV VAMOS_RELEASE_URL=file:///tmp/dist\nRUN curl -fsSL -o /tmp/vamos-install.sh file:///tmp/dist/install.sh \\#' \
   > "$TMP/devc/Dockerfile" && grep -qF 'file:///tmp/dist/install.sh' "$TMP/devc/Dockerfile" \
   && docker build -q -t vamos-devcontainer "$TMP/devc" \

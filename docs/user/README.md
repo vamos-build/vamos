@@ -41,18 +41,19 @@ Node.js and build tools remain in the build cache.
 
 ## Where to start
 
-Start with the [tutorial](tutorial.md).
-It introduces images and filesets, walks through setting up vamos,
-and builds the [TypeScript UI example](https://github.com/vamos-build/vamos/blob/main/examples/typescript-ui/README.md)
-into a running container.
+Start with the [fundamentals](fundamentals.md).
+It introduces images, filesets, layers and tasks,
+then walks through the `BUILD` file of the [TypeScript UI example](https://github.com/vamos-build/vamos/blob/main/examples/typescript-ui/README.md)
+and runs it as a container.
 
 ## Documentation index
 
-Use these references when writing your own project:
+Use these pages when setting up and writing your own project:
 
 | Reference | Contents |
 | --- | --- |
-| [Tutorial](tutorial.md) | Hands-on walkthrough building an application from source into a running container |
+| [Fundamentals](fundamentals.md) | Images, filesets, layers and tasks, then a walkthrough building a website from source into a running container |
+| [Install](install/README.md) | Installing vamos in an Ubuntu or Fedora container image or on an Ubuntu or Fedora host |
 | [BUILD language](reference/build/README.md) | Target declarations (`pull`, `glob`, `task`, `layer`, `index`, `publication`), build steps, secrets, and file selection |
 | [CLI](reference/cli/README.md) | Commands for building, publishing, loading into Docker, saving archives, and exporting files |
 | [Configuration](reference/configuration.md) | Multi-package workspaces, target parameters, cross-platform builds, and shared `.star` files |

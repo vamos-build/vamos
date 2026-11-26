@@ -82,7 +82,7 @@ Locally cached layer images are stored in the local container store under the na
 Metadata, logs, and captured workspace files are stored alongside the container store,
 typically under `/var/lib/containers/vamos`.
 Mounting a volume at `/var/lib/containers` preserves the cache when running vamos inside a container;
-see the [tutorial setup](../tutorial.md#2-set-up-vamos).
+see the [installation requirements](../install/README.md).
 
 If a cached layer image or fileset is deleted or corrupted,
 vamos reports the issue and automatically rebuilds the target rather than failing the build.

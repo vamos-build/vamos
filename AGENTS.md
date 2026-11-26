@@ -21,7 +21,7 @@ Read the routes relevant to the change before editing.
 | Concurrency, ownership, trace transport | [docs/design/scheduling.md](docs/design/scheduling.md), [.agents/kb/concurrency-model.md](.agents/kb/concurrency-model.md) |
 | Remote execution environment, `remote/`, its Helm chart and published image | [docs/design/remote-execution.md](docs/design/remote-execution.md), [.agents/kb/remote-environment.md](.agents/kb/remote-environment.md) |
 | Updating dependencies, lockfiles, image tags and the devcontainer's tools | [.claude/skills/update-dependencies/SKILL.md](.claude/skills/update-dependencies/SKILL.md) |
-| Releases, `release.yml`, `install.sh` | [docs/design/releases.md](docs/design/releases.md), [.agents/kb/remote-environment.md](.agents/kb/remote-environment.md#releases) |
+| Releases, `release.yml`, `install.sh` | [docs/design/releases.md](docs/design/releases.md), [.agents/kb/remote-environment.md](.agents/kb/remote-environment.md#releases), [docs/user/install/](docs/user/install/README.md) |
 | Root startup / `main.go` | [doc.go](doc.go) |
 | `internal/api/` | [internal/api/doc.go](internal/api/doc.go) |
 | `internal/cli/` | [internal/cli/doc.go](internal/cli/doc.go) |

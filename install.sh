@@ -162,7 +162,8 @@ echo "Installed $installed at $dir/vamos."
 # Each check looks for what vamos uses, wherever the distribution's package puts it.
 missing=
 has_ca_bundle || missing="$missing ca-certificates"
-[ -e /etc/containers/policy.json ] || missing="$missing containers-common"
+# Fedora 45's containers-common puts policy.json under /usr/share/containers, where vamos also looks.
+[ -e /etc/containers/policy.json ] || [ -e /usr/share/containers/policy.json ] || missing="$missing containers-common"
 found=
 for d in /usr/local/libexec/podman /usr/local/lib/podman /usr/libexec/podman /usr/lib/podman; do
 	[ -x "$d/netavark" ] && found=1
@@ -181,7 +182,7 @@ if [ -n "$missing" ]; then
 fi
 
 echo "vamos runs as root, in a privileged container with BUILDAH_ISOLATION=chroot" \
-	"and a volume for /var/lib/containers; see $repository/blob/main/docs/user/tutorial.md."
+	"and a volume for /var/lib/containers; see $repository/blob/main/docs/user/install/README.md."
 
 # vamos is installed either way, but fails at its first pull or run step without them.
 if [ -n "$missing" ]; then

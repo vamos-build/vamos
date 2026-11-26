@@ -32,7 +32,7 @@ Syntax and configuration errors in `BUILD` files report the file path, line, and
 
 | Symptom | Cause and resolution |
 | --- | --- |
-| `Operation not permitted` during namespace creation | Host lacks container privileges; follow the [tutorial setup](../../tutorial.md#2-set-up-vamos) |
+| `Operation not permitted` during namespace creation | Host lacks container privileges; follow the [installation requirements](../../install/README.md) |
 | `exec format error` in a build step | Foreign binary architecture; register QEMU emulators on the Docker host |
 | An `add()` source is rejected | The source target must be a `glob()` or a `task()` declaring `source` and `include` |
 | A glob matches no files | Check file paths relative to the `BUILD` file and review exclusions |

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Check the tutorial's image and exported website from the repository root.
+# Check the fundamentals page's image and exported website from the repository root.
 set -eu
 
 project_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)

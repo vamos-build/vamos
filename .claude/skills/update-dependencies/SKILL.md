@@ -39,12 +39,12 @@ So the user invokes this skill the same way both times, and a session that was c
 | --- | --- |
 | Go toolchain | Fedora `golang` in the devcontainer ≥ the `go` line of [go.mod](../../../go.mod); [Dockerfile](../../../Dockerfile)'s `golang:1.NN-bookworm` and the root [BUILD](../../../BUILD)'s `golang` pull have go.mod's minor |
 | Go in the example | the devcontainer's Go minor; [examples/golang-cli/go.mod](../../../examples/golang-cli/go.mod)'s `go` line, its [BUILD](../../../examples/golang-cli/BUILD) tag `1.NN-alpine`, [vamos.lock](../../../examples/golang-cli/vamos.lock), its README's "`1.NN.x-alpine`", and the comment on line 62 of [smoke-checks.md](../../../.agents/kb/smoke-checks.md) |
-| Node.js major | Fedora `nodejs26`/`nodejs26-npm`; `node:26-alpine` in the BUILD files of typescript-mcp, typescript-ui and strawberry-react/ui; [docs/user/tutorial.md](../../../docs/user/tutorial.md) (its BUILD walkthrough and mermaid diagram); the example READMEs' mermaid diagrams; `engines` and `@types/node` in typescript-mcp's package.json; `engines` in docs/site's package.json |
-| pnpm | Fedora `pnpm`; `packageManager` in [docs/site/package.json](../../../docs/site/package.json) and [examples/typescript-ui/package.json](../../../examples/typescript-ui/package.json); `pnpm@X` in [examples/typescript-ui/BUILD](../../../examples/typescript-ui/BUILD), [examples/strawberry-react/ui/BUILD](../../../examples/strawberry-react/ui/BUILD) and tutorial.md |
+| Node.js major | Fedora `nodejs26`/`nodejs26-npm`; `node:26-alpine` in the BUILD files of typescript-mcp, typescript-ui and strawberry-react/ui; [docs/user/fundamentals.md](../../../docs/user/fundamentals.md) (its BUILD walkthrough and mermaid diagrams); the example READMEs' mermaid diagrams; `engines` and `@types/node` in typescript-mcp's package.json; `engines` in docs/site's package.json |
+| pnpm | Fedora `pnpm`; `packageManager` in [docs/site/package.json](../../../docs/site/package.json) and [examples/typescript-ui/package.json](../../../examples/typescript-ui/package.json); `pnpm@X` in [examples/typescript-ui/BUILD](../../../examples/typescript-ui/BUILD), [examples/strawberry-react/ui/BUILD](../../../examples/strawberry-react/ui/BUILD) and fundamentals.md |
 | Python minor | Fedora `python3`; `python:3.NN` / `3.NN-slim` in the fastmcp and strawberry-react/backend BUILD files and vamos.lock files; `--python-version 3.NN` in each lockfile header and README command; `target-version`/`pythonVersion` in [examples/fastmcp/pyproject.toml](../../../examples/fastmcp/pyproject.toml); `uv venv --python 3.NN` in the strawberry-react README |
 | kubectl | Fedora `kubernetes1.NN-client` matches the Kubernetes minor of the default node image of the `kind` that Fedora ships |
 | Registry image | `registry:3` in [remote/compose.yaml](../../../remote/compose.yaml) (twice), [remote/helm/vamos/values.yaml](../../../remote/helm/vamos/values.yaml) (twice) and smoke-checks.md |
-| glibc floor | Dockerfile's build stage and the root BUILD's `golang` pull stay on Debian **bookworm** (glibc 2.36), since `glibc_minimum=2.34` in [install.sh](../../../install.sh) and the tutorial promise Ubuntu 24.04; moving to trixie raises that floor, so it is a major and needs the user's yes |
+| glibc floor | Dockerfile's build stage and the root BUILD's `golang` pull stay on Debian **bookworm** (glibc 2.36), since `glibc_minimum=2.34` in [install.sh](../../../install.sh) and the install guide promise Ubuntu 24.04; moving to trixie raises that floor, so it is a major and needs the user's yes |
 | OpenSpec | the CLI version in the devcontainer and `generatedBy` in the generated skills and commands |
 | mermaid-cli | `puppeteer@X` in the devcontainer's `npm install -g` is within the `peerDependencies` range of the `@mermaid-js/mermaid-cli` version beside it |
 | golangci-lint | the Go that built it, which `golangci-lint version` reports, is at least the `go` line of go.mod: a release built with an older Go can't load the packages |
@@ -153,7 +153,8 @@ Ask once about the new majors found in this phase. Leave declined majors alone u
    If this raises go.mod's `go` line, it must stay ≤ the devcontainer's `go version`.
    The line's minor must also match the Dockerfile's `golang:1.NN-bookworm` and the root BUILD's `golang` pull.
 4. **[Dockerfile](../../../Dockerfile)** and the root **[BUILD](../../../BUILD)**: `golang:1.NN-bookworm` follows go.mod's minor; keep bookworm (see glibc floor).
-   `fedora:NN` in the runtime stage and the root BUILD's `fedora` pull follow the devcontainer's Fedora.
+   `fedora:NN` in the runtime stage, the root BUILD's `fedora` pull and
+   [docs/user/install/dockerfile-fedora.md](../../../docs/user/install/dockerfile-fedora.md)'s `FROM` follow the devcontainer's Fedora.
    Fedora's `containers-common` and `netavark` are unpinned.
 5. In the root BUILD's `check-tools`, keep the `go install` versions of golangci-lint and govulncheck at the devcontainer's versions.
 
@@ -234,7 +235,7 @@ Find it with `curl -fsSL https://nodejs.org/dist/index.json | jq -r '[.[] | sele
    The update re-pins each tag to its newest release and digest.
    (`vamos update` asks Docker Hub directly. It doesn't apply the two-week rule, and doesn't need to:
    the tags it follows are the maintainers' own rolling tags.)
-3. If a tag changes, update its coherence group. That includes the tutorial, which walks through typescript-ui's BUILD,
+3. If a tag changes, update its coherence group. That includes fundamentals.md, which walks through typescript-ui's BUILD,
    and [docs/user/reference/build/pull.md](../../../docs/user/reference/build/pull.md)'s example `pull`.
    Then run `vamos update` again.
 4. In strawberry-react, `vamos update` keeps the old tag's pin ("kept ..., since "release", which couldn't be
@@ -293,7 +294,7 @@ Follow [.agents/kb/testing.md](../../../.agents/kb/testing.md) for every scope t
   For the chart, `helm lint --strict remote/helm/vamos` and `helm template vamos remote/helm/vamos | kubeconform -strict -summary`.
 - docs/site: `pnpm install && pnpm build && pnpm test`. Neither starts workerd, so if Wrangler or the date moved,
   also run `pnpm exec wrangler dev --port 8799` and fetch a page, as HTML and with `Accept: text/markdown`.
-  If Mermaid moved, ask the user to look at the tutorial's diagrams in a browser: they render client-side.
+  If Mermaid moved, ask the user to look at fundamentals.md's diagrams in a browser: they render client-side.
 
 If an update breaks something you can't fix with a small, clear change, revert that one update.
 Record it in the report instead of forcing it through.

@@ -23,6 +23,10 @@
 		{
 			"name": "examples/typescript-mcp",
 			"path": "examples/typescript-mcp"
+		},
+		{
+			"name": "examples/typescript-ui",
+			"path": "examples/typescript-ui"
 		}
 	],
 	"settings": {

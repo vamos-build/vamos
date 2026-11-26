@@ -17,7 +17,9 @@ The `build` task takes a `mode` parameter, which the layer and the index pass on
 ---
 config:
   flowchart:
+    minNodeWidth: 80
     padding: 6
+    wrappingWidth: 400
 ---
 flowchart TD
     golang[<div style="text-align:left"><i>pull golang</i><hr/>golang:1.27-alpine</div>]

@@ -34,7 +34,7 @@ export default defineConfig({
         "./src/styles/vamos.css",
       ],
       social: [{ icon: "github", label: "GitHub", href: github }],
-      // Page paths are relative to this directory, as ../user/tutorial.md.
+      // Page paths are relative to this directory, as ../user/fundamentals.md.
       editLink: { baseUrl: `${github}/edit/main/docs/site/` },
       routeMiddleware: "./src/routeData.ts",
       sidebar,

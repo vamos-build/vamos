@@ -5,16 +5,18 @@
   </picture>
 </h1>
 
-<p align="center">The lovechild of bazel and buildah.</p>
+<p align="center">The lovechild of Bazel and Buildah.</p>
 
-A Go CLI that uses the [buildah](https://github.com/containers/buildah) library
-to build container images described by `BUILD` files written in [Starlark](https://github.com/bazelbuild/starlark).
+Starlark rules to build containers and other artifacts.
+A Go CLI that reads `BUILD` files, written in [Starlark](https://github.com/bazelbuild/starlark),
+that describe the steps producing container images and filesets,
+then runs those steps with the [buildah](https://github.com/containers/buildah) library.
 
-Start with the [tutorial](docs/user/tutorial.md) to learn the core concepts, set up vamos,
-and build a website into a running container.
-To build your own project, [install vamos](docs/user/tutorial.md#in-your-projects-devcontainer) in its devcontainer,
+Start with the [fundamentals](https://vamos.build/fundamentals/) to learn images, filesets, layers and tasks,
+and follow a website's `BUILD` file from source into a running container.
+To build your own project, [install Vamos](https://vamos.build/install/) in its devcontainer,
 or on a Linux machine, with a release's `install.sh`.
-The [user guide](docs/user/README.md) links to the CLI, BUILD language, configuration, and cache references.
+The [user guide](https://vamos.build/) links to the CLI, BUILD language, configuration, and cache references.
 
 ## Development
 

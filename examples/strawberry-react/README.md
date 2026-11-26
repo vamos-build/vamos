@@ -22,7 +22,9 @@ The main build paths connect the backend image and its schema to the UI bundle a
 ---
 config:
   flowchart:
+    minNodeWidth: 80
     padding: 6
+    wrappingWidth: 400
 ---
 flowchart TD
     subgraph backend["backend/BUILD"]

@@ -9,7 +9,9 @@ It speaks MCP over stdio.
 ---
 config:
   flowchart:
+    minNodeWidth: 80
     padding: 6
+    wrappingWidth: 400
 ---
 flowchart TD
     python[<div style="text-align:left"><i>pull python</i><hr/>python:3.15-slim</div>]

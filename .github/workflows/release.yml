@@ -86,7 +86,7 @@ jobs:
           outputs: type=local,dest=${{ runner.temp }}/dist
           cache-from: type=gha,scope=${{ matrix.arch }}
 
-      # install.sh and the tutorial promise the glibc that install.sh checks for; the binary must need no newer.
+      # install.sh and the install guide promise the glibc that install.sh checks for; the binary must need no newer.
       - run: |
           mv "$RUNNER_TEMP/dist/vamos" "$RUNNER_TEMP/dist/vamos-linux-${{ matrix.arch }}"
           minimum=$(sed -n 's/^glibc_minimum=\([0-9.]*\).*/\1/p' install.sh)
@@ -95,7 +95,7 @@ jobs:
           echo "the binary needs glibc $needed; install.sh checks for $minimum"
           [ "$(printf '%s\n' "$needed" "$minimum" | sort -V | tail -1)" = "$minimum" ]
 
-      # Installs this platform's binary with the working tree's install.sh, as the tutorial's devcontainer Dockerfile
+      # Installs this platform's binary with the working tree's install.sh, as the install guide's Ubuntu Dockerfile
       # does on Ubuntu 24.04, from this build rather than the release, and builds an example with it;
       # a failure leaves the digest out, so merge tags nothing and no release is made.
       # Under emulation buildah can't re-execute itself, so only a native runner can check this.
@@ -108,7 +108,7 @@ jobs:
           cp -r install.sh "$RUNNER_TEMP/dist" "$context/"
           cp install.sh "$context/dist/"
           (cd "$context/dist" && sha256sum vamos-linux-* > SHA256SUMS)
-          awk '/^```dockerfile/ { f = 1; next } /^```/ { f = 0 } f' docs/user/tutorial.md \
+          awk '/^```dockerfile/ { f = 1; next } /^```/ { f = 0 } f' docs/user/install/dockerfile-ubuntu.md \
             | sed 's#^RUN curl -fsSL -o /tmp/vamos-install.sh https://github.com/vamos-build/vamos/releases/download/[^ ]*/install.sh \\$#COPY dist /tmp/dist\nENV VAMOS_RELEASE_URL=file:///tmp/dist\nRUN curl -fsSL -o /tmp/vamos-install.sh file:///tmp/dist/install.sh \\#' \
             > "$context/Dockerfile"
           grep -qF 'file:///tmp/dist/install.sh' "$context/Dockerfile"
