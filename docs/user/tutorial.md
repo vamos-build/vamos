@@ -32,38 +32,6 @@ Two operations turn these artifacts into new results:
   Its temporary container is discarded after collection,
   so only the selected files pass to subsequent targets.
 
-This diagram shows the inputs and outputs of layers and tasks:
-layers produce container images, while tasks produce filesets.
-
-```mermaid
-flowchart LR
-    subgraph left["layer"]
-        direction TB
-        layer-input-image@{shape: procs, label: "image"}
-        layer-input-fileset@{shape: docs, label: "fileset"}
-        layer-target@{shape: trap-t, label: "layer"}
-        layer-output-image@{shape: procs, label: "image"}
-
-        layer-input-image --> layer-target
-        layer-input-fileset --> layer-target
-        layer-target --> layer-output-image
-    end
-
-    subgraph right["task"]
-        direction TD
-        task-input-image@{shape: procs, label: "image"}
-        task-input-fileset@{shape: docs, label: "fileset"}
-        task-target@{shape: trap-t, label: "task"}
-        task-output-fileset@{shape: docs, label: "fileset"}
-
-        task-input-image --> task-target
-        task-input-fileset --> task-target
-        task-target --> task-output-fileset
-    end
-
-    left ~~~ right
-```
-
 Both operations can add input filesets and run commands inside their base image.
 For this website, a layer installs dependencies into a Node.js image.
 A task uses that dependency image to build the website and collects only the generated files.
@@ -73,6 +41,136 @@ That separation keeps build tools out of the application image.
 Two operations bring external inputs into a build:
 - **`pull()`** fetches an image from a container registry.
 - **`glob()`** selects local files into a fileset.
+
+Delivery commands take results out of the build:
+`vamos push` and `vamos load` deliver images to a registry or Docker,
+and `vamos export` writes a task's fileset into a local folder.
+
+This table arranges these operations by the artifact they produce and by stage:
+pulls and globs bring in inputs, layers and tasks build, and delivery commands output the results.
+
+<table class="artifact-grid">
+<thead>
+<tr><th></th><th>Images</th><th>Filesets</th></tr>
+</thead>
+<tbody>
+<tr>
+<th>Input</th>
+<td>
+
+```mermaid
+---
+config:
+  flowchart:
+    useMaxWidth: false
+    minNodeWidth: 80
+    padding: 6
+---
+flowchart TB
+    repo@{shape: cloud, label: "registry"}
+    op@{shape: trap-t, label: "<b>pull</b><hr/>image ref"}
+    out@{shape: procs, label: "image"}
+    repo --> op --> out
+```
+
+</td>
+<td>
+
+```mermaid
+---
+config:
+  flowchart:
+    useMaxWidth: false
+    minNodeWidth: 80
+    padding: 6
+---
+flowchart TB
+    repo@{shape: cyl, label: "repo"}
+    op@{shape: trap-t, label: "<b>glob</b><hr/>file patterns"}
+    out@{shape: docs, label: "fileset"}
+    repo --> op --> out
+```
+
+</td>
+</tr>
+<tr>
+<th>Build</th>
+<td>
+
+```mermaid
+---
+config:
+  flowchart:
+    useMaxWidth: false
+    minNodeWidth: 80
+    padding: 6
+---
+flowchart TB
+    image@{shape: procs, label: "image"}
+    filesets@{shape: docs, label: "filesets"}
+    op@{shape: trap-t, label: "<b>layer</b><hr/>commands"}
+    out@{shape: procs, label: "image"}
+    image & filesets --> op --> out
+```
+
+</td>
+<td>
+
+```mermaid
+---
+config:
+  flowchart:
+    useMaxWidth: false
+    minNodeWidth: 80
+    padding: 6
+---
+flowchart TB
+    image@{shape: procs, label: "image"}
+    filesets@{shape: docs, label: "filesets"}
+    op@{shape: trap-t, label: "<b>task</b><hr/>commands<br/>file patterns"}
+    out@{shape: docs, label: "fileset"}
+    image & filesets --> op --> out
+```
+
+</td>
+</tr>
+<tr>
+<th>Output</th>
+<td>
+
+```mermaid
+---
+config:
+  flowchart:
+    useMaxWidth: false
+    minNodeWidth: 80
+    padding: 6
+---
+flowchart TB
+    push([vamos push]) --> registry@{shape: cloud, label: "registry"}
+    load([vamos load]) --> docker@{shape: cyl, label: "Docker"}
+```
+
+</td>
+<td>
+
+```mermaid
+---
+config:
+  flowchart:
+    useMaxWidth: false
+    minNodeWidth: 80
+    padding: 6
+---
+flowchart TB
+    export([vamos export]) --> folder@{shape: cyl, label: "local folder"}
+    run([vamos run]) --> result@{shape: doc, label: "lint / test<br/>output"}
+```
+
+</td>
+</tr>
+</tbody>
+</table>
 
 A `BUILD` file declares these operations as named targets in Starlark, a Python-like language.
 Targets refer to one another by name: `base` selects an image, and `add()` copies in a fileset.
@@ -287,19 +385,19 @@ The first section declares the base image and source files:
 
 ```python
 pull(
-    name = "nodejs",
-    image = "docker.io/library/node",
-    tag = "26-alpine",
+    name="nodejs",
+    image="docker.io/library/node",
+    tag="26-alpine",
 )
 
 glob(
-    name = "install-files",
-    include = ["package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml"],
+    name="install-files",
+    include=["package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml"],
 )
 
 glob(
-    name = "source-files",
-    include = ["index.html", "tsconfig.json", "src/**"],
+    name="source-files",
+    include=["index.html", "tsconfig.json", "src/**"],
 )
 ```
 
@@ -314,9 +412,9 @@ The `packages` layer installs build tools and project dependencies:
 
 ```python
 layer(
-    name = "packages",
-    base = "nodejs",
-    steps = [
+    name="packages",
+    base="nodejs",
+    steps=[
         workdir("/workspace"),
         add("install-files", "/workspace"),
         run(["npm", "install", "-g", "pnpm@10.33.0"]),
@@ -339,14 +437,14 @@ The `build` task compiles the application using the dependency image:
 
 ```python
 task(
-    name = "build",
-    base = "packages",
-    steps = [
+    name="build",
+    base="packages",
+    steps=[
         add("source-files", "/workspace"),
         run(["pnpm", "build"]),
     ],
-    source = "/workspace/dist",
-    include = ["."],
+    source="/workspace/dist",
+    include=["."],
 )
 ```
 
@@ -365,15 +463,15 @@ The final declarations pull nginx and assemble the runtime image:
 
 ```python
 pull(
-    name = "nginx",
-    image = "docker.io/library/nginx",
-    tag = "alpine",
+    name="nginx",
+    image="docker.io/library/nginx",
+    tag="alpine",
 )
 
 layer(
-    name = "frontend",
-    base = "nginx",
-    steps = [add("build", "/usr/share/nginx/html")],
+    name="frontend",
+    base="nginx",
+    steps=[add("build", "/usr/share/nginx/html")],
 )
 ```
 
