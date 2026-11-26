@@ -33,7 +33,7 @@ type JobTrace struct {
 	// Dropped counts the entries left out, from the end, since even they alone passed the cap.
 	Dropped int `json:"dropped,omitempty"`
 	// Exported is how the job's trace was exported over OpenTelemetry, if it was: its trace's ID, its span's and
-	// whether it was sampled; the zero value, as a manifest stored before vamos exported, or by an executor that
+	// whether it was sampled; the zero value, as a manifest stored before Vamos exported, or by an executor that
 	// exports nothing, has.
 	Exported tracing.Exported `json:"exported,omitzero"`
 }

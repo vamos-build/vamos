@@ -2,14 +2,14 @@
 //
 // # Invariants
 //
-// This package imports tracing and OpenTelemetry, and no other vamos package;
+// This package imports tracing and OpenTelemetry, and no other Vamos package;
 // sched, api and tracing never import it or any of OpenTelemetry,
 // and remote's non-test code never imports OpenTelemetry's SDK.
 // The spans a Bridge exports are the snapshots that sched stores, so the exported trace and the stored one show the
 // same spans, truncation included.
 // Exported spans are made through the SDK with IDs and times that this package chooses:
-// a span's context carries the IDs that chosenIDs gives it once, and its start and end are vamos's.
-// Every ID is derived from the coordinator's instance, the job, its run after the first, and vamos's span or attempt
+// a span's context carries the IDs that chosenIDs gives it once, and its start and end are Vamos's.
+// Every ID is derived from the coordinator's instance, the job, its run after the first, and Vamos's span or attempt
 // IDs, never drawn at random,
 // so that a job resumed after a restart that kept the coordinator's state goes on in the same trace,
 // and a joiner links to an attempt's span without asking its starter;

@@ -154,7 +154,7 @@ A client building on it with `TRACEPARENT` set, as CI tools that trace their pip
 pipeline's span, in its trace, and is kept or dropped as its flags say under the default parent-based sampler.
 A malformed `TRACEPARENT`, or a `TRACESTATE` that isn't a W3C tracestate, is warned about once and ignored,
 and an empty one is taken as unset.
-Without a coordinator, vamos ignores both.
+Without a coordinator, Vamos ignores both.
 The coordinator keeps them with the job, so that a job resumed after a restart stays in the pipeline's trace.
 
 ### Remote cache pruning

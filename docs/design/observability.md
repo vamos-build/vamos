@@ -1,7 +1,7 @@
 # Observability
 
 This document describes how a coordinator exports what it does over OpenTelemetry: each job's trace, made from the
-same spans that vamos stores as the job's trace, and how those spans become OpenTelemetry's.
+same spans that Vamos stores as the job's trace, and how those spans become OpenTelemetry's.
 The [telemetry](../../internal/telemetry/doc.go) package holds the SDK; no other package imports it but the
 coordinator and the CLI, which configure it.
 
@@ -35,14 +35,14 @@ Every span is bounded in what it holds, so that the exporters' queues are bounde
 
 IDs are derived, not drawn: a trace's from the coordinator's instance and the job, the job's span's likewise, and for
 a run after the first, as a build resumed after a restart has, from the run as well, an
-attempt's span's from its ID, and every other span's from the job and vamos's span ID. A job resumed after a restart
+attempt's span's from its ID, and every other span's from the job and Vamos's span ID. A job resumed after a restart
 that kept the coordinator's state so goes on in the same trace, and a job that joined another's attempt links to the
 attempt's span without asking its starter for it. A job that joined an outer trace, through `TRACEPARENT`, takes its
 trace ID, and its job span is a child of the outer span. The SDK is given the chosen IDs through an `IDGenerator`
 that reads them from the context, which a test proves the pinned SDK keeps.
 
 The CLI writes a job's exported trace ID on its top-level spans in the `--trace` file, so a user can find a build in
-the tracing backend from the file vamos wrote.
+the tracing backend from the file Vamos wrote.
 
 ## Sampling
 

@@ -253,7 +253,7 @@ alone, so they get no sampler, and serve no Prometheus.
       (has "OTEL_EXPORTER_OTLP_ENDPOINT" $endpoints) (has "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT" $endpoints) }}
 {{- $env = append $env (dict "name" "OTEL_METRICS_EXPORTER"
       "value" (ternary "otlp,prometheus" "prometheus" $otlp)) }}
-{{- /* Every address, which vamos takes as a listener with no host, as the API's, IPv6's and IPv4's alike, or IPv4's
+{{- /* Every address, which Vamos takes as a listener with no host, as the API's, IPv6's and IPv4's alike, or IPv4's
       alone on a node without IPv6, so that every cluster's scrapes reach it. */}}
 {{- $env = append $env (dict "name" "OTEL_EXPORTER_PROMETHEUS_HOST" "value" "::") }}
 {{- $env = append $env (dict "name" "OTEL_EXPORTER_PROMETHEUS_PORT" "value" ($t.prometheus.port | toString)) }}

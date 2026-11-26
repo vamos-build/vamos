@@ -153,8 +153,8 @@ func TestTraceExport_EachJobIsOneTrace(t *testing.T) {
 	})
 }
 
-// TestTraceExport_KeepsTimingAndNesting specifies that each exported span starts and ends when the vamos span did, on
-// the coordinator's clock, and has as its parent the exported span of the vamos span it was part of.
+// TestTraceExport_KeepsTimingAndNesting specifies that each exported span starts and ends when the Vamos span did, on
+// the coordinator's clock, and has as its parent the exported span of the Vamos span it was part of.
 func TestTraceExport_KeepsTimingAndNesting(t *testing.T) {
 	parallelRule(t)
 	t.Run("A step's exported span lies within its target's", func(t *testing.T) {

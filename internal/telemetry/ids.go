@@ -123,7 +123,7 @@ func attemptSpanIDOf(attempt string) trace.SpanID {
 	return spanIDFrom(hashOf("vamos/attempt", attempt))
 }
 
-// spanIDOf returns the ID of the vamos span whose ID is id, recorded by the job, or by an attempt the job started.
+// spanIDOf returns the ID of the Vamos span whose ID is id, recorded by the job, or by an attempt the job started.
 func spanIDOf(instance, job, id string) trace.SpanID {
 	return spanIDFrom(hashOf("vamos/span", instance, job, id))
 }

@@ -737,7 +737,7 @@ func (inv *invocation) coordinator() error {
 		return err
 	}
 	// OpenTelemetry's error handler is the process's, so it is installed here, rather than by Setup, once the
-	// coordinator listens, and the last coordinator to listen in a process replaces it: vamos runs one a process,
+	// coordinator listens, and the last coordinator to listen in a process replaces it: Vamos runs one a process,
 	// though tests that run several share it. What fails to export before then, as a resumed job's export may, goes to
 	// whichever handler the process has, the SDK's own if none.
 	stderr := inv.stderr

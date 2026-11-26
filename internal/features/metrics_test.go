@@ -386,7 +386,7 @@ func TestMetrics_FlushedOnShutdown(t *testing.T) {
 }
 
 // TestMetrics_TheReferenceListsEveryMetric checks that the table of metrics in docs/design/observability.md lists
-// exactly the vamos and HTTP metrics a coordinator's Prometheus scrape shows once it has run a build, each exported
+// exactly the Vamos and HTTP metrics a coordinator's Prometheus scrape shows once it has run a build, each exported
 // from zero, or recorded by the build, but for the peak memory of attempts, which a worker reports only where its
 // cgroup has the memory controller, as this machine's may not.
 func TestMetrics_TheReferenceListsEveryMetric(t *testing.T) {
