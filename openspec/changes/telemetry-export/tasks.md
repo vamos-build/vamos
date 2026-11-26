@@ -170,7 +170,7 @@
   coordinator's `containerPort`, Service port named `metrics` and optional scrape annotations. Verify with `helm lint
   --strict remote/helm/vamos` and `helm template ... | kubeconform -strict -summary` for the defaults, an OTLP endpoint,
   and Prometheus on, and check that the defaults render no `OTEL_` variable
-- [ ] 8.2 Run the chart's Kubernetes smoke checks on kind with Prometheus on, scrape the coordinator's `metrics` port
+- [x] 8.2 Run the chart's Kubernetes smoke checks on kind with Prometheus on, scrape the coordinator's `metrics` port
   through the Service after a build, and add that scrape to `.agents/kb/smoke-checks.md`. Document the values in
   `values.yaml`'s comments and `.agents/kb/remote-environment.md`
 
@@ -178,7 +178,7 @@
 
 - [x] 9.1 Run `scripts/check full` as root in the devcontainer and verify that it passes, with the new features'
   scenarios running rather than skipping (`VAMOS_REQUIRE_INTEGRATION=1`)
-- [ ] 9.2 Run the compose environment in `remote/compose.yaml` with an OpenTelemetry Collector added for the check
+- [x] 9.2 Run the compose environment in `remote/compose.yaml` with an OpenTelemetry Collector added for the check
   only, build an example project with `TRACEPARENT` set, and verify that the collector logs the job's span under the
   given parent and the coordinator's metrics, including an exemplar
 - [x] 9.3 Verify that `openspec validate telemetry-export --strict` passes
