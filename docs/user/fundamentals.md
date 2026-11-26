@@ -231,14 +231,8 @@ flowchart TD
     nodejs[<div style="text-align:left"><i>pull nodejs</i><hr/>node:26-alpine</div>]
     install-files[<div style="text-align:left"><i>glob install-files</i><hr/>package.json<br/>pnpm-lock.yaml<br/>pnpm-workspace.yaml</div>]
     packages[<div style="text-align:left"><i>layer packages</i><hr/>install pnpm<br/>pnpm install</div>]
-    source-files[<div style="text-align:left"><i>glob source-files</i><hr/>index.html<br/>tsconfig.json<br/>src/**</div>]
-    build[<div style="text-align:left"><i>task build</i><hr/>pnpm build<hr/>dist/**</div>]
-    nginx[<div style="text-align:left"><i>pull nginx</i><hr/>nginx:alpine</div>]
-    frontend[<div style="text-align:left"><i>layer frontend</i></div>]
 
     nodejs & install-files --> packages
-    packages & source-files --> build
-    build & nginx --> frontend
 ```
 
 ## Example: Build a JS UI
