@@ -156,11 +156,17 @@ It shows:
 - `BUILD` file parsing and package loading.
 - Input glob evaluation and source file hashing.
 - Execution steps for pulls, tasks, and layers, with their files and bytes.
+- CPU time for remote attempts when reported by the worker, and peak memory when the worker's cgroup has the memory controller.
 - Cache hits, with when the result was made, how long making it took, and the time reusing it saved,
   and cache misses, with why each target missed (see [why a target missed](#why-a-target-missed)).
 - Delivery operations (pushing to registries, loading into Docker, saving archives).
 
 Arrows in the timeline connect glob and target outputs to the execution steps that consume them.
+
+When [OpenTelemetry trace export](cli/coordinator.md#telemetry) is enabled, each coordinator job's top-level
+spans in the trace file show its OpenTelemetry trace ID as `otel trace` and its sampling decision as `otel sampled`.
+Use the ID to find the job in your tracing backend if it was sampled and exported. The client's own spans are
+kept in the trace file but aren't exported.
 
 What a trace keeps lives in the executor's build cache:
 the trace of each attempt that ran a target, kept with its result, each job's trace, and each command's.
