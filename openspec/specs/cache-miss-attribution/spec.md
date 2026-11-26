@@ -179,7 +179,8 @@ doesn't hold them.
 
 A miss whose nearest entry differs only in the image that the pull which is its base names, the same pull of the same
 image reference, its own inputs alike, SHALL have the cause `upstream`, and its span SHALL name the pull and the
-manifest digests before and after.
+manifest digests before and after. A pull that names another manifest of the same image SHALL cause no miss, and a later
+`upstream` miss SHALL name that manifest as before.
 
 #### Scenario: A tag that moved, updated with vamos update
 
@@ -190,8 +191,15 @@ manifest digests before and after.
 #### Scenario: An updated pin
 
 - **GIVEN** a named workspace whose `app` is based on a pinned pull `base`, and that has built `app`
-- **WHEN** `vamos.lock` pins `base` to another digest, and I build `app`
+- **WHEN** `vamos.lock` pins `base` to another image's digest, and I build `app`
 - **THEN** its span says the miss cause `upstream`
+
+#### Scenario: A tag moved to another manifest of the same image is compared from there
+
+- **GIVEN** a named workspace whose `app` is based on the pinned pull `base` of a tag, and that has built `app`
+- **AND** the tag moved to an index of the same image, `vamos update base` run, and `app` built again, and reused
+- **WHEN** the tag is moved to another image, I run `vamos update base`, and I build `app`
+- **THEN** its span says the miss cause `upstream`, naming the index's digest before and the moved image's after
 
 ### Requirement: A change only in what a dependency supplies is dependency
 
