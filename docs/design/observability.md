@@ -92,8 +92,8 @@ The metrics, as Prometheus names them; OpenTelemetry's names are the same with d
 | `vamos_transfer_bytes_total` | counter | `direction` | The bytes of blobs the API accepted, `in`, and sent, `out`, as far as each read went |
 | `vamos_store_size_bytes` | gauge | `store` | What the build cache holds, `content` or `records`, once its count of what it held at start is done, which reads each directory's names at once; a directory it couldn't read holds the gauge back until a later collection reads it |
 | `vamos_attempts` | gauge | `state`, `platform` | Attempts `queued` for a worker, by the platform they run on, and `running`, by their worker's; `any` for work that runs no command, as its tries are labelled |
-| `vamos_workers` | gauge | `platform` | Registered workers |
-| `vamos_worker_slots` | gauge | `state`, `platform` | The registered workers' slots, `busy` or `free` |
+| `vamos_workers` | gauge | `platform` | Registered workers, at zero for a configured platform that none serves |
+| `vamos_worker_slots` | gauge | `state`, `platform` | The registered workers' slots, `busy` or `free`, at zero for a configured platform that none serves |
 | `vamos_builds_waiting` | gauge | `platform` | Builds with an attempt that runs commands waiting for a platform no registered worker runs, by the build that started it, which builds that share it aren't; work waiting for a worker that publishes isn't counted |
 | `vamos_jobs_open` | gauge | `kind` | Jobs running: `build`, `push` or `publish` |
 | `vamos_jobs_refused_total` | counter | `reason` | Jobs refused: `busy`, `platform`, `version` or `generation` |

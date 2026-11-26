@@ -227,9 +227,9 @@ func TestWithdrawnLeaseUncounted(t *testing.T) {
 }
 
 // TestMetricsGauges checks the gauges as they are collected, with one build's tasks running and another's waiting for
-// a platform: attempts queued, by the platform they run on, and
-// running, by their worker's; workers and their slots by platform; builds waiting for a platform no worker serves;
-// and jobs running, by kind.
+// a platform: attempts queued, by the platform they run on, and running, by their worker's; workers and their slots
+// by platform, at zero for one configured that none serves; builds waiting for a platform no worker serves; and jobs
+// running, by kind.
 func TestMetricsGauges(t *testing.T) {
 	cfg, reader := metered(t, Config{Platforms: []imgspecv1.Platform{amd64, arm64}})
 	f := newFixture(t, cfg)
@@ -262,6 +262,10 @@ func TestMetricsGauges(t *testing.T) {
 		return n == 2 && q == 2 // each build's two tasks
 	})
 	checkMeasured(t, reader, 1, "vamos.workers", platform("linux/amd64"))
+	// An offered platform that no worker serves is observed at zero, not left out.
+	checkMeasured(t, reader, 0, "vamos.workers", platform("linux/arm64"))
+	checkMeasured(t, reader, 0, "vamos.worker.slots", state("busy"), platform("linux/arm64"))
+	checkMeasured(t, reader, 0, "vamos.worker.slots", state("free"), platform("linux/arm64"))
 	checkMeasured(t, reader, 2, "vamos.worker.slots", state("busy"), platform("linux/amd64"))
 	checkMeasured(t, reader, 1, "vamos.worker.slots", state("free"), platform("linux/amd64"))
 	checkMeasured(t, reader, 1, "vamos.builds.waiting", platform("linux/arm64"))

@@ -224,16 +224,19 @@ func (p *pool) observe(m *Metrics, o metric.Observer) {
 	type key struct{ state, platform string }
 	attempts := map[key]int64{}
 	waiting := map[string]map[string]bool{} // the builds waiting, by platform
-	// Every platform offered or served is observed, at zero when nothing is there.
+	workers, slots := map[string]int64{}, map[key]int64{}
+	// Every platform configured, or served by a worker registered now, is observed, at zero when nothing is there,
+	// so that a configured platform whose last worker has gone reports none rather than no series; one that only a
+	// worker served is no longer offered once it has gone, and is left out.
 	for _, platform := range p.cfg.Platforms {
 		name := platforms.Format(platforms.Normalize(platform))
 		attempts[key{"queued", name}], attempts[key{"running", name}] = 0, 0
+		workers[name], slots[key{"busy", name}], slots[key{"free", name}] = 0, 0, 0
 		waiting[name] = map[string]bool{}
 	}
 	for _, at := range p.pending {
 		attempts[key{"queued", at.platformLabel()}]++
 	}
-	workers, slots := map[string]int64{}, map[key]int64{}
 	for _, w := range p.workers {
 		platform := platforms.Format(w.info.Platform)
 		workers[platform]++
