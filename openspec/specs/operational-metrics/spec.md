@@ -12,7 +12,8 @@ reading logs.
 
 A coordinator SHALL read its metric export configuration from the standard `OTEL_*` environment variables when it
 starts. `OTEL_METRICS_EXPORTER` SHALL take `otlp`, `prometheus`, `console` or `none`, or several, comma-separated. If it
-is unset, the exporter is `otlp` when an OTLP endpoint variable is set, and `none` otherwise.
+is unset, the exporter is `otlp` when `OTEL_EXPORTER_OTLP_ENDPOINT` or `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` is set, and
+`none` otherwise. With `--local` a coordinator SHALL read none of them and export nothing.
 
 #### Scenario: A coordinator with nothing configured serves no metrics
 
@@ -56,9 +57,10 @@ SHALL serve no metrics. An address it can't listen on SHALL fail its start, nami
 ### Requirement: Metrics are labeled coarsely
 
 No metric SHALL be labeled with a target, a workspace, a job, an attempt, a worker's ID or a file. Labels SHALL be
-drawn from a platform, a kind of target or job, an outcome, a miss cause, a reason, a state or a store, each with a
-bounded set of values. A platform is one the deployment offers or a registered worker runs, which the deployment
-bounds, as it trusts its workers, whose registrations and relayed spans supply a try's labels.
+drawn from bounded sets: a platform, a kind of target or job, an outcome, a miss cause, a reason, a state, a store, a
+direction, and a request's method, route and status. A platform is one the deployment offers or a registered worker
+runs, which the deployment bounds, as it trusts its workers, whose registrations and relayed spans supply a try's
+labels.
 
 #### Scenario: A workspace's builds add no series
 
@@ -69,9 +71,10 @@ bounds, as it trusts its workers, whose registrations and relayed spans supply a
 
 ### Requirement: Capacity metrics
 
-A coordinator SHALL export: `vamos.attempts.wait`, a histogram of how long attempts waited for a worker; `vamos.attempts`,
-attempts by `state` `queued` or `running`; `vamos.workers` and `vamos.worker.slots`, by `state` `busy` or `free`, by
-platform; `vamos.builds.waiting` for a platform; `vamos.jobs.open`; and `vamos.jobs.refused` by `reason`.
+A coordinator SHALL export: `vamos.attempts.wait`, a histogram of how long attempts waited for a worker;
+`vamos.attempts`, attempts by platform and `state` `queued` or `running`; `vamos.workers` by platform, and
+`vamos.worker.slots` by platform and `state` `busy` or `free`; `vamos.builds.waiting` for a platform; `vamos.jobs.open`;
+and `vamos.jobs.refused` by `reason`.
 
 #### Scenario: A build waiting for a platform is counted
 
@@ -117,7 +120,8 @@ and without a route for a request that matches none.
 
 ### Requirement: Cache metrics
 
-A coordinator SHALL export, by kind of target, `vamos.cache.hits`; `vamos.cache.misses` by cause; `vamos.cache.joins`;
+A coordinator SHALL export, by kind of target, `vamos.cache.hits`; `vamos.cache.misses` by cause, `unknown` for a miss
+with none, as a pull's, even a pull whose unusable result `vamos.cache.lost` counts; `vamos.cache.joins`;
 `vamos.cache.saved`, the time hits saved; `vamos.cache.lost` by reason, results found but unusable; and
 `vamos.transfer.bytes` by direction, and `vamos.store.size` by store.
 
@@ -166,8 +170,9 @@ A coordinator SHALL count `vamos.attempts.retries`, `vamos.leases.expired`, `vam
 
 ### Requirement: Histograms carry exemplars of their spans
 
-A histogram measured from a span of a sampled exported trace SHALL carry, as an exemplar, the trace ID and span ID that
-span was exported under, so that an outlier leads to its trace.
+With the default exemplar filter, `trace_based`, a histogram's exemplars SHALL be drawn only from spans of sampled
+traces queued for export, each naming the trace ID and span ID its span was exported under, so that an outlier leads to
+its trace. A Prometheus scrape in the plain text format SHALL show no exemplars.
 
 #### Scenario: A slow attempt leads to its trace
 
@@ -199,9 +204,10 @@ of the attempt's run, which the stored trace shows; the coordinator SHALL export
 
 ### Requirement: Workers export their own metrics over OTLP
 
-A worker SHALL export its metrics as `OTEL_METRICS_EXPORTER` and the OTLP variables say, and take `otlp`, `console` or
-`none` alone; `prometheus` SHALL fail its start, saying workers export over OTLP. A worker SHALL export no traces, and
-SHALL warn that `OTEL_TRACES_EXPORTER`, if set, is ignored, since its coordinator exports its spans.
+A worker SHALL export its metrics as `OTEL_METRICS_EXPORTER` and the OTLP variables say, and take one of `otlp` or
+`console`, or `none`, `none` beside another being ignored; `prometheus` SHALL fail its start, saying workers export over
+OTLP. A worker SHALL export no traces. If `OTEL_TRACES_EXPORTER` names an exporter other than `none`, or is a mistake, a
+worker SHALL warn that it is ignored, since its coordinator exports its spans, unless `OTEL_SDK_DISABLED` is true.
 
 #### Scenario: A worker's counters reach the collector
 
@@ -227,9 +233,11 @@ A coordinator or worker that shuts down SHALL export what it holds of traces and
 
 ### Requirement: The Helm chart exposes telemetry
 
-The chart SHALL take values for the OTLP endpoint, the trace sampler and the metrics exporters, passed to the
-coordinator and the workers as `OTEL_*` variables, and, with Prometheus on, SHALL expose the coordinator's metrics port,
-named `metrics`, on its Service. With the defaults it SHALL set no `OTEL_*` variable and expose no metrics port.
+The chart SHALL pass, as `OTEL_*` variables, the OTLP endpoint, protocol and headers it is given to both roles, and the
+trace sampler to the coordinator alone. With its Prometheus switch on, it SHALL set the coordinator's metrics exporters,
+adding `otlp` if a shared or metrics OTLP endpoint is set, in the values or its extra environment, which can't then set
+the exporters, and expose port `metrics` on its Service. Its defaults SHALL set no `OTEL_*` variable and expose no
+metrics port.
 
 #### Scenario: The chart's defaults export nothing
 

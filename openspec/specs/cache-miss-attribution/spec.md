@@ -21,7 +21,8 @@ A reused target SHALL have none.
 
 ### Requirement: A forced build is forced
 
-A target that runs because `--rebuild` named it SHALL have the cause `forced`, whatever else changed.
+A target that runs because `--rebuild` named it SHALL have the cause `forced`, whatever else changed, but for a task run
+again because a target found its files unusable, which is `lost`.
 
 #### Scenario: --rebuild forces a target
 
@@ -33,8 +34,9 @@ A target that runs because `--rebuild` named it SHALL have the cause `forced`, w
 
 An executor SHALL keep, per target of a named workspace, the last 8 distinct actions its builds used, reused or made,
 most recent first, or fewer where 8 would pass the history's size cap. A target SHALL be identified by the workspace's
-name, its label, its platform and all its parameters' values. A failed or cancelled target SHALL add nothing. Builds of
-one target on one executor at once SHALL each add their action, and none SHALL drop another's.
+name, its label, its platform and all its parameters' values. A failed or cancelled target, or one whose history can't
+be read or written, SHALL add nothing. Concurrent builds of one target on one executor SHALL each add their action, none
+dropping another's.
 
 #### Scenario: Two branches' builds don't look like changes
 
@@ -72,7 +74,8 @@ workspaces SHALL NOT compare with each other's. An unnamed workspace SHALL keep 
 ### Requirement: A target without comparable history is new
 
 A target with no history entry, or none recorded by the same version of what an action covers, SHALL have the cause
-`new`, unless it is `forced`, or `lost` for a result found that can't be used.
+`new`, unless it is `forced`, or `lost` for a result found that can't be used. Where the store returns an error reading
+its history, the target's span SHALL name it, and the target SHALL be attributed as if it had none.
 
 #### Scenario: A target's first build is new
 
@@ -88,9 +91,9 @@ A target with no history entry, or none recorded by the same version of what an 
 
 ### Requirement: A result that is gone is lost
 
-A target whose action is one its history holds, or whose result is found but can't be used, at lookup or when a target
-that adds its files finds them unusable and has it run again, SHALL have the cause `lost`, as after a prune or once an
-image it names was removed.
+A target that isn't `forced` and misses though its action is one its history holds, or any target whose result is found
+but can't be used, at lookup or when a target that adds its files finds them unusable and has it run again, SHALL have
+the cause `lost`, as after a prune or once an image it names was removed.
 
 #### Scenario: A task whose cached files are corrupt is lost
 
@@ -109,9 +112,10 @@ image it names was removed.
 ### Requirement: Attribution compares with the nearest entry
 
 A miss that isn't `forced`, `new` or `lost` SHALL be compared with the entry, of the same version of what an action
-covers, that differs from it least: whether it is a layer or a task, each step, the command, the entrypoint, the output
-directory, the output selection, each source file added, removed or changed, the base, and each target's files or their
-epoch it adds count one difference. Among entries that differ equally, the most recent SHALL be compared.
+covers, that differs from it least, counting one for each of: its kind, a step, the command, the entrypoint, the output
+directory, the output selection, a source file added, removed or changed, a changed source kept by digest, the base, by
+supplier or content, an add whose supplier differs, and an added target's files or epoch. Of equals, the most recent
+SHALL be compared.
 
 #### Scenario: The nearest entry is compared, not the latest
 
@@ -123,10 +127,11 @@ epoch it adds count one difference. Among entries that differ equally, the most 
 
 ### Requirement: A change of the target's own inputs is own-inputs
 
-A miss whose nearest entry differs in a step, the command, the entrypoint, the output directory or selection, a
-source's files, or which target supplies its base or files it adds, SHALL have the cause `own-inputs`, whatever else
-differs. Where a source's files differ, the span SHALL name the files added, removed and changed, by path, unless the
-source was too large for history to keep its files, when it SHALL say the source changed.
+A miss whose nearest entry differs in its kind, a step, the command, the entrypoint, the output directory or selection,
+a source's files, or which target supplies its base or files it adds, SHALL have the cause `own-inputs`, whatever else
+differs. Where a source's files differ, the span SHALL name those added, removed and changed, by path, up to 100 of each
+with the count of all, or say a source changed if history couldn't keep its files or, once any source can't be read,
+doesn't hold them.
 
 #### Scenario: A layer that became a task is own-inputs
 
@@ -190,10 +195,10 @@ manifest digests before and after.
 
 ### Requirement: A change only in what a dependency supplies is dependency
 
-A miss whose nearest entry differs only in what a target it depends on supplies, the image of its base layer, the
-image reference its base pull declares, or the files or epoch of a task it adds, and not in its own inputs or as
-`upstream`, SHALL have the cause `dependency`, and its span SHALL name each such target. That target's own cause SHALL
-be its own, whether it hit or missed.
+A miss whose nearest entry differs only in what a target it depends on supplies, its base's image, its base pull's
+reference or, with another such change, manifest, or the files or epoch of a task it adds, and not in its own inputs or
+as `upstream`, SHALL have the cause `dependency`, its span naming each such target, or none if the entry differs in
+nothing history kept. That target's own cause SHALL be its own, whether it hit or missed.
 
 #### Scenario: A layer on a changed layer
 

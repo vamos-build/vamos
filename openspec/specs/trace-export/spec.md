@@ -10,9 +10,11 @@ from the pipeline into its targets and steps.
 
 ### Requirement: A coordinator is configured by the standard OTEL variables
 
-A coordinator SHALL read its trace export configuration from the standard `OTEL_*` environment variables when it
-starts. `OTEL_TRACES_EXPORTER` SHALL choose the exporter, `otlp`, `console` or `none`. If it is unset, the exporter is
-`otlp` when an OTLP endpoint variable is set, and `none` otherwise. `OTEL_SDK_DISABLED=true` SHALL turn off every export.
+A coordinator SHALL read its trace export configuration from the standard `OTEL_*` environment variables when it starts.
+`OTEL_TRACES_EXPORTER` SHALL take `otlp`, `console` or `none`, or several, comma-separated. If it is unset, the exporter
+is `otlp` when `OTEL_EXPORTER_OTLP_ENDPOINT` or `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` is set, and `none` otherwise.
+`OTEL_SDK_DISABLED=true` SHALL turn off every export. With `--local` a coordinator SHALL read none of them and export
+nothing.
 
 #### Scenario: A coordinator with nothing configured exports nothing
 
@@ -86,14 +88,15 @@ of an attempt's trace that was cut short SHALL be absent, as it is from the stor
 - **GIVEN** a coordinator with a worker, exporting traces to an OTLP collector
 - **AND** a project whose layer `app` must run a step that sleeps one second
 - **WHEN** I build `app` on the coordinator
-- **THEN** the step's exported span lasts at least one second and lies within the span of `layer "app"`, its parent
+- **THEN** the step's exported span lasts at least one second and lies within the span of `layer "app"`, its ancestor
 
 ### Requirement: Exported IDs are derived, and the trace file names them
 
-A job's trace ID and its spans' IDs SHALL be derived from the coordinator's instance, the job and vamos's span IDs, so
-that a job resumed after a restart that kept the coordinator's state goes on in the same trace. The `--trace` file and
-`vamos trace` file SHALL name, on each job's top-level spans, the trace ID the job was exported under, and whether it
-was sampled, but for its copies of an attempt's cache write, which the attempt's own trace holds when it is kept.
+A job's trace ID, unless it joined an outer trace, and its spans' IDs SHALL be derived from the coordinator's instance,
+the job and vamos's span IDs, so that a job resumed after a restart that kept the coordinator's state goes on in the
+same trace. Where the coordinator exports traces, the `--trace` and `vamos trace` files SHALL name, on each job's
+top-level spans, the trace ID the job was given and whether it was sampled, but for its copies of an attempt's cache
+write.
 
 #### Scenario: The trace file names the exported trace
 
@@ -125,10 +128,11 @@ attempt span.
 
 ### Requirement: A shared attempt's export may fall short when its starter's isn't kept or it is forgotten
 
-A joiner whose spans are exported before the attempt's are handed to export, as a joiner cancelled while the attempt
-runs on may be, or after the coordinator has forgotten the attempt, as it remembers a bounded number, MAY lack its
-link. If the starter's trace isn't kept, or the coordinator has forgotten the attempt, each sampled job the attempt
-served MAY export its own copy of the attempt's cache write, and a sampled job SHALL then hold one.
+A joiner MAY lack its link if its spans are exported before the attempt's are handed to export, as a cancelled joiner's
+may be, or if the coordinator has forgotten the attempt, of a bounded number, or dropped its snapshot. If the starter's
+trace isn't kept, or the attempt is forgotten or dropped, each sampled job it served whose snapshot reaches export SHALL
+export the copy of its cache write its own trace holds, if any; one that left the attempt, or whose trace was cut short,
+MAY hold none.
 
 #### Scenario: A joiner of an attempt whose starter's trace isn't kept keeps its cache write
 
@@ -140,11 +144,10 @@ served MAY export its own copy of the attempt's cache write, and a sampled job S
 
 ### Requirement: Arrows become span links
 
-Where a stored trace draws an arrow from the span that made something to a span that used it, the exported span that
-used it SHALL link to the exported span that made it, if that span was exported before it or in the same snapshot,
-in the same job's trace or in a job's still remembered by the coordinator that exports it.
-A span that used what a cache hit of its own job made, exported with the job's snapshot after the attempt that used it,
-MAY have no link.
+Where a stored trace draws an arrow from a span that made something to one that used it, the exported span that used it
+SHALL link to the exported span that made it, if that span is in the same snapshot, or was exported before it and the
+coordinator, of a bounded number, still remembers what it made. A span that used what a cache hit of its own job made,
+exported with the job's snapshot after the attempt that used it, MAY have no link.
 
 #### Scenario: A layer's start links to the commit of its base
 
@@ -164,8 +167,9 @@ MAY have no link.
 ### Requirement: Sampling keeps or drops a trace whole
 
 A coordinator SHALL sample as `OTEL_TRACES_SAMPLER` and `OTEL_TRACES_SAMPLER_ARG` say, `parentbased_always_on` if unset,
-and SHALL decide once for each job, keeping or dropping every span of its trace, its attempts' spans among them. An
-unknown sampler, or an argument it can't take, SHALL fail the coordinator's start, naming the variable.
+and SHALL decide for each job as it starts, keeping or dropping every span of its trace, its attempts' spans among
+them. A job resumed after a restart SHALL be decided again as it resumes, the same way if the sampler's settings are
+unchanged. An unknown sampler, or an argument it can't take, SHALL fail the coordinator's start, naming the variable.
 
 #### Scenario: A ratio of zero drops every trace
 
@@ -255,9 +259,11 @@ without it.
 
 ### Requirement: Exported spans say what was built and why
 
-Exported spans SHALL carry the attributes `vamos.job` on the job's span, `vamos.workspace` on every span of a job of a
-named workspace, `vamos.target` on a target's span, and on a target that missed, `vamos.miss.cause` and, for an
-`own-inputs` miss, the files added, removed and changed, as many as its stored trace names.
+Exported spans SHALL carry `vamos.job` on the job's span, `vamos.workspace` on each span of a named workspace's job,
+`vamos.target` on a target's span, and on a target that missed, `vamos.miss.cause` and, for an `own-inputs` miss, the
+files added, removed and changed that its stored trace names, up to 64 of each as the span's attribute budget allows.
+`vamos.truncated` `true` SHALL mark a span with a list cut short or an attribute its budget cut, not a key or string cut
+to its own size limit.
 
 #### Scenario: A miss's cause and files are exported
 

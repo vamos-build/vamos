@@ -61,10 +61,11 @@ can't be stored SHALL warn, print no digest, and end as it would have otherwise.
 
 ### Requirement: vamos trace writes a stored trace
 
-`vamos trace <digest|job> <file.json>` SHALL write the stored trace that the digest or job names, which Perfetto
-opens: a command's as `--trace` would have written it, a job's, or an attempt's. With `--coordinator` it SHALL read
-the coordinator's; without, the local executor's. A digest SHALL name a trace until a prune; a job ID SHALL name its
-job's while the coordinator remembers the job, after its command ends too. A trace not found SHALL fail saying why.
+`vamos trace <digest|job> <file.json>` SHALL write the stored trace that the digest or job names, which Perfetto opens:
+a command's as `--trace` would have written it, a job's, or an attempt's. With `--coordinator` it SHALL read the
+coordinator's; without, the local executor's. A digest SHALL name a trace until a prune, and a job ID, with
+`--coordinator`, its job's stored trace once the job has ended, even after its command, until a prune or the job is
+forgotten. Else it SHALL fail saying why.
 
 #### Scenario: A trace is read by its digest
 
@@ -112,8 +113,9 @@ job's while the coordinator remembers the job, after its command ends too. A tra
 
 `--trace <file.json>` SHALL write the command's trace, retrieved from the executor once the command's jobs have ended,
 to the file. It SHALL hold the client's spans and every job's, with the steps of the attempts they started or joined,
-and SHALL say where a part of the trace was cut short or couldn't be read. Where it may be written and what happens
-when it can't be SHALL be as before this change.
+and SHALL say where a part of the trace was cut short or couldn't be read. If writing the file fails, a command that
+otherwise succeeded SHALL fail with that error, and a command that failed SHALL keep its own error and warn of the
+write's.
 
 #### Scenario: --trace writes a command that ran no job
 
@@ -128,12 +130,28 @@ when it can't be SHALL be as before this change.
 - **AND** I run `vamos trace <digest> second.json` with the digest it printed
 - **THEN** both files hold the same spans
 
+### Requirement: --trace's path can be written and is not the output
+
+Before anything is built, a command given `--trace <file.json>` SHALL fail, naming the file, if it is a folder or a file
+can't be created in its folder, if it is the file that `save` writes, or if it is within the folder that `export`
+replaces, even through a link.
+
+#### Scenario: A trace at save's archive fails
+
+- **WHEN** I save `app` to `app.tar` with `--trace app.tar`
+- **THEN** it fails with `--trace app.tar: it is also the file that save writes`, and builds nothing
+
+#### Scenario: A trace within export's folder fails
+
+- **WHEN** I export `gen` to the folder `gen` with `--trace gen/t.json`
+- **THEN** it fails with `--trace gen/t.json: it is within the folder that export replaces`, and builds nothing
+
 ### Requirement: An attempt's trace is kept with its result
 
-The trace of the attempt that made a layer's or task's result SHALL be kept with the result, and a later build that
-reuses the result SHALL refer to it, and no part of the key. Every build that waits for an attempt to end, whenever it
-joined, SHALL refer to the same trace of it, and SHALL show the attempt's steps: in the target's span for the build that
-started it, and on a track named for the target for one that joined it.
+The trace of the attempt that made a layer's or task's result SHALL be kept with it, unless storing it failed, and a
+build that reuses the result SHALL refer to it, though it is no part of the key. Every build that waits for an attempt,
+whenever it joined, SHALL refer to that trace and show its steps or that they are missing, in the starter's target span
+or a joiner's shared track named for the target.
 
 #### Scenario: Two builds that share an attempt both show its steps
 
@@ -151,7 +169,9 @@ started it, and on a track named for the target for one that joined it.
 ### Requirement: A build that leaves an attempt says so
 
 A build that leaves an attempt while it runs on, as a cancelled build does while another build waits for it, SHALL say
-on the target's track that it left the attempt running, in place of the attempt's steps.
+on the target's track that it left the attempt running, in place of the attempt's steps. One command's trace SHALL show
+an attempt's steps once: as the starter's if its job has the trace, else as the first joiner's that has it, when a
+starter that left it MAY lack that note.
 
 #### Scenario: A build that left a shared attempt says so
 
@@ -162,10 +182,11 @@ on the target's track that it left the attempt running, in place of the attempt'
 
 ### Requirement: A hit shows what its result cost and saved
 
-A reused target SHALL show, in the trace, when its result was made, on what platform, how long the run that made it
-took, the time the reuse saved, being that run's duration less the hit's, and the digest of the attempt's trace. The
-run that made it SHALL exclude waiting for a worker and failed tries. A result made before vamos kept attempt traces
-SHALL show none of these.
+A reused layer or task SHALL show, in the trace, when its result was made, on what platform if recorded, how long the
+run that made it took, the time the reuse saved, being that run's duration less the hit's so far, before it records
+history, or zero if that is negative, and the digest of the attempt's trace, if one was stored. The run that made it
+SHALL exclude waiting for a worker and failed tries. A result made before vamos kept attempt traces SHALL show none of
+these.
 
 #### Scenario: A reused target shows the time it saved
 
