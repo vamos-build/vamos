@@ -1,12 +1,12 @@
 ---
 title: "Install on Ubuntu"
-description: "Install vamos directly on an Ubuntu 24.04 or later host."
+description: "Install Vamos directly on an Ubuntu 24.04 or later host."
 ---
 
-These steps install vamos on an Ubuntu 24.04 or later host or virtual machine.
+These steps install Vamos on an Ubuntu 24.04 or later host or virtual machine.
 Earlier releases have a glibc older than 2.34, which the binary requires.
 
-Install the packages vamos needs at run time:
+Install the packages Vamos needs at run time:
 
 ```sh
 sudo apt-get update
@@ -20,7 +20,7 @@ Install the latest release:
 curl -fsSL https://github.com/vamos-build/vamos/releases/latest/download/install.sh | sh
 ```
 
-[install.sh](README.md#what-installsh-does) installs vamos as `/usr/local/bin/vamos`,
+[install.sh](README.md#what-installsh-does) installs Vamos as `/usr/local/bin/vamos`,
 through `sudo` if you are not root.
 Run build steps with chroot isolation, so no OCI runtime is needed,
 by adding this line to your shell profile:
@@ -29,7 +29,7 @@ by adding this line to your shell profile:
 export BUILDAH_ISOLATION=chroot
 ```
 
-vamos needs root, so run it with `sudo`, keeping that variable:
+Vamos needs root, so run it with `sudo`, keeping that variable:
 
 ```sh
 sudo --preserve-env=BUILDAH_ISOLATION vamos --version

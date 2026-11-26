@@ -5,14 +5,14 @@ sidebar:
   label: "Fundamentals"
 ---
 
-vamos manipulates two kinds of artifacts:
+Vamos manipulates two kinds of artifacts:
 
 - An **image** is a standard OCI container image.
   An image can provide build tools for a later build step, or it can run the finished application.
 - A **fileset** contains files at relative paths, like a tarball or zip archive.
   They can be copied into an image, or they can be written out locally.
 
-vamos provides two operations to act on these artifacts:
+Vamos provides two operations to act on these artifacts:
 
 - A **layer** starts from a base image, adds filesets, runs commands, and preserves the new image.
 - A **task** starts from a base image, adds filesets, runs commands, and collects selected files into a new fileset.

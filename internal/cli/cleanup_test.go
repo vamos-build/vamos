@@ -93,7 +93,7 @@ func newHeldCoordinator(t *testing.T) *heldCoordinator {
 	return c
 }
 
-// servingCommand is a vamos command that serves, run in this process until its context ends.
+// servingCommand is a Vamos command that serves, run in this process until its context ends.
 type servingCommand struct {
 	name   string
 	output syncBuffer
@@ -101,7 +101,7 @@ type servingCommand struct {
 	err    error
 }
 
-// serveCommand runs vamos with args, a command that serves, on store, until ctx ends.
+// serveCommand runs Vamos with args, a command that serves, on store, until ctx ends.
 func serveCommand(ctx context.Context, cgroups string, store *testenv.Stores, args ...string) *servingCommand {
 	s := &servingCommand{name: "vamos " + args[0], ended: make(chan struct{})}
 	cmd := NewRootCommand(Config{Fs: afero.NewMemMapFs(), Store: &store.Options, // which reads no project

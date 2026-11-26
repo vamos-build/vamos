@@ -6,10 +6,10 @@ import (
 	"testing"
 )
 
-// module is the path of vamos's module, which its packages' import paths start with.
+// module is the path of Vamos's module, which its packages' import paths start with.
 const module = "github.com/vamos-build/vamos/internal/"
 
-// TestImportRules checks which packages each of vamos's may depend on, directly or not: load must not reach buildah,
+// TestImportRules checks which packages each of Vamos's may depend on, directly or not: load must not reach buildah,
 // so that it could run where buildah can't, run must not reach Starlark, so that a graph is all an executor needs,
 // and api must reach neither buildah nor the container store, so that a client of a remote executor needs neither.
 func TestImportRules(t *testing.T) {
@@ -19,7 +19,7 @@ func TestImportRules(t *testing.T) {
 	storage := "go.podman.io/storage"
 	rules := []struct {
 		pkg      string
-		internal []string // the packages of vamos it may use; nil for any
+		internal []string // the packages of Vamos it may use; nil for any
 		not      []string // packages it must not use, or trees of them, ending in "/..."
 	}{
 		{

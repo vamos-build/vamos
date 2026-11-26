@@ -25,13 +25,13 @@ import (
 // LockFile is the name of the lockfile, which pins pulls, at the workspace's root.
 const LockFile = "vamos.lock"
 
-// LockVersion is the version of the lockfile that this vamos reads and writes.
+// LockVersion is the version of the lockfile that this Vamos reads and writes.
 // A reader ignores fields it doesn't know, so a field can be added within a version;
-// a lockfile of a greater version is refused, so that an older vamos never rewrites it and drops what it can't read.
+// a lockfile of a greater version is refused, so that an older Vamos never rewrites it and drops what it can't read.
 const LockVersion = 1
 
 // Lock is a lockfile: the pin of each pulled image and tag.
-// It keeps the fields that this vamos doesn't know, as a newer one of the same version may write,
+// It keeps the fields that this Vamos doesn't know, as a newer one of the same version may write,
 // and writes them back: the lockfile's, and a pin's while the pin is unchanged.
 type Lock struct {
 	Version int
@@ -39,11 +39,11 @@ type Lock struct {
 	// "docker.io/library/node:24-alpine".
 	Pulls map[string]Pin
 
-	unknown     map[string]json.RawMessage // the lockfile's fields that this vamos doesn't know
+	unknown     map[string]json.RawMessage // the lockfile's fields that this Vamos doesn't know
 	unknownPins map[string]unknownPin      // those of each pin, by image, while it is the pin read
 }
 
-// unknownPin is the fields of a pin that this vamos doesn't know, and the pin they were read with.
+// unknownPin is the fields of a pin that this Vamos doesn't know, and the pin they were read with.
 type unknownPin struct {
 	read   Pin
 	fields map[string]json.RawMessage
@@ -323,9 +323,9 @@ func lineCol(data []byte, offset int64) (line, col int) {
 	return line, col
 }
 
-// Marshal returns the lockfile as vamos writes it, one field per line, indented by two spaces, and ending in a
+// Marshal returns the lockfile as Vamos writes it, one field per line, indented by two spaces, and ending in a
 // newline: its version, then its pins, sorted by image, each its tag then its digest, and, after the fields of each,
-// those this vamos doesn't know, sorted. The same pins always give the same bytes, and one pin's change changes only
+// those this Vamos doesn't know, sorted. The same pins always give the same bytes, and one pin's change changes only
 // its lines.
 func (l *Lock) Marshal() []byte {
 	pulls := make([]field, 0, len(l.Pulls))
@@ -382,7 +382,7 @@ func marshal(v any) []byte {
 
 // UpdateLock changes the lockfile of the workspace whose root is root, in fsys: holding the workspace's lock, which
 // another UpdateLock takes, it reads the lockfile again, as it is now, applies change, and writes it whole, of this
-// vamos's version, to a temporary file synced and renamed over it, so that a reader never sees it half written,
+// Vamos's version, to a temporary file synced and renamed over it, so that a reader never sees it half written,
 // a crash leaves the old lockfile or the new one, and a pin written since the caller last read it is kept.
 // It writes nothing if change leaves the lockfile's bytes as they were, or if there was none and change pins nothing,
 // and reports whether it wrote. Waiting for the lock ends with ctx.
@@ -409,7 +409,7 @@ func WouldUpdateLock(fsys afero.Fs, root string, change func(*Lock)) (bool, erro
 }
 
 // changeLock reads the lockfile at path, in fsys, applies change, and returns the lockfile as UpdateLock would write
-// it, of this vamos's version, and whether that differs from the one there: in its bytes, or by pinning something
+// it, of this Vamos's version, and whether that differs from the one there: in its bytes, or by pinning something
 // where there is none.
 func changeLock(fsys afero.Fs, path string, change func(*Lock)) ([]byte, bool, error) {
 	before, err := afero.ReadFile(fsys, path)

@@ -158,7 +158,7 @@ func (s *Stores) ContainerIDs() (map[string]bool, error) {
 }
 
 // WithStore calls use with the container store, open only until use returns,
-// since each vamos run opens and shuts it too.
+// since each Vamos run opens and shuts it too.
 func (s *Stores) WithStore(use func(storage.Store) error) error {
 	store, err := storage.GetStore(s.Options)
 	if err != nil {

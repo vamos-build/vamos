@@ -85,7 +85,7 @@ func Isolation() string {
 	return isolation.String()
 }
 
-// Version returns the version of vamos, as the release build stamped it or the Go module that built it records,
+// Version returns the version of Vamos, as the release build stamped it or the Go module that built it records,
 // or "" if that is unknown.
 func Version() string {
 	return vamosVersion()
@@ -199,7 +199,7 @@ func (l *Local) Close() error {
 	var errs []error
 	if l.store != nil {
 		// Shutdown reports a layer used if any in the store is mounted, by this process or another sharing the store,
-		// such as a second vamos building at the same time. This executor's jobs have removed their own containers,
+		// such as a second Vamos building at the same time. This executor's jobs have removed their own containers,
 		// and reported a failure to, so a layer still mounted is another's, and that is no failure.
 		// force must stay false: it would unmount every mounted layer in the store, under another's running build.
 		if _, err := l.store.Shutdown(false); err != nil && !errors.Is(err, storage.ErrLayerUsedByContainer) {
@@ -220,7 +220,7 @@ func (l *Local) Close() error {
 var graphVersions = []int{graph.Version}
 
 // Capabilities reports the host's platform, the one execution platform it offers, the graph versions this version
-// of vamos runs, how commands are isolated, and the time.
+// of Vamos runs, how commands are isolated, and the time.
 func (l *Local) Capabilities(context.Context) (api.Capabilities, error) {
 	isolation, err := parse.IsolationOption("")
 	if err != nil {
@@ -249,7 +249,7 @@ func checkExecPlatform(platform string) error {
 // the Dockerfile builds outside the repository's git metadata, so the build info can't record it.
 var stampedVersion string
 
-// vamosVersion returns the version of vamos, as the release build stamped it or the Go module that built it records,
+// vamosVersion returns the version of Vamos, as the release build stamped it or the Go module that built it records,
 // or "" if that is unknown.
 func vamosVersion() string {
 	if stampedVersion != "" {

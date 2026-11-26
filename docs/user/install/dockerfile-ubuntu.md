@@ -1,6 +1,6 @@
 ---
 title: "Dockerfile from Ubuntu"
-description: "Install vamos in a container image built from Ubuntu 24.04, such as a devcontainer or CI image."
+description: "Install Vamos in a container image built from Ubuntu 24.04, such as a devcontainer or CI image."
 ---
 
 Add these lines to a Dockerfile built from Ubuntu 24.04 or later:
@@ -26,7 +26,7 @@ ENV BUILDAH_ISOLATION=chroot
 
 Combine the package installation with your existing `apt-get install` step.
 Ubuntu names Fedora's `containers-common` package `golang-github-containers-common`.
-If a package is missing, [install.sh](README.md#what-installsh-does) installs vamos
+If a package is missing, [install.sh](README.md#what-installsh-does) installs Vamos
 but fails the build, printing the `apt-get` command that installs it.
 
 Run the container privileged with a volume for `/var/lib/containers`;

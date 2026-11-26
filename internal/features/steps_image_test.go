@@ -287,7 +287,7 @@ func (w *world) ThenTheImageIsForThisMachine() {
 	w.ThenTheImageIsFor(thisPlatform())
 }
 
-// thisPlatform returns the platform that the tests run on, as vamos names it.
+// thisPlatform returns the platform that the tests run on, as Vamos names it.
 func thisPlatform() string {
 	return platforms.Format(platforms.Normalize(platforms.DefaultSpec()))
 }

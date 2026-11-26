@@ -59,7 +59,7 @@ func anIndexOfApp(nonce string) string {
 	`, nonce, thisPlatform(), anotherPlatform())
 }
 
-// TestIndex_HasAnImageForEachPlatform specifies that with a single pull or layer reference, vamos configures that
+// TestIndex_HasAnImageForEachPlatform specifies that with a single pull or layer reference, Vamos configures that
 // target once for each listed platform and preserves the list's order in the index, which push publishes whole.
 func TestIndex_HasAnImageForEachPlatform(t *testing.T) {
 	parallelRule(t)

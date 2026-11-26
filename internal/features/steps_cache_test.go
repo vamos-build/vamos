@@ -25,8 +25,8 @@ import (
 )
 
 // Steps about the build cache and the container store as other programs see them: Given steps that damage them,
-// as something outside vamos might, a disk that corrupts a file, a person who removes one, or another tool, or that
-// hold them as another vamos does; and Then steps that see what they hold, as `podman images` or a look at the disk
+// as something outside Vamos might, a disk that corrupts a file, a person who removes one, or another tool, or that
+// hold them as another Vamos does; and Then steps that see what they hold, as `podman images` or a look at the disk
 // would. They reach into the cache's own files, as no user step can, and only stores of the scenario's own, so that
 // they damage nothing another scenario uses.
 
@@ -425,7 +425,7 @@ func copyImageData(store storage.Store, img *storage.Image, to string) error {
 	return nil
 }
 
-// GivenAnotherVamosIsUsingTheBuildCache holds the scenario's build cache open, as another vamos that builds does,
+// GivenAnotherVamosIsUsingTheBuildCache holds the scenario's build cache open, as another Vamos that builds does,
 // until the scenario ends or GivenTheOtherVamosIsDone.
 func (w *world) GivenAnotherVamosIsUsingTheBuildCache() {
 	w.t.Helper()
@@ -437,7 +437,7 @@ func (w *world) GivenAnotherVamosIsUsingTheBuildCache() {
 	w.holdOther(func() { d.Close() })
 }
 
-// GivenAnotherVamosIsPruningTheBuildCache holds the scenario's build cache exclusively, as another vamos that prunes
+// GivenAnotherVamosIsPruningTheBuildCache holds the scenario's build cache exclusively, as another Vamos that prunes
 // does, until the scenario ends or GivenTheOtherVamosIsDone.
 func (w *world) GivenAnotherVamosIsPruningTheBuildCache() {
 	w.t.Helper()
@@ -468,7 +468,7 @@ func (w *world) GivenAnotherVamosIsPruningTheBuildCache() {
 	})
 }
 
-// noOther fails the scenario if another vamos holds the build cache already, before a step takes it for another.
+// noOther fails the scenario if another Vamos holds the build cache already, before a step takes it for another.
 func (w *world) noOther() {
 	w.t.Helper()
 	if w.other != nil {
@@ -476,7 +476,7 @@ func (w *world) noOther() {
 	}
 }
 
-// holdOther records how to release what another vamos holds, once the scenario ends or GivenTheOtherVamosIsDone.
+// holdOther records how to release what another Vamos holds, once the scenario ends or GivenTheOtherVamosIsDone.
 func (w *world) holdOther(release func()) {
 	w.t.Helper()
 	var once sync.Once
@@ -484,7 +484,7 @@ func (w *world) holdOther(release func()) {
 	w.t.Cleanup(w.other)
 }
 
-// GivenTheOtherVamosIsDone releases what the other vamos held.
+// GivenTheOtherVamosIsDone releases what the other Vamos held.
 func (w *world) GivenTheOtherVamosIsDone() {
 	w.t.Helper()
 	if w.other == nil {

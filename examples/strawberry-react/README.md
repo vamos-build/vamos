@@ -87,9 +87,9 @@ pnpm check           # eslint and tsc
 pnpm dev             # http://localhost:3100, proxying /graphql to the backend on port 8100
 ```
 
-## Build with vamos
+## Build with Vamos
 
-The directory is a vamos workspace: `backend/` and `ui/` each have a `BUILD` file,
+The directory is a Vamos workspace: `backend/` and `ui/` each have a `BUILD` file,
 and both load helpers from `defs.star`; the root's `BUILD` declares the release.
 The UI's `graphql-codegen` task adds `//backend:schema`, the backend's exported schema,
 so no generated file is needed on disk.

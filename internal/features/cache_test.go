@@ -10,7 +10,7 @@ import (
 )
 
 // newCacheWorld starts a scenario of the cache feature, from its background.
-// vamos caches target results and reuses them when their effective inputs are unchanged.
+// Vamos caches target results and reuses them when their effective inputs are unchanged.
 // Delivery commands use the same cache as build.
 // Scenarios declare targets that print a value new to each, so that no result from another scenario is reused.
 // Its project pulls busybox.
@@ -61,7 +61,7 @@ func aLayerOnScratch(nonce string) string {
 	`, nonce)
 }
 
-// TestCache_UnchangedInputsAreReused specifies that vamos reuses target results while their effective inputs are
+// TestCache_UnchangedInputsAreReused specifies that Vamos reuses target results while their effective inputs are
 // unchanged, and that the CLI reports reuse and replays a cached target's previous output.
 func TestCache_UnchangedInputsAreReused(t *testing.T) {
 	parallelRule(t)

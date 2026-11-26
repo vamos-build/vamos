@@ -17,7 +17,7 @@ import (
 	"github.com/containerd/platforms"
 )
 
-// native is the platform the tests run on, as vamos names it.
+// native is the platform the tests run on, as Vamos names it.
 var native = platforms.Format(platforms.Normalize(platforms.DefaultSpec()))
 
 // foreign returns a platform that isn't the host's, whose programs run here only under emulation.

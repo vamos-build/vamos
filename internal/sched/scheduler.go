@@ -1210,7 +1210,7 @@ func resultArgs(result *cache.ActionResult) []any {
 
 // hitArgs returns what a reused result's span says of the run that made it, from its provenance, without reading
 // its trace: when it was made, on what platform, how long that took, what reusing it saved, the run's duration less
-// the hit's own so far, never below zero, and its attempt's trace; nothing for a result made before vamos kept
+// the hit's own so far, never below zero, and its attempt's trace; nothing for a result made before Vamos kept
 // them.
 func hitArgs(result *cache.ActionResult, span *tracing.Active) []any {
 	p := result.Provenance

@@ -9,7 +9,7 @@ export const GET: APIRoute = async ({ site }) => {
     ({ id, data }) => `- [${data.title}](${url(markdownPath(slugOf(id)))})${data.description ? `: ${data.description}` : ""}`,
   );
   return markdownResponse(
-    `# vamos
+    `# Vamos
 
 > A Go CLI that uses the buildah library to build container images described by BUILD files written in Starlark.
 

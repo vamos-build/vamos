@@ -1,9 +1,9 @@
 # Architecture
 
-This document describes the high-level architecture of vamos: the three execution phases,
+This document describes the high-level architecture of Vamos: the three execution phases,
 the client and executor components, and how build targets transition through the pipeline.
 
-vamos evaluates Starlark `BUILD` projects and builds OCI container images using the buildah library directly.
+Vamos evaluates Starlark `BUILD` projects and builds OCI container images using the buildah library directly.
 It does not generate Dockerfiles or invoke Docker or buildah command-line executables to build targets:
 Docker is a destination for built images, not the build engine.
 
@@ -122,7 +122,7 @@ The API contract and execution sequence are detailed in [Client/executor protoco
 
 ## Target identity across phases
 
-vamos distinguishes between two notions of package:
+Vamos distinguishes between two notions of package:
 - A BUILD package is a directory in a source workspace containing a `BUILD` file, addressed as `//dir:name`.
 - A Go package is an internal Go module subsystem, such as `internal/sched`.
 

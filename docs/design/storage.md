@@ -1,6 +1,6 @@
 # Storage and identity
 
-This document describes storage, artifact identity, and caching in vamos: the three storage layers,
+This document describes storage, artifact identity, and caching in Vamos: the three storage layers,
 action key generation, image naming, pin resolution, and cache pruning.
 
 ## The three storage layers

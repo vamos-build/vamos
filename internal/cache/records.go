@@ -34,10 +34,10 @@ type Provenance struct {
 	Platform     string   `json:"platform,omitempty"`     // the executor's, as platforms.Format gives it
 	Isolation    string   `json:"isolation,omitempty"`    // how it ran commands, such as "chroot"
 	Capabilities []string `json:"capabilities,omitempty"` // the Linux capabilities it gave run() steps
-	Version      string   `json:"version,omitempty"`      // of vamos, if known
+	Version      string   `json:"version,omitempty"`      // of Vamos, if known
 	Emulated     bool     `json:"emulated,omitempty"`     // its run() steps ran under emulation, for another platform
 	// Started and Took are when the run that made the result began, and how long it took,
-	// without waiting for a worker or failed tries; a result made before vamos kept them has neither.
+	// without waiting for a worker or failed tries; a result made before Vamos kept them has neither.
 	Started time.Time     `json:"started,omitzero"`
 	Took    time.Duration `json:"took,omitempty"`
 }

@@ -231,7 +231,7 @@ func finishJob(t *testing.T, ex api.Executor, req api.Request) api.Outcome {
 // as a worker does to the cache repository, and returns its reference there and its ID.
 func pushRandomImage(t *testing.T, repo, platform string) (ref string, id string) {
 	t.Helper()
-	// An OCI image of one random layer, as vamos builds them, so that assembling the index converts nothing
+	// An OCI image of one random layer, as Vamos builds them, so that assembling the index converts nothing
 	// and the image IDs hold.
 	layer, err := random.Layer(256, gcrtypes.OCILayer)
 	testenv.Must(t, err)

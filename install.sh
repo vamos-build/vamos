@@ -1,13 +1,13 @@
 #!/bin/sh
-# Installs the vamos binary from a GitHub release, checking it against the release's SHA256SUMS,
-# then reports the packages vamos needs at run time that this system lacks, with the command that installs them,
+# Installs the Vamos binary from a GitHub release, checking it against the release's SHA256SUMS,
+# then reports the packages Vamos needs at run time that this system lacks, with the command that installs them,
 # and fails if any is missing, unless --allow-missing, or VAMOS_ALLOW_MISSING=1, is given.
 # It never installs packages itself, so a Dockerfile keeps them in its own package step.
 #
 #   sh install.sh [--version <version>] [--dir <directory>] [--allow-missing]
 #
 # --version, or VAMOS_VERSION, names the release, such as 0.1.0, or latest; each release's copy of this script
-# defaults to that release. --dir, or VAMOS_INSTALL_DIR, is where vamos goes, /usr/local/bin by default.
+# defaults to that release. --dir, or VAMOS_INSTALL_DIR, is where Vamos goes, /usr/local/bin by default.
 # VAMOS_RELEASE_URL replaces the release's download URL, such as file:///dist, to install a build before it is released.
 # A user other than root installs through sudo.
 set -eu
@@ -27,7 +27,7 @@ die() {
 }
 
 # Reports whether there is a CA bundle where Debian's, Fedora's or RHEL's ca-certificates put it,
-# where SSL_CERT_FILE, which curl and vamos both read, says it is, or at any path given.
+# where SSL_CERT_FILE, which curl and Vamos both read, says it is, or at any path given.
 has_ca_bundle() {
 	for f in /etc/ssl/certs/ca-certificates.crt /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem \
 		/etc/pki/tls/certs/ca-bundle.crt "${SSL_CERT_FILE:-}" "$@"; do
@@ -159,10 +159,10 @@ $sudo install -m 0755 "$tmp/$asset" "$dir/vamos"
 installed=$("$dir/vamos" --version) || die "the installed $dir/vamos doesn't run"
 echo "Installed $installed at $dir/vamos."
 
-# Each check looks for what vamos uses, wherever the distribution's package puts it.
+# Each check looks for what Vamos uses, wherever the distribution's package puts it.
 missing=
 has_ca_bundle || missing="$missing ca-certificates"
-# Fedora 45's containers-common puts policy.json under /usr/share/containers, where vamos also looks.
+# Fedora 45's containers-common puts policy.json under /usr/share/containers, where Vamos also looks.
 [ -e /etc/containers/policy.json ] || [ -e /usr/share/containers/policy.json ] || missing="$missing containers-common"
 found=
 for d in /usr/local/libexec/podman /usr/local/lib/podman /usr/libexec/podman /usr/lib/podman; do
@@ -184,7 +184,7 @@ fi
 echo "vamos runs as root, in a privileged container with BUILDAH_ISOLATION=chroot" \
 	"and a volume for /var/lib/containers; see $repository/blob/main/docs/user/install/README.md."
 
-# vamos is installed either way, but fails at its first pull or run step without them.
+# Vamos is installed either way, but fails at its first pull or run step without them.
 if [ -n "$missing" ]; then
 	[ -n "$allow_missing" ] || die "vamos is installed, but can't build without those packages; install them," \
 		"or give --allow-missing, or VAMOS_ALLOW_MISSING=1, to install vamos without them"

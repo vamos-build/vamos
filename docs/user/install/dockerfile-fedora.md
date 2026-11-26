@@ -1,6 +1,6 @@
 ---
 title: "Dockerfile from Fedora"
-description: "Install vamos in a container image built from Fedora, such as a devcontainer or CI image."
+description: "Install Vamos in a container image built from Fedora, such as a devcontainer or CI image."
 ---
 
 Add these lines to a Dockerfile built from Fedora:
@@ -24,7 +24,7 @@ ENV BUILDAH_ISOLATION=chroot
 ```
 
 Combine the package installation with your existing `dnf install` step.
-If a package is missing, [install.sh](README.md#what-installsh-does) installs vamos
+If a package is missing, [install.sh](README.md#what-installsh-does) installs Vamos
 but fails the build, printing the `dnf` command that installs it.
 
 Instead of running `install.sh`, you can copy the binary from the published image,

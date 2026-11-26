@@ -33,7 +33,7 @@ flowchart TD
 
 ## Build and run
 
-Set up vamos using the [install guide](../../docs/user/install/README.md).
+Set up Vamos using the [install guide](../../docs/user/install/README.md).
 From the repository root:
 
 ```sh
@@ -67,7 +67,7 @@ pnpm build
 
 The build type-checks `src/main.ts` and bundles it into `dist/` with Vite.
 `pnpm-workspace.yaml` requires dependency releases to be at least two weeks old and saves exact versions.
-The committed lockfile supplies the same dependency selection to local and vamos builds.
+The committed lockfile supplies the same dependency selection to local and Vamos builds.
 
 ## Sanity check
 

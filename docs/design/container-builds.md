@@ -1,6 +1,6 @@
 # Container builds and delivery
 
-This document describes target execution and artifact delivery in vamos: the build lifecycle, target result types,
+This document describes target execution and artifact delivery in Vamos: the build lifecycle, target result types,
 execution platform selection, architecture emulation, and delivery to destinations.
 The phase transitions separating load, run, and finish are documented in [Architecture](architecture.md#phases).
 

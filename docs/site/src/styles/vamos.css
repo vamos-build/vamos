@@ -1,6 +1,6 @@
 /*
-  vamos design tokens, direction "Lovechild": Bazel green and buildah yellow.
-  Starlight reads its own --sl-* properties; this file defines vamos tokens once and maps them onto Starlight.
+  Vamos design tokens, direction "Lovechild": Bazel green and buildah yellow.
+  Starlight reads its own --sl-* properties; this file defines Vamos tokens once and maps them onto Starlight.
   Starlight's scale runs from --sl-color-white (strongest text) to --sl-color-black (page),
   so light mode inverts the gray steps rather than renaming them.
   Every text pairing meets WCAG 2.2 AA; marigold fails as text on the light page,

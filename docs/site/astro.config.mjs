@@ -19,7 +19,7 @@ export default defineConfig({
       mermaidConfig: { themeVariables: { fontFamily: '"Figtree Variable", Figtree, system-ui, sans-serif' } },
     }),
     starlight({
-      title: "vamos",
+      title: "Vamos",
       logo: { light: "./src/assets/logo-light.svg", dark: "./src/assets/logo-dark.svg", replacesTitle: true },
       favicon: "/favicon.svg",
       expressiveCode: {

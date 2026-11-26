@@ -13,16 +13,16 @@ Link to the owner when another scope needs it.
 | User workflow | [docs/user/](../../docs/user/README.md), example project READMEs | Fundamentals, install pages, references and runnable project setup |
 
 Do not add Go package READMEs.
-The root [README.md](../../README.md) introduces vamos and links to the user guide, the design documents
+The root [README.md](../../README.md) introduces Vamos and links to the user guide, the design documents
 and contributor instructions.
 The [fundamentals](../../docs/user/fundamentals.md) page owns the introductory walkthrough;
-the [install pages](../../docs/user/install/README.md) own installing vamos in a container image or on a host;
+the [install pages](../../docs/user/install/README.md) own installing Vamos in a container image or on a host;
 the references in `docs/user/reference/` own CLI, BUILD language, configuration, cache and remote execution behavior.
 The release's smoke test builds the Dockerfile in `install/dockerfile-ubuntu.md`,
 so keep it that page's only `dockerfile` block.
 The [example index](../../examples/README.md) helps users choose projects and build patterns.
 Example project READMEs own project-specific setup and checks, including non-Go toolchains,
-and link to the fundamentals or the install pages for shared vamos setup.
+and link to the fundamentals or the install pages for shared Vamos setup.
 
 [docs/site](../../docs/site/astro.config.mjs) publishes `docs/user/` as a Starlight site on Cloudflare Workers;
 each Markdown file there is a page, and a README is its directory's index.
@@ -102,7 +102,7 @@ Check local links and inspect `go doc ./internal/<package>` after changing packa
 
 ## Design documents
 
-[docs/design](../../docs/design/README.md) explains vamos's design to its developers:
+[docs/design](../../docs/design/README.md) explains Vamos's design to its developers:
 what spans packages, how the parts interact, and why, including rejected alternatives.
 A knowledge-base file on the same subject links to its design page and keeps only what a change needs:
 the symbols to inspect, the tests that guard each decision, gotchas and commands.

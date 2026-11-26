@@ -1,9 +1,9 @@
 ---
 title: "Build cache and traces"
-description: "How vamos reuses and rebuilds results, prunes its cache, and traces builds."
+description: "How Vamos reuses and rebuilds results, prunes its cache, and traces builds."
 ---
 
-vamos caches target results and reuses them when their effective inputs have not changed.
+Vamos caches target results and reuses them when their effective inputs have not changed.
 Delivery commands (`push`, `publish`, `load`, `save`, `export`) use the same cache as `build`.
 This reference describes cache key composition, rebuild rules, cache storage, pruning, timestamps,
 and performance tracing.
@@ -81,11 +81,11 @@ vamos build lint test --rebuild
 Locally cached layer images are stored in the local container store under the name `localhost/vamos-cache:<id>`.
 Metadata, logs, and captured workspace files are stored alongside the container store,
 typically under `/var/lib/containers/vamos`.
-Mounting a volume at `/var/lib/containers` preserves the cache when running vamos inside a container;
+Mounting a volume at `/var/lib/containers` preserves the cache when running Vamos inside a container;
 see the [installation requirements](../install/README.md).
 
 If a cached layer image or fileset is deleted or corrupted,
-vamos reports the issue and automatically rebuilds the target rather than failing the build.
+Vamos reports the issue and automatically rebuilds the target rather than failing the build.
 
 To remove cached build outputs:
 

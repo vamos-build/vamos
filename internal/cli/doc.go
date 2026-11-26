@@ -1,4 +1,4 @@
-// Package cli coordinates loading, execution and delivery for vamos commands.
+// Package cli coordinates loading, execution and delivery for Vamos commands.
 //
 // # Invariants
 //

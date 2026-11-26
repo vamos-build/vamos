@@ -1,9 +1,9 @@
 ---
 title: "Run with Docker"
-description: "Run vamos in a container on a Docker host, without installing it."
+description: "Run Vamos in a container on a Docker host, without installing it."
 ---
 
-vamos can run in a privileged container on a Docker host, without being installed there.
+Vamos can run in a privileged container on a Docker host, without being installed there.
 Build its image from the repository root:
 
 ```sh
@@ -32,8 +32,8 @@ vamos() {
 
 This assumes a Docker daemon at `/var/run/docker.sock` and a host directory Docker can mount.
 The named volume preserves the build cache between invocations.
-Run the function from your project directory; paths passed to vamos refer to the container filesystem.
+Run the function from your project directory; paths passed to Vamos refer to the container filesystem.
 
-If you are already inside a devcontainer, install vamos in its image instead,
+If you are already inside a devcontainer, install Vamos in its image instead,
 from [Ubuntu](dockerfile-ubuntu.md) or [Fedora](dockerfile-fedora.md),
 because the paths in the devcontainer differ from the Docker host's.

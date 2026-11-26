@@ -1,6 +1,6 @@
-# vamos design
+# Vamos design
 
-This directory contains the design documentation for vamos, written for contributors and maintainers.
+This directory contains the design documentation for Vamos, written for contributors and maintainers.
 It explains how the system is structured, the boundaries between its components,
 and the engineering decisions behind its implementation, including rejected alternatives.
 Users looking for command-line usage and BUILD language syntax should read the [user guide](../user/README.md) instead.
@@ -36,7 +36,7 @@ The design documents build progressively on one another:
 
 ## At a glance
 
-vamos evaluates Starlark `BUILD` files on the client to produce a dependency graph,
+Vamos evaluates Starlark `BUILD` files on the client to produce a dependency graph,
 executes that graph using the buildah library on an executor,
 and delivers final outputs to requested destinations.
 The executor runs either locally within the client process or remotely as a coordinator distributing actions to workers.
@@ -71,7 +71,7 @@ flowchart LR
 
 ## Documentation ownership
 
-vamos documentation follows strict ownership boundaries:
+Vamos documentation follows strict ownership boundaries:
 
 - Go symbol contracts are documented in doc comments directly above declarations.
 - Package-level invariants, lifecycles, and navigation are documented in each package's `doc.go`.

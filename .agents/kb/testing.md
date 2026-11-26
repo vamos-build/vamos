@@ -10,7 +10,7 @@ scripts/check full         # then go test ./..., with real buildah; needs root a
 Lint is golangci-lint, which runs `go vet`, `gofmt` and the linters [.golangci.yml](../../.golangci.yml) enables.
 Fix what it reports rather than suppressing it;
 a `//nolint:<linter>` needs a comment saying why the finding is wrong there.
-govulncheck fails only for a known vulnerability that vamos's code can reach;
+govulncheck fails only for a known vulnerability that Vamos's code can reach;
 fix one by updating the module, under the update-dependencies skill's policy.
 
 For timeout planning, previous devcontainer runs with a warm Go build cache took about 15 seconds for the short suite
@@ -38,7 +38,7 @@ for FastMCP activate `.venv`, then run `ruff check .`, `ruff format --check .`, 
 The other projects' guides are linked from [development.md](development.md).
 
 Everything a user does or sees is specified as [behavior specifications](#behavior-specifications):
-what they write and run, what vamos reports, sends and keeps, and how it reports their mistakes.
+what they write and run, what Vamos reports, sends and keeps, and how it reports their mistakes.
 A test outside them needs a strong case, and there are three.
 The ways a remote cache, coordinator or executor, or the connection to one, can fail
 are explored in Go tests, while a few scenarios show how a user sees such a failure.
@@ -240,7 +240,7 @@ reads it;
 [steps_terminal_test.go](../../internal/features/steps_terminal_test.go) a terminal as a command's standard output;
 [steps_remote_test.go](../../internal/features/steps_remote_test.go) coordinators that a command builds on;
 and [steps_cache_test.go](../../internal/features/steps_cache_test.go) the build cache and the container store as
-other programs see them: steps that damage or hold them, as something outside vamos might, and see what they hold,
+other programs see them: steps that damage or hold them, as something outside Vamos might, and see what they hold,
 on stores of the scenario's own.
 Reuse a step before adding one, and name a new one as what a user does or sees, not as how it is checked.
 Steps call `t.Helper`, so a failure names the scenario's line;
@@ -273,7 +273,7 @@ since an image on busybox can't be listed whole but a directory in it can.
 Use the exact form wherever a scenario can say all that a directory holds,
 and `ThenTheImageHoldsAtLeast` only where it can't, such as a file added to a base's `/etc`,
 or where a listing of paths is exact, as `ThenTheExportHoldsAtLeast` and `ThenTheDestinationHoldsAtLeast` are used;
-an exact check that fails where a subset would pass is a finding, to fix in vamos or the reference, not to loosen.
+an exact check that fails where a subset would pass is a finding, to fix in Vamos or the reference, not to loosen.
 Steps about named paths, variables or targets, such as `ThenTheImageModesAre`, `ThenTheImageLinks`,
 `ThenTheImageEnvironmentSets` and `ThenTheTargetsWere`, check those alone.
 `ThenItSucceeds` and `ThenItFailsWith` carry the checks that success and failure mean for every command:
@@ -281,7 +281,7 @@ success reports sending what the command sends, nothing if it sends nothing, and
 failure prints no usage and reports nothing sent.
 `ThenItFailsShowingUsage` is the failure of a mistake on the command line, which prints usage.
 `WhenIRun` runs a command line that the other When steps don't give, such as a mistaken one,
-`WhenIRunVamosAlone` runs vamos without arguments,
+`WhenIRunVamosAlone` runs Vamos without arguments,
 and `GivenTheCommandRunsIn` gives `-C` as it is, even outside the project, rather than `GivenIWorkIn`.
 No other step checks more than its name says, beyond what it needs to check that,
 such as a real time to compare with or a path in both images it compares;

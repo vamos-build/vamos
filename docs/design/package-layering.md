@@ -1,6 +1,6 @@
 # Package layering and dependencies
 
-This document describes the internal package hierarchy of vamos: import dependency rules,
+This document describes the internal package hierarchy of Vamos: import dependency rules,
 boundary isolation rationale, architectural verification, and the procedure for extending
 the build language with new steps.
 
@@ -9,7 +9,7 @@ For the system-level phases and execution topologies, see [Architecture](archite
 ## Package dependencies
 
 Package import rules enforce strict architectural layering across the codebase.
-The following diagram shows the permitted import dependencies among vamos packages, omitting transitive edges.
+The following diagram shows the permitted import dependencies among Vamos packages, omitting transitive edges.
 Import edges to `cache` and `tracing` are omitted from the diagram for clarity.
 Neither package is imported everywhere: `TestImportRules` limits `fileset` to `[cache]`
 and `graph` to `[fileset, cache]`, so neither of those may import `tracing`.

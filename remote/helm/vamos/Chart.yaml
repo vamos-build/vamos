@@ -1,10 +1,10 @@
 apiVersion: v2
 name: vamos
 description: >-
-  Remote execution for vamos: a coordinator, a pool of workers per platform, the cache registry they push built
+  Remote execution for Vamos: a coordinator, a pool of workers per platform, the cache registry they push built
   layers to, and pull-through caches for base images.
 type: application
-# The chart's own version; vamos has no releases yet, so the image tag is a value rather than appVersion.
+# The chart's own version; Vamos has no releases yet, so the image tag is a value rather than appVersion.
 version: 0.1.0
 appVersion: "latest"
 keywords:

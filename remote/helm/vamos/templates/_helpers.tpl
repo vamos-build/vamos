@@ -34,7 +34,7 @@ app.kubernetes.io/instance: {{ .root.Release.Name }}
 app.kubernetes.io/component: {{ .component }}
 {{- end }}
 
-{{/* The vamos image. */}}
+{{/* The Vamos image. */}}
 {{- define "vamos.image" -}}
 {{- printf "%s:%s" .Values.image.repository (default .Chart.AppVersion .Values.image.tag) }}
 {{- end }}
@@ -103,7 +103,7 @@ An upstream mapped twice fails, since the coordinator would keep only one of the
 {{- end }}
 {{- end }}
 
-{{/* The registry settings volume and its mount, which every vamos process reads as $CONTAINERS_REGISTRIES_CONF. */}}
+{{/* The registry settings volume and its mount, which every Vamos process reads as $CONTAINERS_REGISTRIES_CONF. */}}
 {{- define "vamos.registriesVolume" -}}
 - name: registries
   configMap:

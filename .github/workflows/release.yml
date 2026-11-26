@@ -1,4 +1,4 @@
-# Releases vamos: publishes the image, built from the repository's Dockerfile, to GitHub Packages
+# Releases Vamos: publishes the image, built from the repository's Dockerfile, to GitHub Packages
 # as one index for linux/amd64 and linux/arm64, then creates the GitHub Release v<tag> at the commit,
 # with each platform's binary, vamos-linux-amd64 and vamos-linux-arm64, install.sh and their SHA256SUMS.
 # It runs only when started by hand: Actions > release > Run workflow, or `gh workflow run release.yml -f tag=0.1.0`.
@@ -115,7 +115,7 @@ jobs:
           docker buildx build --load -t vamos-devcontainer "$context"
           docker run --rm vamos-devcontainer vamos --version | grep -qx "vamos version v$TAG"
           # Without a CA bundle, install.sh fails before downloading from GitHub, naming ca-certificates;
-          # without the packages, it installs vamos and fails, unless --allow-missing.
+          # without the packages, it installs Vamos and fails, unless --allow-missing.
           docker run --rm -v "$context:/w:ro" -e VAMOS_RELEASE_URL=file:///w/dist ubuntu:24.04 sh -ec '
             apt-get -qq update && apt-get -qq install -y --no-install-recommends curl >/dev/null
             env -u VAMOS_RELEASE_URL sh /w/install.sh 2>&1 | tee /dev/stderr | grep -q "needs a CA bundle"
@@ -222,5 +222,5 @@ jobs:
         working-directory: ${{ runner.temp }}/dist
         run: |
           if [[ $TAG == *-* ]]; then latest=--prerelease; else latest=--latest; fi
-          gh release create "v$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "vamos $TAG" \
+          gh release create "v$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Vamos $TAG" \
             --generate-notes "$latest" vamos-linux-amd64 vamos-linux-arm64 install.sh SHA256SUMS

@@ -60,7 +60,7 @@ Use `.` to select an entire directory tree.
 
 ### Reading files and links
 
-vamos traverses only directories that can match an included pattern.
+Vamos traverses only directories that can match an included pattern.
 In every include pattern, all path components before the first wildcard must exist and must not be symbolic links,
 even when `allow_no_files = True`.
 For patterns without wildcards (such as `main.go` or `link`), this requirement applies to the entire path:

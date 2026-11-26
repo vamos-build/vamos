@@ -236,7 +236,7 @@ func changePins(l *load.Lock, pins map[string]load.Pin, full bool) []pinChange {
 }
 
 // reportPins prints a line for each change to the lockfile, or that there was none, and each pin kept;
-// a lockfile rewritten with the same pins, as this vamos writes it, is reported as such.
+// a lockfile rewritten with the same pins, as this Vamos writes it, is reported as such.
 // changed says whether the lockfile was written, or would be; with --dry-run, each line says what would change.
 func (inv *invocation) reportPins(changes []pinChange, changed bool) error {
 	would := func(verb, conditional string) string {

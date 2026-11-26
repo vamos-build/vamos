@@ -5,7 +5,7 @@ import (
 )
 
 // newBuildFileWorld starts a scenario of the BUILD file feature, from its background.
-// A BUILD file is a Starlark program that declares named targets, which vamos loads before anything runs.
+// A BUILD file is a Starlark program that declares named targets, which Vamos loads before anything runs.
 // Every scenario's file holds a mistake, which loading catches, so it needs no buildah,
 // and saves its layer, to see that the mistake leaves nothing where it would have saved.
 // Its project pulls busybox.

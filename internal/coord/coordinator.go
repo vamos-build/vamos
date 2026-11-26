@@ -59,7 +59,7 @@ type Config struct {
 	// Registries are how the coordinator's registry settings reach the cache repository and the pull-through
 	// caches, for capabilities.
 	Registries []api.RegistryPolicy
-	// Version is the vamos version, for capabilities.
+	// Version is the Vamos version, for capabilities.
 	Version string
 	// Isolation is how workers run commands, for capabilities.
 	Isolation string

@@ -17,7 +17,7 @@
 // Checkout can write safely.
 // Images remain in container storage and may be removed independently of their action records;
 // before reusing a result, the scheduler in run has the runner check that its image, output tree and log still exist.
-// This package imports no other vamos package and does not invoke buildah.
+// This package imports no other Vamos package and does not invoke buildah.
 //
 // # Lifecycle
 //

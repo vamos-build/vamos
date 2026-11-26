@@ -271,7 +271,7 @@ func Decode(data []byte) (*Graph, error) {
 
 // Validate checks that g is a graph that can be run, and compiles its tasks' selections for matching.
 // Load checks every mistake a BUILD file can make first, with a message saying where,
-// so an error here means a graph that vamos didn't make, or a bug.
+// so an error here means a graph that Vamos didn't make, or a bug.
 func (g *Graph) Validate() error {
 	if g.Version != Version {
 		return fmt.Errorf("invalid build graph: version %d, want %d", g.Version, Version)

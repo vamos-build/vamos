@@ -18,6 +18,6 @@ Exporting into a nonempty directory requires `--replace`.
 Always specify a dedicated directory for generated outputs.
 
 When running as root, exported files receive the ownership of the destination folder's parent directory.
-Otherwise, files belong to the user executing vamos.
+Otherwise, files belong to the user executing Vamos.
 Exported files retain the task's timestamp, permission modes (including setuid/setgid bits within `mode_mask`),
 and symbolic links.

@@ -1,20 +1,20 @@
 ---
-title: "Install vamos"
-description: "Requirements for running vamos, and how to install it in a container image or on a host."
+title: "Install Vamos"
+description: "Requirements for running Vamos, and how to install it in a container image or on a host."
 ---
 
-vamos runs on Linux and uses Buildah, so it needs root and container privileges.
+Vamos runs on Linux and uses Buildah, so it needs root and container privileges.
 Each [release](https://github.com/vamos-build/vamos/releases) publishes the binary for `linux/amd64` and `linux/arm64`,
 a `SHA256SUMS` file, and an `install.sh` script that installs the binary.
 The binary requires glibc 2.34 or later.
 
-To follow the [fundamentals](../fundamentals.md), use the repository's devcontainer or [run vamos with Docker](docker.md).
+To follow the [fundamentals](../fundamentals.md), use the repository's devcontainer or [run Vamos with Docker](docker.md).
 
 ## Choose a setup
 
 | Setup | Use it when |
 | --- | --- |
-| [Run with Docker](docker.md) | You want to try vamos on a Docker host without installing it |
+| [Run with Docker](docker.md) | You want to try Vamos on a Docker host without installing it |
 | [Dockerfile from Ubuntu](dockerfile-ubuntu.md) | Your devcontainer or CI image is built `FROM ubuntu` |
 | [Dockerfile from Fedora](dockerfile-fedora.md) | Your devcontainer or CI image is built `FROM fedora` |
 | [Install on Ubuntu](ubuntu.md) | You build directly on an Ubuntu host or VM |
@@ -32,7 +32,7 @@ Run as a user other than root, it installs through `sudo`.
 It requires `curl` (or `wget`) and `ca-certificates` to download the release.
 
 It does not install packages itself:
-it checks for the packages vamos needs at run time and prints the `apt-get` or `dnf` command that installs any missing.
+it checks for the packages Vamos needs at run time and prints the `apt-get` or `dnf` command that installs any missing.
 If packages are missing, the script installs the binary and exits with status 1,
 which stops a Docker build before the image is finished.
 Pass `--allow-missing` or set `VAMOS_ALLOW_MISSING=1` to skip this check.
@@ -45,7 +45,7 @@ Pass `--allow-missing` or set `VAMOS_ALLOW_MISSING=1` to skip this check.
 
 ## Configure a devcontainer
 
-When vamos runs in a devcontainer, run the container privileged,
+When Vamos runs in a devcontainer, run the container privileged,
 mount a dedicated volume for container storage,
 and mount the Docker socket if you use `vamos load`.
 In `.devcontainer/devcontainer.json`:
@@ -59,7 +59,7 @@ In `.devcontainer/devcontainer.json`:
 ```
 
 The named volume retains the build cache when the devcontainer is rebuilt.
-Run vamos as root, or with `sudo` if your devcontainer user is non-root.
+Run Vamos as root, or with `sudo` if your devcontainer user is non-root.
 
 ## Build for other architectures
 

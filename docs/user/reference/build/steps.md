@@ -44,7 +44,7 @@ run(["sh", "-c", "mkdir -p /out && printf 'hello\\n' > /out/message.txt"])
 Invoke a shell explicitly to use pipes, file redirection, or shell variable expansion.
 The base image must provide all executables referenced by `argv`, including any shell.
 
-Commands run with chroot isolation and inherit the network configuration of the host process running vamos.
+Commands run with chroot isolation and inherit the network configuration of the host process running Vamos.
 They use the host's network interfaces, IP addresses, and DNS configuration from `/etc/resolv.conf`.
 Inside a devcontainer, commands can reach Docker Compose services by service name.
 On remote workers, commands use the worker's network environment.

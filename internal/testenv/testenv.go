@@ -28,7 +28,7 @@ const PullBusybox = `pull(name="busybox", image="docker.io/library/busybox", tag
 // Should Docker Hub stop serving it, `crane digest docker.io/library/busybox:1.36` gives the new one.
 const BusyboxIndex = "sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662"
 
-// BusyboxLock is a lockfile that pins PullBusybox's tag to BusyboxIndex, as vamos writes one.
+// BusyboxLock is a lockfile that pins PullBusybox's tag to BusyboxIndex, as Vamos writes one.
 const BusyboxLock = `{
   "version": 1,
   "pulls": {

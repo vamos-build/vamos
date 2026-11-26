@@ -45,7 +45,7 @@ type TraceEntry struct {
 	Cause   string `json:"cause,omitempty"`
 	Attempt string `json:"attempt,omitempty"` // the ID of the attempt that served it, or made the result it reused
 	// Trace is the stored trace of that attempt: the one it took, or the one that made the result it reused.
-	// It is nil if the job left the attempt running, or the result was made before vamos kept traces.
+	// It is nil if the job left the attempt running, or the result was made before Vamos kept traces.
 	Trace *cache.Blob `json:"trace,omitempty"`
 	// Left says the job left the attempt running, so that it took no trace of it.
 	Left bool `json:"left,omitempty"`

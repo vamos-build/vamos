@@ -1,4 +1,4 @@
-// Package features specifies vamos's behavior as features, rules and scenarios, in Go,
+// Package features specifies Vamos's behavior as features, rules and scenarios, in Go,
 // and runs them against the command line, in process, as a user would see it: projects in, images and files out.
 //
 // A feature is a file, such as layer_test.go, whose tests are its rules, named TestFeature_Rule,

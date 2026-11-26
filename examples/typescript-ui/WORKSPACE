@@ -1,2 +1,2 @@
 # Marks the workspace's root, so that the example stands alone, with its own vamos.lock,
-# rather than as a package of the vamos repository's workspace.
+# rather than as a package of the Vamos repository's workspace.

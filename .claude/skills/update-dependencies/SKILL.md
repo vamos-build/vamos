@@ -252,7 +252,7 @@ The image names and tags in Go tests and feature files are test data, not depend
 - `registry:3` in its coherence group: check for a newer major with
   `curl -fsSL 'https://hub.docker.com/v2/repositories/library/registry/tags?page_size=100' | jq -r '.results[].name'`.
 - The chart's own `version` and `appVersion` in [Chart.yaml](../../../remote/helm/vamos/Chart.yaml)
-  version vamos itself, not a dependency. Leave them alone.
+  version Vamos itself, not a dependency. Leave them alone.
 
 ### GitHub Actions: [.github/workflows/release.yml](../../../.github/workflows/release.yml)
 

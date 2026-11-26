@@ -21,7 +21,7 @@ The [user guide](https://vamos.build/) links to the CLI, BUILD language, configu
 ## Development
 
 Use the repository's [devcontainer](.devcontainer/devcontainer.json) for build dependencies and container privileges.
-See the [design documents](docs/design/README.md) for how vamos is built and why,
+See the [design documents](docs/design/README.md) for how Vamos is built and why,
 and the [contributor index](AGENTS.md) for development and validation instructions.
 
 Build the CLI image from the repository root:
@@ -45,4 +45,4 @@ so the next build of your own project runs every target again.
 
 ## License
 
-vamos is released under the [MIT License](LICENSE).
+Vamos is released under the [MIT License](LICENSE).

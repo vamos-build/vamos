@@ -1,12 +1,12 @@
 ---
 title: "Registry credentials"
-description: "How vamos finds credentials for container registries, including inside Docker."
+description: "How Vamos finds credentials for container registries, including inside Docker."
 ---
 
 Registry operations use your local container registry credentials, including `~/.docker/config.json`.
 Set `$REGISTRY_AUTH_FILE` to specify a custom authentication file path.
 
-When running vamos inside Docker, mount your authentication file into the container:
+When running Vamos inside Docker, mount your authentication file into the container:
 
 ```sh
 -v "$HOME/.docker/config.json:/root/.docker/config.json:ro"

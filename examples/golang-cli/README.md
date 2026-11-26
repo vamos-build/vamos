@@ -2,7 +2,7 @@
 
 A Go command, `echo`, built into an image of the binary alone, for amd64 and arm64.
 
-The `build` task cross-compiles: its base is the `golang` image for the platform vamos runs on,
+The `build` task cross-compiles: its base is the `golang` image for the platform Vamos runs on,
 so the compiler runs natively, while `GOOS` and `GOARCH` come from the platform the image is for.
 Since it reads `ctx.os` and `ctx.arch`, each platform's binary is its own build.
 The image itself is a layer on `scratch` that only adds the binary,
@@ -41,7 +41,7 @@ go vet ./... && gofmt -l .
 go run . -n hola
 ```
 
-## Build with vamos
+## Build with Vamos
 
 From the repository root:
 

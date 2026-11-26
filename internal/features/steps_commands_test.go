@@ -156,7 +156,7 @@ func fromTheClient() option {
 	}}
 }
 
-// withoutTLSVerification lets vamos itself reach a registry over plain HTTP, with --tls-verify=false.
+// withoutTLSVerification lets Vamos itself reach a registry over plain HTTP, with --tls-verify=false.
 // Every command takes it.
 func withoutTLSVerification() option {
 	return option{"withoutTLSVerification", everyCommandAndUpdate, func(w *world, c *commandLine) {
@@ -544,7 +544,7 @@ func (w *world) noGraph() string {
 	return "no When step showed the graph"
 }
 
-// WhenIRun runs vamos with args as they are, after -C, for a command line that the other When steps don't give:
+// WhenIRun runs Vamos with args as they are, after -C, for a command line that the other When steps don't give:
 // one that is itself a mistake, or that asks for help. A command line that builds is given by the When step of its
 // command and the options that name its flags. It sends nothing that a later step can check.
 func (w *world) WhenIRun(args ...string) {
@@ -553,7 +553,7 @@ func (w *world) WhenIRun(args ...string) {
 	w.run(args...)
 }
 
-// WhenIRunVamosAlone runs vamos without arguments, not even -C, so that no Given step may say where it runs.
+// WhenIRunVamosAlone runs Vamos without arguments, not even -C, so that no Given step may say where it runs.
 func (w *world) WhenIRunVamosAlone() {
 	w.t.Helper()
 	if (w.dir != "" && w.dir != ".") || w.cDir != "" {

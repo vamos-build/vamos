@@ -333,7 +333,7 @@ func TestPlatforms_VariantsReachTheImage(t *testing.T) {
 
 // TestPlatforms_TheCommandLineGivesPlatforms specifies that --platform and --exec-platform give a platform,
 // os/arch or os/arch/variant, and that the exec platform is one the executor offers, which for the executor built
-// into vamos is this machine's, so that naming it builds as without the flag.
+// into Vamos is this machine's, so that naming it builds as without the flag.
 func TestPlatforms_TheCommandLineGivesPlatforms(t *testing.T) {
 	parallelRule(t)
 	for _, example := range []struct {

@@ -1,6 +1,6 @@
 ---
 title: "BUILD language reference"
-description: "Targets, steps, and file selection in vamos BUILD files."
+description: "Targets, steps, and file selection in Vamos BUILD files."
 ---
 
 A `BUILD` file is a Starlark program that declares build targets.
