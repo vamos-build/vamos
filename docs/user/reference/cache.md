@@ -134,14 +134,16 @@ Exported task files retain the task's timestamp.
 
 Every command that builds is traced, whether or not you ask: `build`, `push`, `publish`, `load`, `save` and
 `export`.
-Once its jobs end, a command prints its trace's digest on standard error, whether it succeeded or failed:
+Once its jobs end, a command prints its stored trace's digest on standard error, whether it succeeded or failed.
+A command that runs no job prints no trace digest:
 
 ```text
 vamos: trace sha256:4f2a…
 ```
 
-`vamos trace` writes a stored trace to a file, by that digest, or by a job's ID on a coordinator,
-and `--trace <file.json>` writes the command's own as it ends:
+`vamos trace` writes a stored trace to a file by digest, or by job ID once the job has ended.
+Use `--coordinator <URL>` to read from a coordinator; a job ID requires it.
+`--trace <file.json>` writes the command's own trace as it ends:
 
 ```sh
 vamos build lint test app --trace build-trace.json
@@ -184,14 +186,14 @@ The trace path must not collide with a `save` archive path or reside inside an `
 
 ### Why a target missed
 
-In a [named workspace](configuration.md), the executor keeps each target's history: the last 8 actions its builds
+In a [named workspace](configuration.md), the executor keeps each target's history: up to 8 distinct actions its builds
 used, per target, platform and parameters.
-Each layer or task that runs, rather than being reused, gets one cause in its trace:
+Each layer or task that runs or joins another build's attempt, rather than being reused, gets one cause in its trace:
 
 | Cause | Meaning |
 | --- | --- |
-| `forced` | `--rebuild` named it, whatever else changed. |
-| `lost` | Its action is one it built before, but the result is gone or can't be used, as after a prune. |
+| `forced` | It runs because `--rebuild` named it, whatever else changed. |
+| `lost` | Its action is in history but the result is gone, as after a prune, or a cached result was found but couldn't be used. This includes a task run again because another target found its cached files unusable. |
 | `new` | It has no earlier build to compare with: a first build, a new configuration, or an unnamed workspace. |
 | `own-inputs` | A step, command, output, source file, or which target supplies its base or files changed; a source's added, removed and changed files are named. |
 | `upstream` | Only the image that its base pull's tag names moved, as after `vamos update`; both manifests are named. |
