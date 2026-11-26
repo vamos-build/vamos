@@ -98,7 +98,7 @@ and `vamos.jobs.refused` by `reason`.
 
 ### Requirement: Speed metrics
 
-A coordinator SHALL export `vamos.attempts.duration`, a histogram of attempts' runs, by platform, kind and outcome;
+A coordinator SHALL export `vamos.attempts.duration`, a histogram of attempts' tries, by platform, kind and outcome;
 `vamos.jobs.duration`, of jobs, by kind and outcome; and the duration of the API's requests that its middleware passes,
 by method, route pattern and status, never by a path that holds an ID or digest,
 and without a route for a request that matches none.
@@ -178,7 +178,7 @@ its trace. A Prometheus scrape in the plain text format SHALL show no exemplars.
 
 - **GIVEN** a coordinator with a worker, exporting traces to an OTLP collector and serving Prometheus metrics
 - **WHEN** I build `app` on the coordinator, and scrape the metrics as OpenMetrics
-- **THEN** `vamos_attempts_duration_seconds` has an exemplar whose `trace_id` and `span_id` name the span of `app`'s
+- **THEN** `vamos_attempts_duration_seconds` has an exemplar whose `trace_id` and `span_id` name the try span of `app`'s
   attempt that the collector received
 
 #### Scenario: A sampled-out span leaves no exemplar
