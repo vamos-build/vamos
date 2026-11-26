@@ -189,9 +189,10 @@ its trace. A Prometheus scrape in the plain text format SHALL show no exemplars.
 
 ### Requirement: Attempts report the resources they used
 
-A worker SHALL read an attempt's cgroup as the attempt ends and record the CPU time and peak memory it used on the span
-of the attempt's run, which the stored trace shows; the coordinator SHALL export `vamos.attempts.cpu` and
-`vamos.attempts.memory.peak`, histograms by platform and kind. What the cgroup can't tell SHALL be left out.
+A worker SHALL read an attempt's cgroup as the attempt ends and record the CPU time and peak memory it used on the
+attempt's try span, which the stored trace shows; the coordinator SHALL export `vamos.attempts.cpu` and
+`vamos.attempts.memory.peak`, histograms by platform and kind. What the cgroup can't tell SHALL be left out, as SHALL
+all of it for an attempt killed or cancelled before its cgroup is read.
 
 #### Scenario: A busy step's CPU time is reported
 

@@ -219,9 +219,10 @@ target started or joined, SHALL say so, on that target's track, where the attemp
 ### Requirement: A trace is capped in size
 
 Each stored trace, an attempt's, a job's with its targets' outcomes, and a command's, SHALL be kept whole within a size
-cap, as a log is. Spans past the cap SHALL be dropped, the latest started first, so that children go before the target
-spans that hold them, and the trace SHALL say that it was cut short and how many spans it dropped. It SHALL say so in
-the trace alone, and warn about nothing.
+cap, as a log is. Spans past the cap SHALL be dropped as it is stored, the latest started first, so that children go
+before the target spans that hold them; a recorder past twice the cap SHALL refuse spans as they end, which MAY take a
+parent. The trace SHALL say that it was cut short and how many spans it dropped or refused, in the trace alone, and warn
+about nothing.
 
 #### Scenario: An attempt that traces past the cap is cut short
 

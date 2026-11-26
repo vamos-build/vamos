@@ -261,8 +261,8 @@ without it.
 ### Requirement: Exported spans say what was built and why
 
 Exported spans SHALL carry `vamos.job` on the job's span, `vamos.workspace` on each span of a named workspace's job,
-`vamos.target` on a target's span, and on a target that missed, `vamos.miss.cause` and, for an `own-inputs` miss, the
-files added, removed and changed that its stored trace names, up to 64 of each as the span's attribute budget allows.
+`vamos.target` on a target's span, and on a layer or task that missed, `vamos.miss.cause` and, for an `own-inputs` miss,
+files added, removed and changed that its stored trace names, up to 64 of each, as its attribute budget allows.
 `vamos.truncated` `true` SHALL mark a span with a list cut short or an attribute its budget cut, not a key or string cut
 to its own size limit.
 
