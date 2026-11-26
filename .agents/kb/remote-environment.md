@@ -84,6 +84,14 @@ kubectl -n vamos port-forward svc/vamos-coordinator 18080:8080 &
 helm uninstall vamos -n vamos && kubectl delete namespace vamos   # the namespace takes the volume claims
 ```
 
+The chart's `telemetry` values set the coordinator's and workers' `OTEL_*` variables: `telemetry.otlp.endpoint`,
+`protocol` and `headersSecret` for both, `telemetry.traces.sampler` and `samplerArg` for the coordinator, and
+`telemetry.prometheus.enabled`, which serves the coordinator's metrics on every address at `telemetry.prometheus.port`,
+9464, behind
+its Service's port named `metrics`, with `podAnnotations` for a Prometheus that discovers pods by annotation. The
+defaults set none. `coordinator.terminationGracePeriodSeconds`, 45 by default, gives the coordinator time to drain
+its API and send what its telemetry holds before the pod is killed.
+
 A worker is lost with `crictl stop --timeout 0` on its container, run in the node with `docker exec`:
 the kubelet starts it again in the same pod, as Docker's restart policy does.
 A worker's cgroups are seen from its own namespace, `kubectl exec <pod> -- nsenter -t 1 -C -m ls /sys/fs/cgroup/vamos`,

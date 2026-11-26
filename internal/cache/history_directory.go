@@ -170,7 +170,8 @@ func (d *Directory) PruneHistory(ctx context.Context, before time.Time) (int, er
 		if !head.Used.Before(before) {
 			continue
 		}
-		if err := d.remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		if err := d.sizes.change(path, func() error { return d.remove(path) }); err != nil &&
+			!errors.Is(err, fs.ErrNotExist) {
 			errs = append(errs, fmt.Errorf("removing target history %s: %w", e.Name(), err))
 			continue
 		}

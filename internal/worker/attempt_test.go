@@ -5,9 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -267,7 +270,7 @@ func TestRelayBoundsEvents(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		_, _ = w.relay(t.Context(), "a", clock, r) // the test checks what reached the coordinator
+		_, _ = w.relay(t.Context(), "a", clock, r, nil) // the test checks what reached the coordinator
 	}()
 	time.Sleep(time.Second)
 	// What was read is what waits, a line over the bound at most, and one more line in the scanner.
@@ -285,5 +288,103 @@ func TestRelayBoundsEvents(t *testing.T) {
 	}
 	if !bytes.Equal(got.Bytes(), want.Bytes()) {
 		t.Errorf("the coordinator received %d bytes of output, want the %d written, in order", got.Len(), want.Len())
+	}
+}
+
+// TestKillDecides checks when a kill decides an attempt's end and when a fence is counted: only for a kill that
+// stopped processes that ran, and then, for the end, only if it came before the output ended or nothing was reported.
+func TestKillDecides(t *testing.T) {
+	fence := fmt.Errorf("%w for 1s: no answer came", errFenced)
+	coordinator := errors.New("the coordinator asked for the attempt to be killed")
+	for _, c := range []struct {
+		name                        string
+		why                         error
+		stopped, beforeEnd, reports bool
+		decided, fenced             bool
+	}{
+		{"no kill", nil, false, false, true, false, false},
+		{"a fence that found nothing running, as during the last events", fence, false, false, false, false, false},
+		{"a fence before the output ended", fence, true, true, false, true, true},
+		{"a fence after a report", fence, true, false, true, false, true},
+		{"a fence after the output ended without a report", fence, true, false, false, true, true},
+		{"the coordinator's kill before the output ended", coordinator, true, true, false, true, false},
+	} {
+		decided, fenced := killDecides(c.why, c.stopped, c.beforeEnd, c.reports)
+		if decided != c.decided || fenced != c.fenced {
+			t.Errorf("%s: decided %t, fenced %t; want %t, %t", c.name, decided, fenced, c.decided, c.fenced)
+		}
+	}
+}
+
+// TestEnding checks which cause of an attempt's end comes first, as the attempt then reports it: a kill that came
+// before the output ended decides it, but one after a read of the output failed, as the lease's fence may come as that
+// failure is recorded, doesn't, so that the failure is reported rather than the attempt tried again.
+func TestEnding(t *testing.T) {
+	fence := fmt.Errorf("%w for 1s: no answer came", errFenced)
+	unreadable := errors.New("a line too long")
+	running := func() bool { return true }
+	for _, c := range []struct {
+		name    string
+		order   func(e *ending)
+		decided bool
+	}{
+		{
+			name:    "a fence, then the read's failure",
+			order:   func(e *ending) { e.kill(fence, running); e.outputEnd(unreadable) },
+			decided: true,
+		},
+		{
+			name:    "the read's failure, then a fence",
+			order:   func(e *ending) { e.outputEnd(unreadable); e.kill(fence, running) },
+			decided: false,
+		},
+		{
+			name:    "the output's end without a report, then a fence",
+			order:   func(e *ending) { e.outputEnd(nil); e.kill(fence, running) },
+			decided: true,
+		},
+		{
+			name:    "the subprocess's exit, then a fence",
+			order:   func(e *ending) { e.outputEnd(nil); _, _, _ = e.exited(); e.kill(fence, running) },
+			decided: false,
+		},
+	} {
+		var e ending
+		c.order(&e)
+		live, beforeEnd, why := e.exited()
+		if decided, _ := killDecides(why, live, beforeEnd, false); decided != c.decided {
+			t.Errorf("%s: the kill decided the end %t; want %t", c.name, decided, c.decided)
+		}
+	}
+}
+
+// TestHolds checks that a cgroup holds a process only if its cgroup.procs lists that pid exactly, that one that can't
+// be read is taken to hold it, and one that is gone holds nothing.
+func TestHolds(t *testing.T) {
+	c := &containment{root: t.TempDir()}
+	dir := c.path("a")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if c.holds("gone", 123) {
+		t.Error("a cgroup that is gone holds 123")
+	}
+	procs := filepath.Join(dir, "cgroup.procs")
+	if err := os.Mkdir(procs, 0o755); err != nil { // which can't be read as a file
+		t.Fatal(err)
+	}
+	if !c.holds("a", 123) {
+		t.Error("a cgroup whose cgroup.procs can't be read doesn't hold 123")
+	}
+	if err := os.Remove(procs); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(procs, []byte("1234\n123\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for pid, want := range map[int]bool{123: true, 1234: true, 12: false, 23: false} {
+		if got := c.holds("a", pid); got != want {
+			t.Errorf("the cgroup holds %d: %t; want %t", pid, got, want)
+		}
 	}
 }

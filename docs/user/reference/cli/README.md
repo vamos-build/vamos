@@ -33,5 +33,13 @@ Delivery commands build the requested target and its dependencies before deliver
 | [`vamos coordinator`](coordinator.md) | None | Run a coordinator to schedule builds across workers |
 | [`vamos worker`](worker.md) | None | Run a build worker managed by a coordinator |
 
+## Environment variables
+
+| Variable | Effect |
+| --- | --- |
+| `VAMOS_COORDINATOR` | The coordinator to build on, as `--coordinator` names it |
+| `VAMOS_PINS` | The policy for unpinned pulls, as `--pins` names it |
+| `TRACEPARENT`, `TRACESTATE` | A W3C trace context that each job built on a coordinator joins, as a [CI trace](../remote.md#joining-a-ci-trace) |
+
 Registry operations authenticate with your local [registry credentials](registry-credentials.md).
 See [output and troubleshooting](output.md) for progress states, error reporting, and common problems.

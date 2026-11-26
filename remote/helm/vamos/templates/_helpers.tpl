@@ -171,6 +171,99 @@ ports:
     {{- if and (has .service.type (list "NodePort" "LoadBalancer")) .service.nodePort }}
     nodePort: {{ .service.nodePort }}
     {{- end }}
+  {{- with .metricsPort }}
+  - name: metrics
+    port: {{ . }}
+    targetPort: metrics
+    protocol: TCP
+  {{- end }}
+{{- end }}
+
+{{/*
+The telemetry values, each defaulted, as a release upgraded with --reuse-values from a chart before them has none.
+*/}}
+{{- define "vamos.telemetryValues" -}}
+{{- $d := dict "otlp" (dict "endpoint" "" "protocol" "" "headersSecret" "")
+      "traces" (dict "sampler" "" "samplerArg" "")
+      "prometheus" (dict "enabled" false "port" 9464 "podAnnotations" false) }}
+{{- $t := mergeOverwrite $d (deepCopy (.Values.telemetry | default dict)) }}
+{{- /* Switches given as strings or numbers, as --set-string or --set may give them, are switches all the same. */}}
+{{- range $name := list "enabled" "podAnnotations" }}
+{{- $v := get $t.prometheus $name | default "" | toString | lower | trim }}
+{{- if has $v (list "true" "1") }}
+{{- $_ := set $t.prometheus $name true }}
+{{- else if has $v (list "false" "0" "") }}
+{{- $_ := set $t.prometheus $name false }}
+{{- else }}
+{{- fail (printf "telemetry.prometheus.%s is %q; it takes true or false" $name $v) }}
+{{- end }}
+{{- end }}
+{{- toYaml $t }}
+{{- end }}
+
+{{/*
+The OTEL_* environment of a role, given as (dict "root" $ "role" "coordinator" "extraEnv" $extraEnv) or "worker", from
+the telemetry values: none for the defaults, and none that extraEnv sets, which overrides it. Workers export metrics
+alone, so they get no sampler, and serve no Prometheus.
+*/}}
+{{- define "vamos.telemetryEnv" -}}
+{{- $t := include "vamos.telemetryValues" .root | fromYaml }}
+{{- $skip := list }}
+{{- $endpoints := list }}
+{{- range .extraEnv }}
+{{- $skip = append $skip .name }}
+{{- if or .valueFrom (ne (.value | default "" | toString | trim) "") }}
+{{- $endpoints = append $endpoints .name }}
+{{- end }}
+{{- end }}
+{{- /* With Prometheus on, the chart chooses the exporters and serves the port, so an extraEnv can't set them. */}}
+{{- if and $t.prometheus.enabled (eq .role "coordinator") }}
+{{- range $name, $value := dict "OTEL_METRICS_EXPORTER" "the exporters, which telemetry.prometheus.enabled and an OTLP endpoint choose"
+      "OTEL_EXPORTER_PROMETHEUS_HOST" "the host Prometheus is served on, every address, for the Service to reach"
+      "OTEL_EXPORTER_PROMETHEUS_PORT" "the port Prometheus is served on, telemetry.prometheus.port, which the Service exposes" }}
+{{- if has $name $skip }}
+{{- fail (printf "coordinator.extraEnv can't set %s with Prometheus on: it is %s" $name $value) }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- $endpoint := $t.otlp.endpoint | toString | trim }}
+{{- $env := list }}
+{{- with $endpoint }}
+{{- $env = append $env (dict "name" "OTEL_EXPORTER_OTLP_ENDPOINT" "value" .) }}
+{{- end }}
+{{- with $t.otlp.protocol | toString | trim }}
+{{- $env = append $env (dict "name" "OTEL_EXPORTER_OTLP_PROTOCOL" "value" .) }}
+{{- end }}
+{{- with $t.otlp.headersSecret | toString | trim }}
+{{- $env = append $env (dict "name" "OTEL_EXPORTER_OTLP_HEADERS"
+      "valueFrom" (dict "secretKeyRef" (dict "name" . "key" "headers"))) }}
+{{- end }}
+{{- if eq .role "coordinator" }}
+{{- with $t.traces.sampler | toString | trim }}
+{{- $env = append $env (dict "name" "OTEL_TRACES_SAMPLER" "value" .) }}
+{{- end }}
+{{- /* A sampler argument of 0, which samples nothing, is a value, not an empty one. */}}
+{{- if ne ($t.traces.samplerArg | toString | trim) "" }}
+{{- $env = append $env (dict "name" "OTEL_TRACES_SAMPLER_ARG" "value" ($t.traces.samplerArg | toString)) }}
+{{- end }}
+{{- if $t.prometheus.enabled }}
+{{- /* An OTLP endpoint, the values' or one the extraEnv sets, for every signal or metrics alone, exports there too. */}}
+{{- /* A blank one in the extraEnv sets none, and one it blanks the values' with clears it. */}}
+{{- $otlp := or (and (ne $endpoint "") (not (has "OTEL_EXPORTER_OTLP_ENDPOINT" $skip)))
+      (has "OTEL_EXPORTER_OTLP_ENDPOINT" $endpoints) (has "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT" $endpoints) }}
+{{- $env = append $env (dict "name" "OTEL_METRICS_EXPORTER"
+      "value" (ternary "otlp,prometheus" "prometheus" $otlp)) }}
+{{- /* Every address, which vamos takes as a listener with no host, as the API's, IPv6's and IPv4's alike, or IPv4's
+      alone on a node without IPv6, so that every cluster's scrapes reach it. */}}
+{{- $env = append $env (dict "name" "OTEL_EXPORTER_PROMETHEUS_HOST" "value" "::") }}
+{{- $env = append $env (dict "name" "OTEL_EXPORTER_PROMETHEUS_PORT" "value" ($t.prometheus.port | toString)) }}
+{{- end }}
+{{- end }}
+{{- range $env }}
+{{- if not (has .name $skip) }}
+- {{ toYaml . | nindent 2 | trim }}
+{{- end }}
+{{- end }}
 {{- end }}
 
 {{/* An emptyDir's fields from medium and sizeLimit values, or {} for neither. */}}

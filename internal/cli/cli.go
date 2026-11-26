@@ -27,6 +27,7 @@ import (
 	"github.com/vamos-build/vamos/internal/remote"
 	"github.com/vamos-build/vamos/internal/run"
 	"github.com/vamos-build/vamos/internal/sched"
+	"github.com/vamos-build/vamos/internal/telemetry"
 	"github.com/vamos-build/vamos/internal/tracing"
 	"github.com/vamos-build/vamos/internal/worker"
 
@@ -56,6 +57,9 @@ type Config struct {
 	// Tests set it, so that a worker starting in one test binary doesn't kill, as leftovers, the attempts of a
 	// worker in another.
 	CgroupRoot string
+	// Getenv, if set, is where a coordinator reads its telemetry's OTEL_* settings; otherwise the process's
+	// environment. Scenarios set it, so that coordinators exporting to collectors of their own run at once.
+	Getenv func(string) string
 }
 
 // app is the Vamos command line: what every invocation shares.
@@ -64,8 +68,9 @@ type Config struct {
 type app struct {
 	fs       afero.Fs
 	store    *storage.StoreOptions
-	registry Registry // Config's, or nil for the upstream registry
-	cgroups  string   // Config's CgroupRoot
+	registry Registry            // Config's, or nil for the upstream registry
+	cgroups  string              // Config's CgroupRoot
+	getenv   func(string) string // Config's Getenv, or nil for os.Getenv
 }
 
 // options are the flags of one invocation; each command reads the ones it takes.
@@ -139,6 +144,10 @@ type invocation struct {
 	generation     uint64               // the executor's cache generation, from its capabilities, read before capture
 	registries     []api.RegistryPolicy // how the executor reaches its results' registries, from its capabilities
 	workspace      string               // the workspace's name, as its WORKSPACE file declares it, once loaded
+	// traceParent and traceState are the outer trace that every job sent to a coordinator joins, from TRACEPARENT
+	// and TRACESTATE, read as the first job is; "" for none, and always locally.
+	traceParent, traceState string
+	tracedOuter             bool // TRACEPARENT was read, and warned about if it isn't one
 }
 
 // hold keeps a build open on its executor while the command delivers its result: a watch past the terminal
@@ -194,7 +203,7 @@ func (inv *invocation) release(ex api.Executor) {
 
 // NewRootCommand returns the Vamos command line, with its subcommands, as cfg says.
 func NewRootCommand(cfg Config) *cobra.Command {
-	a := &app{fs: cfg.Fs, store: cfg.Store, registry: cfg.Registry, cgroups: cfg.CgroupRoot}
+	a := &app{fs: cfg.Fs, store: cfg.Store, registry: cfg.Registry, cgroups: cfg.CgroupRoot, getenv: cfg.Getenv}
 	defaults := defaultOptions()
 	opts := &defaults
 
@@ -652,6 +661,27 @@ func (inv *invocation) executor() (executor, *types.SystemContext, error) {
 	return ex, sys, nil
 }
 
+// outerTrace returns the outer trace that a job sent to the executor joins, such as a CI pipeline's, from TRACEPARENT
+// and TRACESTATE, read as the first job is, and only if it goes to a coordinator, which alone exports traces: an empty
+// TRACEPARENT is none, and one that isn't a W3C traceparent, or a TRACESTATE that isn't a tracestate, is warned about
+// once and ignored, so that the build goes on in a trace of its own, or without the state.
+func (inv *invocation) outerTrace() (parent, state string) {
+	if inv.tracedOuter || inv.opts.coordinator == "" {
+		return inv.traceParent, inv.traceState
+	}
+	inv.tracedOuter = true
+	parentValue, stateValue := os.Getenv("TRACEPARENT"), os.Getenv("TRACESTATE")
+	parent, state, err := telemetry.OuterTrace(parentValue, stateValue)
+	switch {
+	case errors.Is(err, telemetry.ErrNotTraceparent):
+		inv.warn(fmt.Errorf("TRACEPARENT %s is %w and is ignored", telemetry.ShowTraceValue(parentValue), err))
+	case errors.Is(err, telemetry.ErrNotTracestate):
+		inv.warn(fmt.Errorf("TRACESTATE %s is %w and is ignored", telemetry.ShowTraceValue(stateValue), err))
+	}
+	inv.traceParent, inv.traceState = parent, state
+	return parent, state
+}
+
 // remoteExecutor is a coordinator as an executor: its content store is the coordinator's, over HTTP.
 type remoteExecutor struct {
 	*remote.Client
@@ -696,21 +726,76 @@ func (inv *invocation) coordinator() error {
 			return err
 		}
 		server, closer = &remote.Server{Executor: local, Content: content, GracePeriod: inv.opts.grace}, local
-		return inv.serve(server, closer, false)
+		return inv.serve(server, closer, false, nil)
 	}
+	// The console exporters write to the command's output, beside what the command prints and warns, which a resumed
+	// job may export to before the command says where it listens: each stream takes a lock, one for both if they are
+	// one writer, so that a console that blocks holds up no warning written elsewhere.
+	inv.stdout, inv.stderr = lockStreams(inv.stdout, inv.stderr)
 	c, err := inv.newCoordinator()
 	if err != nil {
 		return err
 	}
-	server, closer = &remote.Server{Executor: c, Content: c.content, Workers: c.Workers()}, c
-	return inv.serve(server, closer, true)
+	// OpenTelemetry's error handler is the process's, so it is installed here, rather than by Setup, once the
+	// coordinator listens, and the last coordinator to listen in a process replaces it: vamos runs one a process,
+	// though tests that run several share it. What fails to export before then, as a resumed job's export may, goes to
+	// whichever handler the process has, the SDK's own if none.
+	stderr := inv.stderr
+	listening := func() {
+		telemetry.HandleErrors(func(msg string) { fmt.Fprintf(stderr, "vamos: warning: %s\n", msg) })
+	}
+	s := &remote.Server{Executor: c, Content: c.content, Workers: c.Workers()}
+	if c.telemetry.ExportsMetrics() {
+		transferred, err := telemetry.Transferred(c.telemetry.Meter)
+		if err != nil {
+			inv.closeExecutor(c)
+			return fmt.Errorf("counting the bytes the API moves: %w", err)
+		}
+		s.Instrument, s.Transferred = telemetry.Instrument(c.telemetry.Meter), transferred
+	}
+	server, closer = s, c
+	return inv.serve(server, closer, true, listening)
 }
 
-// coordinatorStores is a coordinator with the build cache it keeps, closed together.
+// lockStreams returns stdout and stderr, each under a lock of its own, or one for both if they are one writer, so that
+// writers in several goroutines share them, and one that blocks on stdout holds up no write to a stderr of its own.
+func lockStreams(stdout, stderr io.Writer) (io.Writer, io.Writer) {
+	outLock, errLock := &sync.Mutex{}, &sync.Mutex{}
+	if sameWriter(stdout, stderr) {
+		errLock = outLock
+	}
+	return &lockedWriter{mu: outLock, w: stdout}, &lockedWriter{mu: errLock, w: stderr}
+}
+
+// sameWriter reports whether a and b are one writer, as a caller that gives both streams one buffer makes them; one
+// whose type can't be compared is taken as another.
+func sameWriter(a, b io.Writer) (same bool) {
+	defer func() {
+		if recover() != nil {
+			same = false
+		}
+	}()
+	return a == b
+}
+
+// lockedWriter is a writer that writers in several goroutines share, under mu, which it may share with others.
+type lockedWriter struct {
+	mu *sync.Mutex
+	w  io.Writer
+}
+
+func (l *lockedWriter) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.w.Write(p)
+}
+
+// coordinatorStores is a coordinator with the build cache it keeps and its telemetry, closed together.
 type coordinatorStores struct {
 	*coord.Coordinator
 	directory *cache.Directory
 	content   cache.ContentStore
+	telemetry *telemetry.Telemetry // nil if Setup didn't run
 }
 
 // ContentStore returns the coordinator's content store.
@@ -718,9 +803,22 @@ func (c *coordinatorStores) ContentStore() (cache.ContentStore, error) {
 	return c.content, nil
 }
 
-// Close closes the coordinator, then its build cache.
+// Close closes the coordinator, then sends what its telemetry holds, the last jobs' spans among it, and closes its
+// build cache.
 func (c *coordinatorStores) Close() error {
-	return errors.Join(c.Coordinator.Close(), c.directory.Close())
+	err := c.Coordinator.Close()
+	return errors.Join(err, shutdownTelemetry(c.telemetry), c.directory.Close())
+}
+
+// shutdownTelemetry shuts tel down, if Setup made it, within its own bound.
+func shutdownTelemetry(tel *telemetry.Telemetry) error {
+	if tel == nil {
+		return nil
+	}
+	if err := tel.Shutdown(context.Background()); err != nil {
+		return fmt.Errorf("sending telemetry: %w", err)
+	}
+	return nil
 }
 
 // newCoordinator returns the coordinator the options describe, over the build cache at --cache-dir.
@@ -777,6 +875,16 @@ func (inv *invocation) newCoordinator() (*coordinatorStores, error) {
 	if err != nil {
 		return nil, fmt.Errorf("--cache-dir %s: %w", inv.opts.cacheDir, err)
 	}
+	// Telemetry is set up once the coordinator's instance, from which every exported ID and its resource's name
+	// derive, is read from its state, and before the jobs it resumes start.
+	var tel *telemetry.Telemetry
+	var telErr error
+	setup := func(instance string) (*telemetry.Telemetry, error) {
+		tel, telErr = telemetry.Setup(telemetry.Config{Role: telemetry.Coordinator, Instance: instance,
+			Version: run.Version(), Getenv: inv.app.getenv, Console: inv.stdout,
+			Warn: func(msg string) { inv.warn(errors.New(msg)) }})
+		return tel, telErr
+	}
 	c, err := coord.New(directory, directory, coord.Config{
 		Platforms:       offered,
 		ExecPlatform:    execPlatform,
@@ -795,14 +903,21 @@ func (inv *invocation) newCoordinator() (*coordinatorStores, error) {
 		Registries: registryPolicies(sys, inv.opts.cacheRepo, pullThrough),
 		Images:     &coord.Registry{Sys: sys},
 		// The jobs are kept beside the build cache, on the volume that keeps it, which a prune leaves alone.
-		State: filepath.Join(inv.opts.cacheDir, "coordinator"),
-		Warn:  inv.warn,
+		State:     filepath.Join(inv.opts.cacheDir, "coordinator"),
+		Warn:      inv.warn,
+		Telemetry: setup,
 	})
 	if err != nil {
+		if serr := shutdownTelemetry(tel); serr != nil {
+			inv.warn(serr)
+		}
 		directory.Close()
+		if telErr != nil {
+			return nil, telErr // which names the variable it can't take
+		}
 		return nil, fmt.Errorf("--cache-dir %s: %w", inv.opts.cacheDir, err)
 	}
-	return &coordinatorStores{Coordinator: c, directory: directory, content: directory}, nil
+	return &coordinatorStores{Coordinator: c, directory: directory, content: directory, telemetry: tel}, nil
 }
 
 // registryPolicies returns how sys reaches the cache repository and the pull-through caches, as policies by prefix
@@ -885,7 +1000,8 @@ func parsePlatforms(flag string, texts []string) ([]imgspecv1.Platform, error) {
 // assignment polls cut first, so that its clients see a drop, and resume their watches once it is back, rather than
 // being told that their builds were cancelled by the shutdown; what else is in flight, such as an upload or a
 // worker's report, may finish within the shutdown's wait, and the executor is closed only after it.
-func (inv *invocation) serve(s *remote.Server, closer executor, resumes bool) error {
+// listening, if not nil, is called once it listens and has said so.
+func (inv *invocation) serve(s *remote.Server, closer executor, resumes bool, listening func()) error {
 	server := &http.Server{Handler: s.Handler()}
 	listener, err := net.Listen("tcp", inv.opts.listen)
 	if err != nil {
@@ -895,6 +1011,9 @@ func (inv *invocation) serve(s *remote.Server, closer executor, resumes bool) er
 	if err := inv.printf("Coordinating builds at %s\n", listener.Addr()); err != nil {
 		inv.closeExecutor(closer)
 		return err
+	}
+	if listening != nil {
+		listening()
 	}
 	served := make(chan error, 1)
 	go func() { served <- server.Serve(listener) }()
@@ -929,17 +1048,42 @@ func (inv *invocation) worker() error {
 	if err != nil {
 		return err
 	}
+	// A worker exports its metrics over OTLP alone; its coordinator exports its spans. Its log is also its attempts'
+	// subprocesses' stderr: a file stays a file, which they inherit, as a wrapper would make it a pipe that a
+	// descendant could hold open, and an exporter's warning is one write to it; any other writer is copied to through
+	// a pipe already, and is locked, as a coordinator's streams are, so that the log and the warnings don't interleave.
+	if _, isFile := inv.stderr.(*os.File); !isFile {
+		inv.stdout, inv.stderr = lockStreams(inv.stdout, inv.stderr)
+	}
+	host, _ := os.Hostname()
+	tel, err := telemetry.Setup(telemetry.Config{Role: telemetry.Worker, Instance: host, Version: run.Version(),
+		Getenv: inv.app.getenv, Console: inv.stdout, Warn: func(msg string) { inv.warn(errors.New(msg)) }})
+	if err != nil {
+		return err
+	}
 	w, err := worker.New(worker.Config{
 		Coordinator: inv.opts.coordinator,
 		Store:       options,
 		Capacity:    inv.opts.capacity,
 		Log:         inv.stderr,
 		CgroupRoot:  inv.app.cgroups,
+		Meter:       tel.Meter,
 	})
 	if err != nil {
-		return err
+		return errors.Join(err, shutdownTelemetry(tel))
 	}
-	return w.Run(inv.ctx)
+	// The error handler is the process's: replaced only by a worker that has started and exports something.
+	if tel.ExportsMetrics() {
+		stderr := inv.stderr
+		telemetry.HandleErrors(func(msg string) { fmt.Fprintf(stderr, "vamos: warning: %s\n", msg) })
+	}
+	// Shut down once the worker has stopped, so that what it counted last is sent, warning about what couldn't be:
+	// the worker's own outcome stands, as the coordinator's does.
+	err = w.Run(inv.ctx)
+	if serr := shutdownTelemetry(tel); serr != nil {
+		inv.warn(serr)
+	}
+	return err
 }
 
 // attempt runs one attempt as a worker's subprocess: the assignment comes on standard input, and what it does goes
@@ -1104,6 +1248,7 @@ func (inv *invocation) runLoaded(
 		Generation: inv.generation, // read before the sources were captured: a prune since refuses the build
 		Secrets:    secrets,
 	}
+	runReq.Parent, runReq.State = inv.outerTrace()
 	events.graph = g
 	ctx, runSpan := tracing.Start(ctx, "run")
 	id, err := ex.Submit(ctx, api.Request{Graph: &runReq})
@@ -1136,8 +1281,9 @@ var closedChan = func() chan struct{} { ch := make(chan struct{}); close(ch); re
 func (inv *invocation) deliver(
 	ctx context.Context, ex api.Executor, res api.Result, events *eventPrinter,
 ) (api.Exported, error) {
+	parent, state := inv.outerTrace()
 	id, err := ex.Submit(ctx, api.Request{Export: &api.ExportRequest{
-		Result: res, Workspace: inv.workspace,
+		Result: res, Workspace: inv.workspace, Parent: parent, State: state,
 	}})
 	if err != nil {
 		return api.Exported{}, err
@@ -1204,8 +1350,9 @@ func (inv *invocation) buildImage(target string, dest destination) error {
 		if dest.push != "" {
 			// The executor pushes, with its own credentials and registry settings.
 			var id api.JobID
+			parent, state := inv.outerTrace()
 			id, err = ex.Submit(ctx, api.Request{Push: &api.PushRequest{
-				Result: res, Destination: dest.push, Workspace: inv.workspace,
+				Result: res, Destination: dest.push, Workspace: inv.workspace, Parent: parent, State: state,
 			}})
 			var outcome api.Outcome
 			if err == nil {
@@ -1320,6 +1467,7 @@ func (inv *invocation) publish(target string) error {
 func (inv *invocation) publishFromExecutor(ctx context.Context, ex api.Executor, plan *load.Publication,
 	results []api.Result, events *eventPrinter) ([]api.Destination, error) {
 	req := api.PublishRequest{Tags: inv.opts.tags, Workspace: inv.workspace}
+	req.Parent, req.State = inv.outerTrace()
 	for _, image := range plan.Images {
 		req.Images = append(req.Images, api.PublishImage{Result: results[image.Root], Repository: image.Repository})
 	}

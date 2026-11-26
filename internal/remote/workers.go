@@ -139,6 +139,15 @@ type AttemptReport struct {
 	// written, which is the publication's, not the attempt's.
 	Tagged  *api.Outcome          `json:"tagged,omitempty"`
 	Failure *sched.AttemptFailure `json:"failure,omitempty"`
+	// Usage is what the attempt's processes used, as its cgroup counted it, if the worker could read it; an older
+	// worker's report has none.
+	Usage *Usage `json:"usage,omitempty"`
+}
+
+// Usage is what an attempt's processes used, each part present only if the worker's cgroups count it.
+type Usage struct {
+	CPUMicros  *int64 `json:"cpu_usec,omitempty"`    // CPU time, in microseconds, from cpu.stat's usage_usec
+	MemoryPeak *int64 `json:"memory_peak,omitempty"` // the most memory in use at once, in bytes, from memory.peak
 }
 
 // ErrStaleAttempt says that a report or heartbeat is for an attempt the coordinator no longer counts live:

@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 
@@ -44,6 +45,7 @@ type Sharing struct {
 	records cache.RecordStore  // takes what attempts Report
 	// traceLimit bounds each attempt's stored trace, if positive, below tracing.MaxTraceSize; see LimitTraces.
 	traceLimit int
+	sink       SpanSink // told of each attempt's spans, or nil
 
 	mu       sync.Mutex
 	inflight map[digest.Digest]*attempt
@@ -74,9 +76,21 @@ type listener struct {
 }
 
 // NewSharing returns a Sharing Runner over r, whose content store holds the logs of results,
-// and which records what attempts Report in records.
-func NewSharing(r Runner, content cache.ContentStore, records cache.RecordStore) *Sharing {
-	return &Sharing{runner: r, content: content, records: records, inflight: map[digest.Digest]*attempt{}}
+// and which records what attempts Report in records, as opts say.
+func NewSharing(r Runner, content cache.ContentStore, records cache.RecordStore, opts ...SharingOption) *Sharing {
+	s := &Sharing{runner: r, content: content, records: records, inflight: map[digest.Digest]*attempt{}}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
+}
+
+// SharingOption is an option of NewSharing.
+type SharingOption func(*Sharing)
+
+// WithSpanSink tells sink of each attempt's spans, as they are stored, as its runner returns.
+func WithSpanSink(sink SpanSink) SharingOption {
+	return func(s *Sharing) { s.sink = sink }
 }
 
 // Run runs req through the attempt of its key: attaching to one in flight, unless req.Force, or the one in flight
@@ -131,7 +145,7 @@ func (s *Sharing) attempt(ctx context.Context, req Request, ev Output) (*cache.A
 			ran = *rep.Ran
 		}
 		spans, lost := recorder.Snapshot()
-		blob, traceErr := s.saveTrace(actx, at.id, spans, lost)
+		blob, spans, traceErr := s.saveTrace(actx, at.id, spans, lost)
 		at.trace = AttemptTrace{ID: at.id, Trace: blob}
 		if err == nil && rep != nil && rep.Result != nil && req.Key != "" {
 			rep.Result.Trace = blob
@@ -147,6 +161,13 @@ func (s *Sharing) attempt(ctx context.Context, req Request, ev Output) (*cache.A
 			wctx := tracing.WithRecorderAt(context.WithoutCancel(actx), write)
 			err = s.publish(wctx, req, rep, at.id, blob, traceErr)
 			at.trace.Write = write.Spans()
+		}
+		if s.sink != nil {
+			// With its cache write, which every job holds a copy of, marked tracing.Shared, and none may be the one
+			// to export, as the starter may have left; and before any job attached is told of the attempt's end, so
+			// that one that joined it finds it reported.
+			// It ends once its result is recorded, so that its cache write lies within it.
+			s.sink.Attempt(actx, at.id, append(slices.Clip(spans), at.trace.Write...), start, time.Now())
 		}
 		if err == nil {
 			at.result = rep.Result
@@ -178,24 +199,29 @@ func join(ev Output, starter Output) {
 // saveTrace stores the spans of the attempt id, with what lost says its recorder refused, as its trace, capped,
 // under ctx without its cancellation and within traceSaveTimeout, apart from publish, so that a cancelled attempt's
 // trace is stored too, and a slow store never stops the result being recorded.
-// It returns nil, with why, if the trace couldn't be stored, which fails nothing.
+// It returns nil, with why, if the trace couldn't be stored, which fails nothing, and the spans the trace holds,
+// trimmed to fit it, whether or not it could be, but none if it couldn't be made.
 func (s *Sharing) saveTrace(ctx context.Context, id string, spans []tracing.Span, lost tracing.Lost) (
-	*cache.Blob, error) {
+	*cache.Blob, []tracing.Span, error) {
 	limit := tracing.MaxTraceSize
 	if s.traceLimit > 0 {
 		limit = s.traceLimit
 	}
-	data, err := tracing.EncodeAttemptWithin(id, spans, lost, limit)
+	trace, err := tracing.NewAttempt(id, spans, lost, limit)
+	if err != nil { // with no spans, rather than ones the trace might not have held
+		return nil, nil, err
+	}
+	data, err := trace.Encode()
 	if err != nil {
-		return nil, err
+		return nil, trace.Spans, err
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), traceSaveTimeout)
 	defer cancel()
 	b, err := s.content.PutBytes(ctx, data)
 	if err != nil {
-		return nil, err
+		return nil, trace.Spans, err
 	}
-	return &b, nil
+	return &b, trace.Spans, nil
 }
 
 // newAttemptID returns 128 random bits in hex, an attempt's ID.

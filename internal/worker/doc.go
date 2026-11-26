@@ -33,12 +33,22 @@
 // which the worker sends once the subprocess has ended and its container is gone.
 // Each span fits on a line, since the attempt's recorder bounds it; a line that can't be read all the same
 // kills the subprocess, which would otherwise block writing the rest, and fails the attempt.
-// A killed attempt reports nothing: the coordinator has stopped counting it.
+// A killed attempt reports nothing but what its process reported before the kill, with its output ended: the
+// coordinator has stopped counting it, or tries it again once its lease has expired, which a report the kill made
+// would prevent. A kill that finds nothing running, as one that comes while the last events are sent, leaves the
+// process's own end to stand.
+// The report carries what the attempt's processes used, read from its cgroup once the subprocess has exited and
+// before the cgroup is removed: its CPU time, always, and its peak memory where the memory controller reaches the
+// worker's cgroups, which the worker enables there if its own cgroup was given it; what the cgroup can't tell is left
+// out.
+// The worker exports its own counters, of attempts it fenced, batches of events the coordinator didn't take and
+// cgroups a kill couldn't empty, over OTLP, as the standard OTEL_* variables say; it exports no spans, which its
+// coordinator does.
 //
 // # Changes
 //
 // cgroup.go owns containment; worker.go registration and the work loop; attempt.go one attempt's subprocess,
-// heartbeats, fencing and relay; emulation.go reads the binfmt_misc handlers.
+// heartbeats, fencing and relay; emulation.go reads the binfmt_misc handlers; metrics.go the worker's counters.
 // ChildFromEnv and TestChild let a test binary be the subprocess.
 // worker_test.go runs a worker against an in-process coordinator and registry.
 package worker

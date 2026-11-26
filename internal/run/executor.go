@@ -312,7 +312,7 @@ func (l *Local) Submit(ctx context.Context, req api.Request) (api.JobID, error) 
 
 // traced runs work, a job's, as sched.RunJob does, storing its manifest in the build cache.
 func (l *Local) traced(ctx context.Context, work func(context.Context) api.Outcome) api.Outcome {
-	return sched.RunJob(ctx, l.ContentStore, nil, work)
+	return sched.RunJob(ctx, l.ContentStore, nil, nil, work)
 }
 
 // Watch delivers the events of the job id from position from to fn, as api.Executor describes.

@@ -9,7 +9,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -29,19 +31,24 @@ const (
 	fenceFraction = 0.8
 	// killWait is how long a killed attempt's processes have to exit before the worker gives up waiting.
 	killWait = 30 * time.Second
+	// waitDelay bounds how long an attempt's end waits for its stderr's pipe to close once its subprocess has gone, as
+	// a process it left may hold it.
+	waitDelay = 10 * time.Second
 )
 
 // attempt runs the assignment a: a subprocess in a cgroup of its own, whose output and spans are sent as events,
 // whose lease is renewed by heartbeat, and whose ending is reported.
 // Once ctx ends, the coordinator asks for a kill, or the lease can't be renewed in time, everything in the cgroup is
-// killed, the attempt's container removed, and nothing reported: the coordinator has stopped counting the attempt.
+// killed and the attempt's container removed, and only what the subprocess reported before the kill is reported, as
+// execute says.
 func (w *Worker) attempt(ctx context.Context, reg remote.Registration, a *remote.Assignment, assigned time.Time) {
 	id := a.Attempt
-	outcome, err := w.execute(ctx, reg, a, assigned)
+	kill := w.killer(id, killWait)
+	outcome, err := w.execute(ctx, reg, a, assigned, func() error { return kill(false) })
 	if err != nil {
 		w.logf("attempt %s: %v", id, err)
 	}
-	if err := w.contain.kill(id, killWait); err != nil {
+	if err := kill(true); err != nil {
 		w.logf("attempt %s: %v", id, err)
 	}
 	if err := run.RemoveAttempt(context.WithoutCancel(ctx), w.cfg.Store, id); err != nil {
@@ -57,10 +64,33 @@ func (w *Worker) attempt(ctx context.Context, reg remote.Registration, a *remote
 	}
 }
 
+// killer returns what kills the attempt id's processes, waiting for its cgroup to empty for at most wait, and removes
+// the cgroup if remove says so, counting it stuck if it won't empty, once for the attempt, whether the kill that found
+// it so was the cancellation's or the cleanup's after it.
+func (w *Worker) killer(id string, wait time.Duration) func(remove bool) error {
+	var stuck atomic.Bool
+	return func(remove bool) error {
+		// The wait is copied, as the kills can come at once: from the context's cancellation and from the execution.
+		d := wait
+		if stuck.Load() {
+			d = 0 // found stuck already: not waited for again
+		}
+		err := w.contain.stop(id, d)
+		if err == nil && remove {
+			err = w.contain.remove(id)
+		}
+		if errors.Is(err, errStuck) && stuck.CompareAndSwap(false, true) {
+			w.metrics.stick()
+		}
+		return err
+	}
+}
+
 // execute runs the subprocess of a and returns what it reported, or nil if it was killed or never started because
-// its lease couldn't be renewed; assigned is when the assignment arrived.
-func (w *Worker) execute(ctx context.Context, reg remote.Registration, a *remote.Assignment, assigned time.Time) (
-	*remote.AttemptReport, error) {
+// its lease couldn't be renewed; assigned is when the assignment arrived, and kill kills its processes, leaving their
+// cgroup to be read.
+func (w *Worker) execute(ctx context.Context, reg remote.Registration, a *remote.Assignment, assigned time.Time,
+	kill func() error) (*remote.AttemptReport, error) {
 	cgroup, err := w.contain.create(a.Attempt)
 	if err != nil {
 		return failed(err), nil
@@ -90,7 +120,11 @@ func (w *Worker) execute(ctx context.Context, reg remote.Registration, a *remote
 	cmd.Stdin = bytes.NewReader(input)
 	cmd.Stderr = w.cfg.Log
 	cmd.SysProcAttr = &syscall.SysProcAttr{UseCgroupFD: true, CgroupFD: int(cgroup.Fd())}
-	cmd.Cancel = func() error { return w.contain.kill(a.Attempt, killWait) }
+	cmd.Cancel = kill
+	// A process the subprocess left that holds its stderr open, as a step's daemon may, doesn't hold up Wait for
+	// longer than this once the subprocess has exited or been killed. Nothing bounds one that holds its stdout open,
+	// which is read to its end before Wait, while the lease is renewed.
+	cmd.WaitDelay = waitDelay
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return failed(err), nil
@@ -98,43 +132,142 @@ func (w *Worker) execute(ctx context.Context, reg remote.Registration, a *remote
 	if err := cmd.Start(); err != nil {
 		return failed(fmt.Errorf("starting the attempt: %w", err)), nil
 	}
+	pid := cmd.Process.Pid
 
-	// The lease is renewed until the subprocess ends; a kill from the coordinator, or a lease that can't be
-	// renewed in time, ends it.
-	killed := make(chan error, 1)
-	beat, stopBeat := context.WithCancel(cctx)
-	go w.heartbeat(beat, reg, a.Attempt, renewed, clock, func(why error) {
-		killed <- why
-		cancel()
-	})
-
-	// What the subprocess prints is sent in batches, and its last line is its report.
-	report, readErr := w.relay(cctx, a.Attempt, clock, stdout)
-	if readErr != nil {
-		// Nothing reads its output any more, such as past a line too long, so it would block writing the rest
-		// while its lease is renewed: it is killed, and the attempt fails.
-		cancel()
+	// The lease is renewed until the subprocess ends, and what it used has been read; a kill from the coordinator, or
+	// a lease that can't be renewed in time, ends it, stopping its processes until it has exited, as one that closed
+	// its output and hangs must still be. The first cause of the attempt's end is recorded as it comes, with whether
+	// the subprocess was still running then, as its cgroup holds it while it hasn't exited, and a kill decides the
+	// end only if it was, and came before the subprocess's output ended, or the subprocess reported nothing, so that no
+	// report a kill stands in for keeps the coordinator from trying the attempt again.
+	var e ending
+	killed := func(cause error) {
+		e.kill(cause, func() bool { return w.contain.holds(a.Attempt, pid) })
+		cancel() // which ends the heartbeat and the events, as the coordinator stops counting the attempt
 	}
+	beat, stopBeat := context.WithCancel(cctx)
+	defer stopBeat()
+	go w.heartbeat(beat, reg, a.Attempt, renewed, clock, killed)
+
+	// What the subprocess prints is sent in batches, and its last line is its report; its output has ended once it
+	// has been read, though its last events may still be sending.
+	// Nothing reads its output once a line can't be read, such as one too long, so it would block writing the rest
+	// while its lease is renewed: it is stopped as reading stops, before the last events are sent, and the attempt
+	// fails, as that decided, whatever kill comes as they are sent.
+	// A read's failure stops the subprocess through its cgroup, rather than by ending the attempt's context, so that
+	// the lease is still renewed, and what it printed before is still sent, until its failure is reported; a kill ends
+	// the context, as it renews nothing more, nor sends what a coordinator that stopped counting the attempt refuses.
+	report, readErr := w.relay(cctx, a.Attempt, clock, stdout, func(err error) {
+		e.outputEnd(err)
+		if err != nil {
+			if kerr := kill(); kerr != nil {
+				w.logf("attempt %s: %v", a.Attempt, kerr)
+			}
+		}
+	})
 	waitErr := cmd.Wait()
-	stopBeat()
-	select {
-	case why := <-killed:
-		return nil, why
-	default:
+	liveAtKill, early, cause := e.exited()
+	// The kill stopped the subprocess only if its cgroup held it as the kill came and a signal ended it, rather than
+	// its own exit, which may come between the two.
+	decided, fenced := killDecides(cause, liveAtKill && signalled(cmd.ProcessState), early, report != nil)
+	if fenced {
+		w.metrics.fence()
+	}
+	if decided {
+		return nil, cause
+	}
+	// Whatever the subprocess left running, as a daemon of a step, stops before what it used is read, while the lease
+	// is still renewed, however long the stop takes.
+	if err := kill(); err != nil {
+		w.logf("attempt %s: %v", a.Attempt, err)
 	}
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
 	switch {
-	case report != nil:
-		return report, nil
+	case report != nil: // the last line it prints, which stands, whatever it printed after
 	case readErr != nil:
-		return failed(fmt.Errorf("reading the attempt's output: %w", readErr)), nil
+		report = failed(fmt.Errorf("reading the attempt's output: %w", readErr))
 	case waitErr != nil:
-		return failed(fmt.Errorf("the attempt's process ended without a report: %w", waitErr)), nil
+		report = failed(fmt.Errorf("the attempt's process ended without a report: %w", waitErr))
+	default:
+		report = failed(errors.New("the attempt's process ended without a report"))
 	}
-	return failed(errors.New("the attempt's process ended without a report")), nil
+	// Read once the subprocess has exited, whether or not it reported, as one that ran out of memory doesn't, from
+	// its cgroup, which a kill stops but leaves for the cleanup to remove.
+	report.Usage = w.contain.usage(a.Attempt)
+	return report, nil
 }
+
+// signalled reports whether the process that state describes was ended by SIGKILL, as cgroup.kill ends it, rather than
+// by a crash's signal of its own.
+func signalled(state *os.ProcessState) bool {
+	if state == nil {
+		return false
+	}
+	ws, ok := state.Sys().(syscall.WaitStatus)
+	return ok && ws.Signaled() && ws.Signal() == syscall.SIGKILL
+}
+
+// ending records the first cause of an attempt's end, as it comes: a kill, from the coordinator or the lease's
+// fence, the failure of a read of the subprocess's output, or the subprocess's exit; only a kill is kept, as only a
+// kill can decide the end, with whether the subprocess was still running then, and whether its output had ended.
+type ending struct {
+	mu          sync.Mutex
+	settled     bool  // the first cause has come
+	why         error // the kill that came first, if one did
+	liveAtKill  bool  // the subprocess's cgroup held it as that kill came
+	beforeEnd   bool  // that kill came before the output ended
+	outputEnded bool
+}
+
+// kill records cause, a kill, as the end, if nothing ended the attempt before it; holds reports whether the
+// subprocess's cgroup holds it now.
+func (e *ending) kill(cause error, holds func() bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if !e.settled {
+		e.settled = true
+		e.why, e.liveAtKill, e.beforeEnd = cause, holds(), !e.outputEnded
+	}
+}
+
+// outputEnd records that the output has ended, and, if err says a read of it failed, that failure as the end, if
+// nothing ended the attempt before it. Both are recorded at once, so that a kill, as the lease's fence, can't come
+// between the two: one that came before the output ended would decide the end, and drop the failure.
+func (e *ending) outputEnd(err error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if err != nil {
+		e.settled = true
+	}
+	e.outputEnded = true
+}
+
+// exited records that the subprocess has exited, after which a kill decides nothing, and returns whether the
+// subprocess's cgroup held it as the kill that came first came, if one did, whether it came before the output ended,
+// and that kill.
+func (e *ending) exited() (liveAtKill, beforeEnd bool, why error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.settled = true
+	return e.liveAtKill, e.beforeEnd, e.why
+}
+
+// killDecides returns whether why, a kill, decides the attempt's end, rather than its process, and whether it is a
+// fence to count. Only a kill that stopped the subprocess, stopped, decides or counts, and it decides only if it came
+// before the subprocess's output ended, beforeEnd, or the subprocess reported nothing, reported, since a report the
+// kill made would keep the coordinator from trying the attempt again. A kill that found the subprocess exited, as one
+// that came while its last events were sent, leaves its own end, its report or its failure, to stand.
+func killDecides(why error, stopped, beforeEnd, reported bool) (decided, fenced bool) {
+	if why == nil || !stopped {
+		return false, false
+	}
+	return beforeEnd || !reported, errors.Is(why, errFenced)
+}
+
+// errFenced says that an attempt was killed as its lease couldn't be renewed in time.
+var errFenced = errors.New("the lease couldn't be renewed")
 
 // failed returns a report of a failure that is the worker's, not the action's.
 func failed(err error) *remote.AttemptReport {
@@ -208,7 +341,7 @@ func (w *Worker) heartbeat(ctx context.Context, reg remote.Registration, id stri
 			if lastErr != nil {
 				why = lastErr.Error()
 			}
-			kill(fmt.Errorf("the lease couldn't be renewed for %s: %s", fence.Round(time.Second), why))
+			kill(fmt.Errorf("%w for %s: %s", errFenced, fence.Round(time.Second), why))
 			return
 		case <-ticker.C:
 			if inFlight != nil {
@@ -281,8 +414,8 @@ const (
 // relay reads the subprocess's lines from r: output and spans, which it sends to the coordinator in batches of at
 // most maxBatch, each carrying clock, the estimate of the clock's offset made before the attempt started, and the
 // report, which it returns, once the stream ends. It stops reading while maxPending waits.
-func (w *Worker) relay(ctx context.Context, id string, clock *tracing.Offset, r io.Reader) (*remote.AttemptReport,
-	error) {
+func (w *Worker) relay(ctx context.Context, id string, clock *tracing.Offset, r io.Reader, ended func(error)) (
+	*remote.AttemptReport, error) {
 	q := newEventQueue()
 	send := func() {
 		for {
@@ -294,7 +427,12 @@ func (w *Worker) relay(ctx context.Context, id string, clock *tracing.Offset, r 
 			sctx, cancel := context.WithTimeout(ctx, w.lease())
 			err := w.client.Events(sctx, id, batch)
 			cancel()
+			// A batch that isn't taken isn't sent again, but for one of an attempt the coordinator no longer counts,
+			// or that a kill or the worker's shutdown stopped, which is no loss of the coordinator's.
 			if err != nil && ctx.Err() == nil {
+				if !errors.Is(err, remote.ErrStaleAttempt) {
+					w.metrics.drop()
+				}
 				w.logf("attempt %s: sending events: %v", id, err)
 			}
 		}
@@ -332,6 +470,9 @@ func (w *Worker) relay(ctx context.Context, id string, clock *tracing.Offset, r 
 		case line.Report != nil:
 			report = line.Report
 		}
+	}
+	if ended != nil {
+		ended(scanner.Err()) // before the last events are sent, which may wait for a slow coordinator
 	}
 	close(stop)
 	<-flushed

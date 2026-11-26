@@ -47,4 +47,5 @@
 // See ContentStore and RecordStore for the contract, pendingFile for publication and cleanup,
 // PutFile for source changes and size limits, and Checkout for path isolation and restoring modes.
 // Inspect Directory.Prune, ClearContent and ClearResults together when changing pruning policy.
+// size.go keeps Directory's running count of what it holds, which every write and removal through it goes through.
 package cache

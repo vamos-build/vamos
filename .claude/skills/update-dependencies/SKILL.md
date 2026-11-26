@@ -251,6 +251,13 @@ The image names and tags in Go tests and feature files are test data, not depend
 
 - `registry:3` in its coherence group: check for a newer major with
   `curl -fsSL 'https://hub.docker.com/v2/repositories/library/registry/tags?page_size=100' | jq -r '.results[].name'`.
+- `otel/opentelemetry-collector:0.N.0` in R7 of [smoke-checks.md](../../../.agents/kb/smoke-checks.md), a collector
+  for that check alone: take the newest release at least two weeks old, the `vN` tags of
+  `gh release list -R open-telemetry/opentelemetry-collector-releases --exclude-pre-releases` (Docker Hub's tag list
+  is mostly nightlies, and dates a tag by its latest push), and run R7 with it, since a release can rename the debug
+  exporter's settings or change its output.
+- `curlimages/curl:8.N.P` in K5 of smoke-checks.md: the full version of the newest curl release at least two weeks
+  old, from `gh release list -R curl/curl --exclude-pre-releases`, once Docker Hub has its tag.
 - The chart's own `version` and `appVersion` in [Chart.yaml](../../../remote/helm/vamos/Chart.yaml)
   version Vamos itself, not a dependency. Leave them alone.
 

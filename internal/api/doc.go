@@ -37,6 +37,9 @@
 // remembers the job, after eviction too; a command's CommandTrace names each of its jobs' manifests.
 // Both are content blobs in tracing's stored format, within tracing.MaxTraceSize, and name the attempt traces that
 // results carry, which replace spans sent as events.
+// A manifest's Exported names the OpenTelemetry trace a coordinator exported the job in, if it did; its zero value,
+// which manifests stored before it existed have too, means none, so a reader never needs it. JobTrace.Trimmed gives
+// the manifest as it is stored, so that what else is made of its spans, such as what is exported, holds the same.
 // Capabilities report the cache generation, which a prune advances; a client reads it before capturing sources and
 // sends it with the graph, so that a submit after a prune is refused rather than building on what is gone.
 //

@@ -29,6 +29,12 @@
 // and leaves one Truncated instant counting what the recorder and the trim lost,
 // and what any earlier trim of the same spans did.
 //
+// A job whose spans a coordinator exports over OpenTelemetry carries how in its context, WithExported's Exported,
+// which the attempts it starts inherit, and which its stored manifest records,
+// so that a stored trace names the exported one; this package only carries it, and exports nothing itself.
+// Spans that are measured, rather than only shown, say what they are with a Role argument, RoleTarget, RoleWait or
+// RoleTry, so that whoever measures them needn't parse their names.
+//
 // # Changes
 //
 // Inspect Recorder and Active for synchronization and ownership.
@@ -36,6 +42,7 @@
 // EstimateOffset and Shift in clock.go align clocks.
 // stored.go owns the stored encoding, its Version, MaxTraceSize and Trim;
 // documents of other kinds, which name other blobs, embed its Header and fit their spans with Trim.
+// exported.go owns Exported and the Role values, which the telemetry package reads.
 // WriteChrome in chrome.go owns ordering and timestamp precision required by Perfetto;
 // consumers must preserve those rules.
 package tracing

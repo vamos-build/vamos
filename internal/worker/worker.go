@@ -18,6 +18,7 @@ import (
 	"github.com/vamos-build/vamos/internal/run"
 	"github.com/vamos-build/vamos/internal/sched"
 
+	"go.opentelemetry.io/otel/metric"
 	"go.podman.io/storage"
 )
 
@@ -33,6 +34,8 @@ type Config struct {
 	CgroupRoot string
 	// Log receives what the worker does, for its operator; nil discards it.
 	Log io.Writer
+	// Meter provides the meters the worker counts what degrades quietly with; nil counts nothing.
+	Meter metric.MeterProvider
 }
 
 // Worker registers with a coordinator, runs the attempts it is assigned, each in a contained subprocess,
@@ -43,6 +46,7 @@ type Worker struct {
 	cfg     Config
 	client  *remote.WorkerClient
 	contain *containment
+	metrics *metrics
 
 	mu       sync.Mutex
 	reg      remote.Registration
@@ -90,7 +94,16 @@ func New(cfg Config) (*Worker, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Worker{cfg: cfg, client: client, contain: contain, attempts: map[string]*running{}}, nil
+	m, err := newMetrics(cfg.Meter)
+	if err != nil {
+		return nil, fmt.Errorf("making the worker's metrics: %w", err)
+	}
+	w := &Worker{cfg: cfg, client: client, contain: contain, metrics: m, attempts: map[string]*running{}}
+	if contain.noMemory != nil {
+		w.logf("attempts' peak memory isn't counted, as the memory controller can't reach their cgroups, which the "+
+			"worker's cgroup must be given: %v", contain.noMemory)
+	}
+	return w, nil
 }
 
 // logf writes to the worker's log.
@@ -271,6 +284,9 @@ func (w *Worker) cleanLeftovers(ctx context.Context) error {
 	for _, id := range ids {
 		w.logf("cleaning up after attempt %s of an earlier run", id)
 		if err := w.contain.kill(id, 10*time.Second); err != nil {
+			if errors.Is(err, errStuck) {
+				w.metrics.stick()
+			}
 			errs = append(errs, err)
 		}
 		if err := run.RemoveAttempt(ctx, w.cfg.Store, id); err != nil {

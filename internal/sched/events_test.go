@@ -49,7 +49,7 @@ func TestForJobSaves(t *testing.T) {
 	cancel()
 
 	store := cache.NewMemory()
-	b, err := trace.Save(ctx, refusingCancelled{store})
+	b, _, err := trace.Save(ctx, refusingCancelled{store})
 	if err != nil || b == nil {
 		t.Fatalf("saving a cancelled job's manifest = %v, %v; want it stored", b, err)
 	}
@@ -68,7 +68,7 @@ func TestForJobSaves(t *testing.T) {
 		t.Errorf("the manifest's entries = %+v; want %+v, the regeneration in place of the hit", manifest.Entries, want)
 	}
 
-	if b, err := trace.Save(context.Background(), refusingAll{store}); err == nil || b != nil {
+	if b, _, err := trace.Save(context.Background(), refusingAll{store}); err == nil || b != nil {
 		t.Errorf("saving to a store that refuses = %v, %v; want none, and why", b, err)
 	}
 }
@@ -394,7 +394,7 @@ func TestRunJobWithoutStore(t *testing.T) {
 	var warned []error
 	outcome := RunJob(context.Background(),
 		func() (cache.ContentStore, error) { return nil, errors.New("the build cache is locked") },
-		func(err error) { warned = append(warned, err) },
+		func(err error) { warned = append(warned, err) }, nil,
 		func(ctx context.Context) api.Outcome { return api.Outcome{Results: []api.Result{{}}} })
 	if outcome.Trace != nil || len(outcome.Results) != 1 {
 		t.Errorf("outcome = %+v; want its results, naming no manifest", outcome)

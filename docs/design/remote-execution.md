@@ -329,6 +329,11 @@ Journaling enforces specific crash invariants:
 - Recovered event streams begin after the highest event index emitted prior to the restart,
   causing resumed client watch streams to encounter an explicit restart gap event.
 
+## Telemetry
+
+A coordinator exports each job's trace over OpenTelemetry, from the same spans it stores, its workers' among them,
+as [observability](observability.md) describes; a resumed job goes on in the same trace, since its IDs are derived.
+
 ## Kubernetes deployment
 
 The Helm chart in [remote/helm/vamos](../../remote/helm/vamos/values.yaml) deploys Vamos services to Kubernetes.
