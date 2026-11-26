@@ -644,8 +644,11 @@ func (p *pool) live(id string) (*attempt, error) {
 }
 
 // lose ends at, whose lease has passed, as lost, so that its work is tried again elsewhere; p.mu must be held.
+// One withdrawn isn't counted as expired: its try ended killed, as it was counted.
 func (p *pool) lose(at *attempt) {
-	p.metrics.count(p.metrics.expired)
+	if !at.killed {
+		p.metrics.count(p.metrics.expired)
+	}
 	at.lost = true
 	p.end(at, nil, fmt.Errorf("%w: worker %s didn't renew its lease", errWorkerLost, at.worker.id))
 }

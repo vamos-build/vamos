@@ -506,7 +506,9 @@ func (c *Coordinator) build(request *api.GraphRequest, native []string, run int6
 			// The generation is checked once the build is open, since no prune starts then: checked before, a prune
 			// could run between the check and the build's start.
 			if err := c.checkGeneration(ctx, g.Generation); err != nil {
-				if errors.Is(err, errPruned) { // not a failure to read the generation
+				// Counted as refused only on the build's first run, not a resumption of one accepted before, and
+				// not as a failure to read the generation.
+				if errors.Is(err, errPruned) && run == 0 {
 					c.metrics.refuse(refusedGeneration)
 				}
 				return sched.Failed(err)

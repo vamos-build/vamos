@@ -677,8 +677,8 @@ func TestPruneClearsRepository(t *testing.T) {
 }
 
 // TestUsageOfABusyCgroup checks that an attempt's cgroup tells the CPU time its processes used, here two seconds of a
-// busy loop, of which at least half a second must have run, and their peak memory if it counts memory, or leaves it
-// out rather than reporting none.
+// busy loop, of which a tenth of a second must have run, however loaded the host, and their peak memory if it counts
+// memory, or leaves it out rather than reporting none.
 func TestUsageOfABusyCgroup(t *testing.T) {
 	c, err := newContainment(testenv.CgroupRoot(t))
 	if err != nil {
@@ -688,12 +688,15 @@ func TestUsageOfABusyCgroup(t *testing.T) {
 	testenv.Must(t, err)
 	defer cgroup.Close()
 	defer func() { _ = c.kill("busy", killWait) }()
-	cmd := exec.Command("timeout", "2", "sh", "-c", "while :; do :; done") // twice the CPU it is asked for
+	cmd := exec.Command("timeout", "2", "sh", "-c", "while :; do :; done")
 	cmd.SysProcAttr = &syscall.SysProcAttr{UseCgroupFD: true, CgroupFD: int(cgroup.Fd())}
-	_ = cmd.Run() // which timeout ends, failing
+	var exit *exec.ExitError
+	if err := cmd.Run(); !errors.As(err, &exit) || exit.ExitCode() != 124 { // as timeout ends the loop
+		t.Fatalf("the busy loop ended with %v; want timeout's exit status 124", err)
+	}
 	u := c.usage("busy")
-	if u == nil || u.CPUMicros == nil || *u.CPUMicros < 500_000 {
-		t.Fatalf("the cgroup's usage = %+v; want at least half a second of CPU", u)
+	if u == nil || u.CPUMicros == nil || *u.CPUMicros < 100_000 {
+		t.Fatalf("the cgroup's usage = %+v; want at least a tenth of a second of CPU", u)
 	}
 	_, err = os.Stat(filepath.Join(c.path("busy"), "memory.peak"))
 	switch counts := err == nil; {

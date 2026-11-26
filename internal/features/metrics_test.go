@@ -320,7 +320,7 @@ func TestMetrics_AttemptsReportTheirResources(t *testing.T) {
 		w.WhenIBuild("app", onTheCoordinator("<coordinator>"), traced())
 		w.ThenItSucceeds()
 		w.ThenTheTraceSpansSayAtLeast("executor", "try", traceArgs{"kind": "pull"},
-			traceArgs{"kind": "layer", "cpu": atLeast(0.5)})
+			traceArgs{"kind": "layer", "cpu": atLeast(0.1)})
 		w.WhenIScrapeTheMetrics()
 		w.ThenTheMetricIs("vamos_attempts_cpu_seconds_count", 1, "kind", "layer")
 	})

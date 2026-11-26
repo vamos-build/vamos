@@ -1077,8 +1077,13 @@ func (inv *invocation) worker() error {
 		stderr := inv.stderr
 		telemetry.HandleErrors(func(msg string) { fmt.Fprintf(stderr, "vamos: warning: %s\n", msg) })
 	}
-	// Shut down once the worker has stopped, so that what it counted last is sent.
-	return errors.Join(w.Run(inv.ctx), shutdownTelemetry(tel))
+	// Shut down once the worker has stopped, so that what it counted last is sent, warning about what couldn't be:
+	// the worker's own outcome stands, as the coordinator's does.
+	err = w.Run(inv.ctx)
+	if serr := shutdownTelemetry(tel); serr != nil {
+		inv.warn(serr)
+	}
+	return err
 }
 
 // attempt runs one attempt as a worker's subprocess: the assignment comes on standard input, and what it does goes

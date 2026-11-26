@@ -316,6 +316,48 @@ func TestKillDecides(t *testing.T) {
 	}
 }
 
+// TestEnding checks which cause of an attempt's end comes first, as the attempt then reports it: a kill that came
+// before the output ended decides it, but one after a read of the output failed, as the lease's fence may come as that
+// failure is recorded, doesn't, so that the failure is reported rather than the attempt tried again.
+func TestEnding(t *testing.T) {
+	fence := fmt.Errorf("%w for 1s: no answer came", errFenced)
+	unreadable := errors.New("a line too long")
+	running := func() bool { return true }
+	for _, c := range []struct {
+		name    string
+		order   func(e *ending)
+		decided bool
+	}{
+		{
+			name:    "a fence, then the read's failure",
+			order:   func(e *ending) { e.kill(fence, running); e.outputEnd(unreadable) },
+			decided: true,
+		},
+		{
+			name:    "the read's failure, then a fence",
+			order:   func(e *ending) { e.outputEnd(unreadable); e.kill(fence, running) },
+			decided: false,
+		},
+		{
+			name:    "the output's end without a report, then a fence",
+			order:   func(e *ending) { e.outputEnd(nil); e.kill(fence, running) },
+			decided: true,
+		},
+		{
+			name:    "the subprocess's exit, then a fence",
+			order:   func(e *ending) { e.outputEnd(nil); _, _, _ = e.exited(); e.kill(fence, running) },
+			decided: false,
+		},
+	} {
+		var e ending
+		c.order(&e)
+		live, beforeEnd, why := e.exited()
+		if decided, _ := killDecides(why, live, beforeEnd, false); decided != c.decided {
+			t.Errorf("%s: the kill decided the end %t; want %t", c.name, decided, c.decided)
+		}
+	}
+}
+
 // TestHolds checks that a cgroup holds a process only if its cgroup.procs lists that pid exactly, that one that can't
 // be read is taken to hold it, and one that is gone holds nothing.
 func TestHolds(t *testing.T) {

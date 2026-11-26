@@ -70,10 +70,12 @@ func (w *Worker) attempt(ctx context.Context, reg remote.Registration, a *remote
 func (w *Worker) killer(id string, wait time.Duration) func(remove bool) error {
 	var stuck atomic.Bool
 	return func(remove bool) error {
+		// The wait is copied, as the kills can come at once: from the context's cancellation and from the execution.
+		d := wait
 		if stuck.Load() {
-			wait = 0 // found stuck already: not waited for again
+			d = 0 // found stuck already: not waited for again
 		}
-		err := w.contain.stop(id, wait)
+		err := w.contain.stop(id, d)
 		if err == nil && remove {
 			err = w.contain.remove(id)
 		}
@@ -138,26 +140,14 @@ func (w *Worker) execute(ctx context.Context, reg remote.Registration, a *remote
 	// the subprocess was still running then, as its cgroup holds it while it hasn't exited, and a kill decides the
 	// end only if it was, and came before the subprocess's output ended, or the subprocess reported nothing, so that no
 	// report a kill stands in for keeps the coordinator from trying the attempt again.
-	var mu sync.Mutex
-	var why error // the kill that came first, if one did
-	var whyFirst, liveAtKill, beforeEnd bool
-	var outputEnded atomic.Bool
-	end := func(cause error, isKill bool) {
-		mu.Lock()
-		defer mu.Unlock()
-		if !whyFirst {
-			whyFirst = true
-			if isKill {
-				why, liveAtKill, beforeEnd = cause, w.contain.holds(a.Attempt, pid), !outputEnded.Load()
-			}
-		}
-		if isKill {
-			cancel() // which ends the heartbeat and the events, as the coordinator stops counting the attempt
-		}
+	var e ending
+	killed := func(cause error) {
+		e.kill(cause, func() bool { return w.contain.holds(a.Attempt, pid) })
+		cancel() // which ends the heartbeat and the events, as the coordinator stops counting the attempt
 	}
 	beat, stopBeat := context.WithCancel(cctx)
 	defer stopBeat()
-	go w.heartbeat(beat, reg, a.Attempt, renewed, clock, func(cause error) { end(cause, true) })
+	go w.heartbeat(beat, reg, a.Attempt, renewed, clock, killed)
 
 	// What the subprocess prints is sent in batches, and its last line is its report; its output has ended once it
 	// has been read, though its last events may still be sending.
@@ -168,22 +158,18 @@ func (w *Worker) execute(ctx context.Context, reg remote.Registration, a *remote
 	// the lease is still renewed, and what it printed before is still sent, until its failure is reported; a kill ends
 	// the context, as it renews nothing more, nor sends what a coordinator that stopped counting the attempt refuses.
 	report, readErr := w.relay(cctx, a.Attempt, clock, stdout, func(err error) {
-		outputEnded.Store(true)
+		e.outputEnd(err)
 		if err != nil {
-			end(err, false)
 			if kerr := kill(); kerr != nil {
 				w.logf("attempt %s: %v", a.Attempt, kerr)
 			}
 		}
 	})
 	waitErr := cmd.Wait()
-	mu.Lock()
-	whyFirst = true // the subprocess has ended: a kill that comes now decides nothing
+	liveAtKill, early, cause := e.exited()
 	// The kill stopped the subprocess only if its cgroup held it as the kill came and a signal ended it, rather than
 	// its own exit, which may come between the two.
-	cause, live, early := why, liveAtKill && signalled(cmd.ProcessState), beforeEnd
-	mu.Unlock()
-	decided, fenced := killDecides(cause, live, early, report != nil)
+	decided, fenced := killDecides(cause, liveAtKill && signalled(cmd.ProcessState), early, report != nil)
 	if fenced {
 		w.metrics.fence()
 	}
@@ -221,6 +207,51 @@ func signalled(state *os.ProcessState) bool {
 	}
 	ws, ok := state.Sys().(syscall.WaitStatus)
 	return ok && ws.Signaled() && ws.Signal() == syscall.SIGKILL
+}
+
+// ending records the first cause of an attempt's end, as it comes: a kill, from the coordinator or the lease's
+// fence, the failure of a read of the subprocess's output, or the subprocess's exit; only a kill is kept, as only a
+// kill can decide the end, with whether the subprocess was still running then, and whether its output had ended.
+type ending struct {
+	mu          sync.Mutex
+	settled     bool  // the first cause has come
+	why         error // the kill that came first, if one did
+	liveAtKill  bool  // the subprocess's cgroup held it as that kill came
+	beforeEnd   bool  // that kill came before the output ended
+	outputEnded bool
+}
+
+// kill records cause, a kill, as the end, if nothing ended the attempt before it; holds reports whether the
+// subprocess's cgroup holds it now.
+func (e *ending) kill(cause error, holds func() bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if !e.settled {
+		e.settled = true
+		e.why, e.liveAtKill, e.beforeEnd = cause, holds(), !e.outputEnded
+	}
+}
+
+// outputEnd records that the output has ended, and, if err says a read of it failed, that failure as the end, if
+// nothing ended the attempt before it. Both are recorded at once, so that a kill, as the lease's fence, can't come
+// between the two: one that came before the output ended would decide the end, and drop the failure.
+func (e *ending) outputEnd(err error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if err != nil {
+		e.settled = true
+	}
+	e.outputEnded = true
+}
+
+// exited records that the subprocess has exited, after which a kill decides nothing, and returns whether the
+// subprocess's cgroup held it as the kill that came first came, if one did, whether it came before the output ended,
+// and that kill.
+func (e *ending) exited() (liveAtKill, beforeEnd bool, why error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.settled = true
+	return e.liveAtKill, e.beforeEnd, e.why
 }
 
 // killDecides returns whether why, a kill, decides the attempt's end, rather than its process, and whether it is a

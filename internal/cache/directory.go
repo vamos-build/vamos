@@ -72,9 +72,14 @@ func (d *Directory) Size() (DirectorySize, bool) {
 	return d.sizes.size()
 }
 
-// commit commits f at path, counting the difference it makes to what the directory holds.
+// commit finishes f and moves it to path, replacing whatever is there, counting the difference it makes to what the
+// directory holds. It is closed first, as a close may flush what was written, so that the count, which each counted
+// write holds in turn, is held only for the rename and the reads of the file's size around it.
 func (d *Directory) commit(f *pendingFile, path string) error {
-	return d.sizes.change(path, func() error { return f.commit(path) })
+	if err := f.f.Close(); err != nil {
+		return err
+	}
+	return d.sizes.change(path, func() error { return os.Rename(f.f.Name(), path) })
 }
 
 // Close releases the directory's lock.
@@ -160,14 +165,6 @@ func (p *pendingFile) Write(data []byte) (int, error) {
 // blob returns the blob that what has been written so far makes.
 func (p *pendingFile) blob() Blob {
 	return Blob{Digest: p.digester.Digest(), Size: p.size}
-}
-
-// commit finishes the file and moves it to path, replacing whatever is there.
-func (p *pendingFile) commit(path string) error {
-	if err := p.f.Close(); err != nil {
-		return err
-	}
-	return os.Rename(p.f.Name(), path)
 }
 
 // discard removes the file, unless it has been committed.

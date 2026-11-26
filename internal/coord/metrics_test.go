@@ -101,6 +101,11 @@ func TestMetricsRefused(t *testing.T) {
 		t.Fatal("a build of a pruned generation succeeded")
 	}
 	checkMeasured(t, reader, 1, "vamos.jobs.refused", reason(refusedGeneration))
+	// A resumption of a build accepted before fails as a prune has run, but isn't counted as refused.
+	if outcome := f.c.build(&stale, f.c.platformNames(), 1)(t.Context(), nil); outcome.Failure == nil {
+		t.Fatal("a resumed build of a pruned generation succeeded")
+	}
+	checkMeasured(t, reader, 1, "vamos.jobs.refused", reason(refusedGeneration))
 
 	old := g
 	old.Version = g.Version + 1
@@ -189,6 +194,36 @@ func TestMetricsPool(t *testing.T) {
 	}
 	checkMeasured(t, reader, 2, "vamos.attempts.killed", reason(killStale))
 	checkMeasured(t, reader, 1, "vamos.attempts.killed", reason(killWithdrawn))
+}
+
+// TestWithdrawnLeaseUncounted checks that a running attempt withdrawn, whose worker then goes silent, isn't counted
+// as a lease that expired, by the sweep or at a late heartbeat, as its try ended killed, as it was counted.
+func TestWithdrawnLeaseUncounted(t *testing.T) {
+	reader := sdkmetric.NewManualReader()
+	provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	t.Cleanup(func() { _ = provider.Shutdown(context.Background()) })
+	metrics, err := newMetrics(provider.Meter(meterName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	p := newPool(Config{}.withDefaults(), "i", func() (uint64, error) { return 0, nil })
+	p.now, p.metrics = func() time.Time { return now }, metrics
+	w := &worker{id: "w", info: remote.WorkerInfo{Platform: amd64, Capacity: 2}, running: 2}
+	p.workers[w.id] = w
+	swept := &attempt{id: "swept", worker: w, lease: now.Add(p.cfg.Lease), done: make(chan struct{})}
+	late := &attempt{id: "late", worker: w, lease: now.Add(p.cfg.Lease), done: make(chan struct{})}
+	p.attempts[swept.id], p.attempts[late.id] = swept, late
+	p.withdraw(swept, killWithdrawn)
+	p.withdraw(late, killWithdrawn)
+
+	now = swept.lease.Add(time.Millisecond)
+	p.mu.Lock()
+	_, _ = p.live(late.id) // its worker's heartbeat, late, which finds its lease passed
+	p.mu.Unlock()
+	p.expire()
+	checkMeasured(t, reader, 2, "vamos.attempts.killed", reason(killWithdrawn))
+	checkMeasured(t, reader, 0, "vamos.leases.expired")
 }
 
 // TestMetricsGauges checks the gauges as they are collected, with one build's tasks running and another's waiting for
