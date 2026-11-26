@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"github.com/opencontainers/go-digest"
@@ -33,6 +34,7 @@ type Directory struct {
 	history     chan struct{}
 	historyWait time.Duration      // how long an add or prune waits for the history lock, in all
 	remove      func(string) error // removes a history record; tests replace it
+	sizes       *sizes             // what the files hold, counted as they change
 }
 
 var (
@@ -59,12 +61,31 @@ func OpenDirectory(dir string) (*Directory, error) {
 		history:     make(chan struct{}, 1),
 		historyWait: historyLockWait,
 		remove:      os.Remove,
+		sizes:       newSizes(dir),
 	}, nil
+}
+
+// Size returns how many bytes the directory's blobs and records hold, and whether the count is whole. The first call
+// starts it: a walk of what is there, in the background, before whose end the count is partial, and what is written
+// and removed through the directory since. What another process, or a hand, changes in it isn't counted.
+func (d *Directory) Size() (DirectorySize, bool) {
+	return d.sizes.size()
+}
+
+// commit finishes f and moves it to path, replacing whatever is there, counting the difference it makes to what the
+// directory holds. It is closed first, as a close may flush what was written, so that the count, which each counted
+// write holds in turn, is held only for the rename and the reads of the file's size around it.
+func (d *Directory) commit(f *pendingFile, path string) error {
+	if err := f.f.Close(); err != nil {
+		return err
+	}
+	return d.sizes.change(path, func() error { return os.Rename(f.f.Name(), path) })
 }
 
 // Close releases the directory's lock.
 // The stores can't be used afterwards.
 func (d *Directory) Close() error {
+	d.sizes.close()
 	return d.lock.release()
 }
 
@@ -146,14 +167,6 @@ func (p *pendingFile) blob() Blob {
 	return Blob{Digest: p.digester.Digest(), Size: p.size}
 }
 
-// commit finishes the file and moves it to path, replacing whatever is there.
-func (p *pendingFile) commit(path string) error {
-	if err := p.f.Close(); err != nil {
-		return err
-	}
-	return os.Rename(p.f.Name(), path)
-}
-
 // discard removes the file, unless it has been committed.
 func (p *pendingFile) discard() {
 	p.f.Close()
@@ -197,7 +210,7 @@ func (d *Directory) Put(_ context.Context, r io.Reader, limit int64) (Blob, erro
 		return Blob{}, fmt.Errorf("%w: %d", ErrOverLimit, limit)
 	}
 	// The same digest means the same content, so replacing an existing blob changes nothing, unless it was corrupt.
-	return b, f.commit(d.blobPath(b))
+	return b, d.commit(f, d.blobPath(b))
 }
 
 // PutBytes stores data as a blob.
@@ -221,7 +234,7 @@ func (d *Directory) Import(_ context.Context, b Blob, r io.Reader) error {
 	if got := f.blob(); got != b {
 		return Corrupt(b, fmt.Sprintf("the bytes imported make blob %s of %d bytes", got.Digest, got.Size))
 	}
-	return f.commit(d.blobPath(b))
+	return d.commit(f, d.blobPath(b))
 }
 
 // Get opens b for reading, as a stream that verifies it.
@@ -247,9 +260,12 @@ func (d *Directory) drop(b Blob, f *os.File) {
 	if err != nil {
 		return
 	}
-	if current, err := os.Stat(path); err == nil && os.SameFile(opened, current) {
-		os.Remove(path)
-	}
+	_ = d.sizes.change(path, func() error {
+		if current, err := os.Stat(path); err == nil && os.SameFile(opened, current) {
+			return os.Remove(path)
+		}
+		return nil
+	})
 }
 
 // Read returns b's content, verified, if it is at most limit bytes.
@@ -285,13 +301,15 @@ func (d *Directory) ClearContent(context.Context) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	var errs []error
-	for _, sub := range []string{"cas", "tmp"} {
-		if err := os.RemoveAll(filepath.Join(d.dir, sub)); err != nil {
-			errs = append(errs, err)
+	return len(entries), d.sizes.clear(0, func() error {
+		var errs []error
+		for _, sub := range []string{"cas", "tmp"} {
+			if err := os.RemoveAll(filepath.Join(d.dir, sub)); err != nil {
+				errs = append(errs, err)
+			}
 		}
-	}
-	return len(entries), errors.Join(append(errs, makeSubdirectories(d.dir))...)
+		return errors.Join(append(errs, makeSubdirectories(d.dir))...)
+	})
 }
 
 // actionPath returns where the result for key, which must be valid, is kept.
@@ -348,7 +366,7 @@ func (d *Directory) writeRecordBytes(path string, data []byte) error {
 	if _, err := f.Write(data); err != nil {
 		return err
 	}
-	return f.commit(path)
+	return d.commit(f, path)
 }
 
 // Result returns the latest result for key, or nil if there is none that can be read.
@@ -400,8 +418,10 @@ func (d *Directory) ClearResults(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	err = os.RemoveAll(filepath.Join(d.dir, "ac"))
-	if err = errors.Join(err, makeSubdirectories(d.dir)); err != nil {
+	err = d.sizes.clear(slices.Index(sizedDirectories, "ac"), func() error {
+		return errors.Join(os.RemoveAll(filepath.Join(d.dir, "ac")), makeSubdirectories(d.dir))
+	})
+	if err != nil {
 		return len(entries), err
 	}
 	generation, err := d.Generation(ctx)

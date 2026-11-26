@@ -183,17 +183,18 @@ docker compose -f remote/compose.yaml up -d --wait \
   docker compose -f remote/compose.yaml down
 
 # R4. A worker killed mid-build: the build's running target is tried again on the other worker and the build
-# succeeds, its trace naming the retry; the worker comes back, logs that it registered again, and cleans up after
+# succeeds, its trace holding the try that was lost, before the one that ran; the worker comes back, logs that it
+# registered again, and cleans up after
 # the attempt it was running. `docker restart -t 0` kills the process at once and starts the container again;
 # `docker kill` would leave it stopped, since Docker's restart policy ignores a manual kill. Workers take work as
-# they poll, so the attempt may be on worker-2: if the trace names no retry, run the check again restarting that one.
+# they poll, so the attempt may be on worker-2: if the trace holds no lost try, run the check again restarting that one.
 # Setup runs first, and only the restart's timer in the background, as in R6.
 docker compose -f remote/compose.yaml up -d --wait \
   && docker network connect remote_default "vamos_$(basename "$WORKSPACE_FOLDER")" \
   && { (sleep 15; docker restart -t 0 remote-worker-1) & \
        ./vamos build slow --rebuild -C "$TMP/slow" --coordinator http://coordinator:8080 --trace "$TMP/r4.json"; \
        wait; }; \
-  grep -o '"retry 1"' "$TMP/r4.json"; \
+  grep -oE '"outcome": *"lost"' "$TMP/r4.json"; \
   docker compose -f remote/compose.yaml logs worker | grep -i "registered\|cleaning up"; \
   docker network disconnect remote_default "vamos_$(basename "$WORKSPACE_FOLDER")"; \
   docker compose -f remote/compose.yaml down
@@ -220,6 +221,84 @@ docker compose -f remote/compose.yaml up -d --wait \
   docker compose -f remote/compose.yaml logs worker | grep -i "registering again"; \
   docker network disconnect remote_default "vamos_$(basename "$WORKSPACE_FOLDER")"; \
   docker compose -f remote/compose.yaml down
+
+# R7. Telemetry through an OpenTelemetry Collector: with one added for the check by an override file, and the
+# coordinator and workers exporting to it, a build whose client sets TRACEPARENT puts the coordinator's `build` span
+# under the given parent, in its trace, and the collector logs the coordinator's and workers' metrics, with exemplars of
+# that trace, naming one of its tries, on the attempts' histogram. The IDs are new for each run, and the project is
+# taken down first with its volumes, so that nothing an earlier run left, a log, a counter or a job its coordinator
+# would resume, can pass; the build is given ten minutes. The collector's debug exporter logs everything it receives, a
+# span or a metric as a block of `-> Field: value` lines; the metrics are exported every 5 seconds, so the log is read
+# again, each read given 20 seconds, until all is there or a minute has passed. A run interrupted before it left the
+# project's network has left this container on it, which `down` can't remove, so R7 leaves it first. R7 runs as a
+# Compose project of its own, vamos-r7, so that its volumes can go without the shared project's cache registry and
+# Docker Hub mirror, though its own mirror then starts empty and pulls from Docker Hub, and its images are removed at
+# the end. Its coordinator is reached as r7-coordinator, a name the shared project's network doesn't answer to if this
+# container is still on it.
+cat > "$TMP/otel.yaml" <<'YAML'
+services:
+  coordinator:
+    environment: {OTEL_EXPORTER_OTLP_ENDPOINT: "http://collector:4318", OTEL_METRIC_EXPORT_INTERVAL: "5000"}
+    depends_on: {collector: {condition: service_started}}
+    networks: {default: {aliases: [r7-coordinator]}}
+  worker:
+    environment: {OTEL_EXPORTER_OTLP_ENDPOINT: "http://collector:4318", OTEL_METRIC_EXPORT_INTERVAL: "5000"}
+  collector:
+    image: otel/opentelemetry-collector:0.165.0
+    command: ["--config=/etc/otel.yaml"]
+    configs: [{source: otel, target: /etc/otel.yaml}]
+configs:
+  otel:
+    content: |
+      receivers: {otlp: {protocols: {http: {endpoint: "0.0.0.0:4318"}}}}
+      exporters: {debug: {verbosity: detailed}}
+      service:
+        pipelines:
+          traces: {receivers: [otlp], exporters: [debug]}
+          metrics: {receivers: [otlp], exporters: [debug]}
+YAML
+# The images are built again, as in R2, since a check of a change needs its own code. The script fails if a check does.
+R7=ok
+T=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n'); S=$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')
+docker network disconnect vamos-r7_default "vamos_$(basename "$WORKSPACE_FOLDER")" 2>/dev/null
+docker compose -p vamos-r7 -f remote/compose.yaml -f "$TMP/otel.yaml" down -v \
+  && docker compose -p vamos-r7 -f remote/compose.yaml -f "$TMP/otel.yaml" up -d --build --wait \
+  && docker network connect vamos-r7_default "vamos_$(basename "$WORKSPACE_FOLDER")" \
+  && TRACEPARENT="00-$T-$S-01" \
+     timeout 600 ./vamos build slow --rebuild -C "$TMP/slow" --coordinator http://r7-coordinator:8080 \
+  || R7=failed
+end=$(($(date +%s) + 60)); missing=" run, as it failed"
+while test "$R7" = ok; do
+  missing=" log"
+  if timeout 20 docker compose -p vamos-r7 -f remote/compose.yaml -f "$TMP/otel.yaml" logs collector \
+      > "$TMP/r7.txt"; then
+    missing=
+    # A span whose trace, parent and name are the run's, read within each span's block.
+    awk -v t="$T" -v s="$S" '/Span #|Metric #/ { tr = pa = na = "" }
+      /Trace ID *:/ { tr = $NF } /Parent ID *:/ { pa = $NF }
+      /Name *:/ { na = $0; sub(/^[^:]*Name *: /, "", na) }
+      tr == t && pa == s && na == "build" { found = 1 } END { exit !found }' "$TMP/r7.txt" \
+      || missing="$missing build span"
+    for m in 'jobs\.duration' workers 'worker\.fenced'; do
+      grep -qE "Name: vamos\.$m\$" "$TMP/r7.txt" || missing="$missing vamos.$m"
+    done
+    # An exemplar on the attempts' histogram naming the run's trace and one of its tries: the log is read twice, for
+    # the spans and then for the exemplars, each within its block.
+    awk -v t="$T" 'NR == FNR { if (/Span #|Metric #/) tr = sp = ""
+      if (/Trace ID *:/) tr = $NF; if (/(^|[|]) +ID +:/) sp = $NF
+      if (/-> vamos\.arg\.role: Str\(try\)/ && tr == t) id[sp]; next }
+      /Metric #/ { me = "" } /-> Name: / { me = $NF } /Exemplar #/ { et = "" } /-> Trace ID: / { et = $NF }
+      me == "vamos.attempts.duration" && /-> Span ID: / && et == t && ($NF in id) { found = 1 } END { exit !found }' \
+      "$TMP/r7.txt" "$TMP/r7.txt" \
+      || missing="$missing exemplar"
+  fi
+  test -z "$missing" || test "$(date +%s)" -ge "$end" && break
+  sleep 5
+done
+test -z "$missing" || { echo "R7: no$missing"; R7=failed; }
+docker network disconnect vamos-r7_default "vamos_$(basename "$WORKSPACE_FOLDER")"
+docker compose -p vamos-r7 -f remote/compose.yaml -f "$TMP/otel.yaml" down -v --rmi local || R7=failed
+test "$R7" = ok
 ```
 
 ## Kubernetes
@@ -244,13 +323,13 @@ for p in $(kubectl -n vamos get pods -o name | grep worker); do
 done
 docker exec vamos-control-plane crictl stop --timeout 0 \
   "$(kubectl -n vamos get $V -o jsonpath='{.status.containerStatuses[0].containerID}' | sed 's|containerd://||')"
-wait $B; grep -o '"retry 1"' "$TMP/k2.json"; sleep 5; kubectl -n vamos logs $V | grep -i "registered\|cleaning up"
+wait $B; grep -oE '"outcome": *"lost"' "$TMP/k2.json"; sleep 5; kubectl -n vamos logs $V | grep -i "registered\|cleaning up"
 
 # K3. The coordinator's pod deleted mid-build, as R6: the StatefulSet starts another on the same volume claim,
 # which resumes the build, and the client, reconnected through a new port-forward, sees it succeed.
 # A port-forward ends with the pod it forwards to, so the check stops the section's, runs its own, and starts it
 # again once the new pod is ready; start the section's again after it.
-pkill -f "port-forward svc/vamos-coordinator"
+pkill -f "^([^ ]*/)?kubectl .*port-forward svc/vamos-coordinator 18080:"
 kubectl -n vamos port-forward svc/vamos-coordinator 18080:8080 >/dev/null 2>&1 & P=$!
 ./vamos build slow --rebuild -C "$TMP/slow" --coordinator http://127.0.0.1:18080 & B=$!
 sleep 15; kubectl -n vamos delete pod vamos-coordinator-0
@@ -264,6 +343,62 @@ sleep 15; kill -INT $B; wait $B; sleep 5
 for p in $(kubectl -n vamos get pods -o name | grep worker); do
   kubectl -n vamos exec $p -- nsenter -t 1 -C -m ls /sys/fs/cgroup/vamos | grep attempt
 done
+
+# K5. Prometheus on: with the release upgraded, keeping its values and taking the chart's new defaults, its coordinator
+# serves its metrics through the Service's `metrics` port, apart from the API's; after a build, expect each of a job
+# counted, the pool's two workers of its platform and the API's requests by route, and a 404 for /metrics on the API's
+# port; the script fails if any is missing, and after a failed upgrade, rollout or build skips the rest. It starts from
+# a release with Prometheus off, as installed above, since only then does the upgrade restart the coordinator, which a
+# rerun needs to check what the new pods serve: turn it off again first. The upgrade restarts the coordinator, and a
+# worker notices only when its wait for an assignment fails, up to a lease later, so the build runs its layer again,
+# which needs a worker, and the scrape is tried again every 5 seconds until one succeeds with both registered, starting
+# none after 90 seconds and giving each 20. The scrapes run in one pod, started first, whose image pull has two minutes
+# of its own. K5 stops the section's port-forward as K3 does, once its upgrade has succeeded; start it again after K5.
+K5=ok; P=
+helm upgrade vamos remote/helm/vamos -n vamos --wait --reset-then-reuse-values --set telemetry.prometheus.enabled=true \
+  && kubectl -n vamos wait --for=condition=Ready pod/vamos-coordinator-0 --timeout=120s \
+  || { echo "K5: the upgrade or the coordinator's rollout failed"; K5=failed; }
+if test "$K5" = ok; then
+  pkill -f "^([^ ]*/)?kubectl .*port-forward svc/vamos-coordinator 18080:"
+  kubectl -n vamos port-forward svc/vamos-coordinator 18080:8080 >/dev/null 2>&1 & P=$!
+  # The build waits for a worker as long as none is registered, so it is given ten minutes.
+  sleep 2; timeout 600 ./vamos build slow --rebuild -C "$TMP/slow" --coordinator http://127.0.0.1:18080 \
+    || { echo "K5: the build failed"; K5=failed; }
+fi
+if test "$K5" = ok; then
+  # Scraped as Prometheus would, from a pod, through the Service's metrics port, rather than through a port-forward.
+  M=$(kubectl -n vamos get svc vamos-coordinator --request-timeout=30s \
+    -o jsonpath='{.spec.ports[?(@.name=="metrics")].port}')
+  missing=" metrics port on the Service"; end=
+  if test -n "$M"; then
+    missing=" scraper pod"
+    kubectl -n vamos delete pod k5-scrape --ignore-not-found --grace-period=0 --force --request-timeout=30s 2>/dev/null
+    kubectl -n vamos run k5-scrape --request-timeout=30s --restart=Never --image=curlimages/curl:8.23.0 \
+        --command -- sleep 600 >/dev/null \
+      && kubectl -n vamos wait --for=condition=Ready pod/k5-scrape --timeout=120s >/dev/null \
+      && end=$(($(date +%s) + 90))
+  fi
+  while test -n "$end" && test "$(date +%s)" -lt "$end"; do
+    missing=" successful scrape"
+    if timeout 20 kubectl -n vamos exec k5-scrape -- curl -fsS --max-time 10 "http://vamos-coordinator:$M/metrics" \
+        > "$TMP/k5.txt"; then
+      missing=
+      grep -qE '^vamos_jobs_duration_seconds_count\{[^}]*outcome="succeeded"[^}]*\} [1-9]' "$TMP/k5.txt" \
+        || missing="$missing succeeded job"
+      grep -qE '^vamos_workers\{[^}]*platform="linux/[a-z0-9]+"[^}]*\} 2$' "$TMP/k5.txt" \
+        || missing="$missing two workers"
+      grep -qE 'http_route="/v1/jobs/\{id\}/events"' "$TMP/k5.txt" || missing="$missing route of the API"
+    fi
+    test -z "$missing" && break
+    sleep 5
+  done
+  kubectl -n vamos delete pod k5-scrape --ignore-not-found --grace-period=0 --force --request-timeout=30s \
+    2>/dev/null
+  test -z "$missing" || { echo "K5: no$missing"; K5=failed; }
+  test "$(curl -s --max-time 10 -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/metrics)" = 404 \
+    || { echo "K5: /metrics on the API"; K5=failed; }
+fi
+test -z "$P" || kill $P; test "$K5" = ok
 ```
 
 Remove the temporary artifacts after the checks: `rm -rf -- "$TMP"`.

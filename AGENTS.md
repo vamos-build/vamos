@@ -19,6 +19,7 @@ Read the routes relevant to the change before editing.
 | Container lifecycle, platforms, delivery | [docs/design/container-builds.md](docs/design/container-builds.md), [.agents/kb/container-builds.md](.agents/kb/container-builds.md) |
 | Cache identity, epochs, pruning | [docs/design/storage.md](docs/design/storage.md), [.agents/kb/storage.md](.agents/kb/storage.md) |
 | Concurrency, ownership, trace transport | [docs/design/scheduling.md](docs/design/scheduling.md), [.agents/kb/concurrency-model.md](.agents/kb/concurrency-model.md) |
+| Telemetry: OpenTelemetry export, `TRACEPARENT`, metrics | [docs/design/observability.md](docs/design/observability.md), [internal/telemetry/doc.go](internal/telemetry/doc.go) |
 | Remote execution environment, `remote/`, its Helm chart and published image | [docs/design/remote-execution.md](docs/design/remote-execution.md), [.agents/kb/remote-environment.md](.agents/kb/remote-environment.md) |
 | Updating dependencies, lockfiles, image tags and the devcontainer's tools | [.claude/skills/update-dependencies/SKILL.md](.claude/skills/update-dependencies/SKILL.md) |
 | Releases, `release.yml`, `install.sh` | [docs/design/releases.md](docs/design/releases.md), [.agents/kb/remote-environment.md](.agents/kb/remote-environment.md#releases) |
@@ -38,5 +39,6 @@ Read the routes relevant to the change before editing.
 | `internal/transfer/` | [internal/transfer/doc.go](internal/transfer/doc.go) |
 | `internal/testenv/` | [internal/testenv/doc.go](internal/testenv/doc.go) |
 | `internal/remote/` | [internal/remote/doc.go](internal/remote/doc.go) |
+| `internal/telemetry/` | [internal/telemetry/doc.go](internal/telemetry/doc.go) |
 | Example projects and their own checks | [.agents/kb/development.md](.agents/kb/development.md) |
 | Go example payload | [examples/golang-cli/doc.go](examples/golang-cli/doc.go) |

@@ -256,8 +256,8 @@ func TestMisses_AResultThatIsGoneIsLost(t *testing.T) {
 		w.ThenItSucceeds()
 		w.ThenTheTargetWasShownAs(task("gen"), "cached", "building again, since its cached files are corrupt: ")
 		// Looked up, its files found corrupt by app, then built again.
-		w.ThenTheTraceSpansSayAtLeast("executor", `task "gen"`, traceArgs{"outcome": "cached"},
-			traceArgs{"outcome": "building again, since its cached files are corrupt: *", "miss": "lost"})
+		w.ThenTheTraceSpansSayAtLeast("executor", `task "gen"`, traceArgs{"status": "cached"},
+			traceArgs{"status": "building again, since its cached files are corrupt: *", "miss": "lost"})
 	})
 
 	t.Run("A target built again after a prune is lost", func(t *testing.T) {

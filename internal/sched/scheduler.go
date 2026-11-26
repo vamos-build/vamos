@@ -399,6 +399,9 @@ type completion struct {
 	result    *cache.ActionResult // a pull's, layer's or task's; nil for an index
 	manifests []api.Manifest      // an index's
 	err       error
+	// span is the target's span, still open, when err is one the walk may recover from, so that the walk, which
+	// alone knows whether it tries the target again, says so before it ends it.
+	span *tracing.Active
 }
 
 // walk runs every node of the graph, each once its dependencies are done, as many at once as the bound allows,
@@ -530,7 +533,7 @@ func (s *Scheduler) walk(ctx context.Context) error {
 			seq++
 			started[i], running[i] = seq, true
 			active++
-			start := s.prepare(ref, why[ref])
+			start := s.prepare(ref, why[ref], regenerated[ref])
 			go func() { completions <- start(ctx) }()
 		}
 		if active == 0 {
@@ -540,6 +543,7 @@ func (s *Scheduler) walk(ctx context.Context) error {
 		active--
 		running[c.ref] = false
 		seq++
+		retried := false // the target is tried again, once an input is made again
 		switch from, ok := s.regenerable(c.err); {
 		case c.err == nil:
 			finished[c.ref] = seq
@@ -560,11 +564,26 @@ func (s *Scheduler) walk(ctx context.Context) error {
 			why[from] = "building again, since its cached files are corrupt: " + c.err.Error()
 			setDone(int(from), false) // the target waits for it, and is then tried again
 			enqueue(int(from))
+			retried = true
 		case !done[from] || started[c.ref] < finished[from]:
 			// The task is being made again, or was while the target ran: the target is tried again as it is.
 			enqueue(int(c.ref))
+			retried = true
 		default:
 			failed = c.err
+		}
+		if c.span != nil {
+			// Retried only if anything more may start: a cancelled or withdrawn job starts nothing.
+			outcome := failedOutcome(ctx)
+			select {
+			case <-Withdrawn(ctx):
+			default:
+				if retried && ctx.Err() == nil {
+					outcome = outcomeRetried
+				}
+			}
+			c.span.Set("outcome", outcome)
+			c.span.EndWith(c.err)
 		}
 		if s.handled != nil {
 			s.handled(c)
@@ -631,7 +650,8 @@ func (e *inputError) Unwrap() error {
 // prepare returns what runs the node ref, with why if it is a layer or task that must run though it may be cached,
 // Everything the node needs of the Scheduler's state is read here, before it starts; the function returned reads
 // only the stores, so that it can run beside other nodes.
-func (s *Scheduler) prepare(ref graph.Ref, why string) func(context.Context) completion {
+// regenerating says it is a task run again because a later target found its cached files corrupt.
+func (s *Scheduler) prepare(ref graph.Ref, why string, regenerating bool) func(context.Context) completion {
 	n := s.graph.Node(ref)
 	switch {
 	case n.Pull != nil:
@@ -639,7 +659,7 @@ func (s *Scheduler) prepare(ref graph.Ref, why string) func(context.Context) com
 	case n.Index != nil:
 		return s.prepareIndex(ref)
 	}
-	return s.prepareTarget(ref, why)
+	return s.prepareTarget(ref, why, regenerating)
 }
 
 // record keeps what the node c.ref made, for the nodes that use it and for the results.
@@ -693,7 +713,13 @@ func (s *Scheduler) prepareResolve(ref graph.Ref) func(context.Context) completi
 	return func(ctx context.Context) (c completion) {
 		c.ref = ref
 		ctx, span := tracing.StartTrack(ctx, n.Desc, n.Desc, "image", n.Pull.Image, "platform", n.Pull.Platform)
-		defer func() { span.EndWith(c.err) }()
+		span.Set(targetArgs(n, kindPull)...)
+		defer func() {
+			if c.err != nil {
+				span.Set("outcome", failedOutcome(ctx))
+			}
+			span.EndWith(c.err)
+		}()
 		if a.Pinned {
 			span.Set("pinned", a.Index.String())
 		}
@@ -760,15 +786,17 @@ func (s *Scheduler) resolve(ctx context.Context, ref graph.Ref, a *Action, runPl
 				return nil, fmt.Errorf("reading the build cache: %w", err)
 			}
 			if problem == nil {
-				tracing.Current(ctx).Set("cached", true)
+				tracing.Current(ctx).Set("cached", true, "outcome", api.NodeHit)
 				jobTraceOf(ctx).Record(api.TraceEntry{Node: ref, Desc: s.graph.Node(ref).Desc, Outcome: api.NodeHit})
 				return result, nil
 			}
-			tracing.Current(ctx).Set("unusable", problem.Error())
+			tracing.Current(ctx).Set("unusable", problem.Error(), "lost", lostReason(problem))
 		}
 	}
 	req := Request{Action: a, Tag: recorded, RunPlatform: runPlatform}
-	out := &pullOutput{out: s.output(ref), ref: ref, desc: s.graph.Node(ref).Desc, ctx: ctx}
+	tracing.Current(ctx).Set("outcome", api.NodeMiss) // unless the Runner says it joined another's attempt
+	out := &pullOutput{out: s.output(ref), ref: ref, desc: s.graph.Node(ref).Desc, ctx: ctx,
+		span: tracing.Current(ctx)}
 	rep, err := s.runner.Run(ctx, req, out)
 	if errors.Is(err, ErrPinUnavailable) { // advised here, since jobs that name the pull otherwise share the attempt
 		return nil, fmt.Errorf("%w; if the registry no longer has it, vamos update %s pins what the tag names now",
@@ -786,7 +814,7 @@ func (s *Scheduler) resolve(ctx context.Context, ref graph.Ref, a *Action, runPl
 // prepareTarget returns what makes the result of the layer or task ref ready for later targets,
 // reusing the result the record store holds for its inputs or else running it.
 // If why isn't "", it runs the target even if its result is cached, reporting why, and replaces that result.
-func (s *Scheduler) prepareTarget(ref graph.Ref, why string) func(context.Context) completion {
+func (s *Scheduler) prepareTarget(ref graph.Ref, why string, regenerating bool) func(context.Context) completion {
 	n := s.graph.Node(ref)
 	a := s.inputs(n)
 	base := s.images[n.Base()]
@@ -809,10 +837,11 @@ func (s *Scheduler) prepareTarget(ref graph.Ref, why string) func(context.Contex
 		req.Emulated = true
 		refused = s.emulationRefused(ref, platform)
 	}
-	forced := s.rebuild[ref] // --rebuild named it, as a regeneration's why doesn't say
+	forced := s.rebuild[ref] // --rebuild named it
 	return func(ctx context.Context) completion {
-		result, err := s.runCached(ctx, ref, req, base, why, forced, refused)
-		return completion{ref: ref, result: result, err: err}
+		var open *tracing.Active
+		result, err := s.runCached(ctx, ref, req, base, why, forced, regenerating, refused, &open)
+		return completion{ref: ref, result: result, err: err, span: open}
 	}
 }
 
@@ -854,21 +883,38 @@ func (s *Scheduler) secrets(a *Action) map[string][]byte {
 // If why isn't "", it runs the target even if its result is cached, reporting why, and replaces that result.
 // It reports whose attempt a run joined, if the Runner says, so that a target configured alike for several platforms
 // isn't taken to build again. refused is its failure if the Runner can't emulate it, or nil if it runs natively.
+// regenerating says it runs again because a later target found its cached files corrupt, which loses its result,
+// whether or not it is forced too. It leaves its span open, in open, if err is one the walk may recover from, which
+// the walk ends, saying whether it does.
 func (s *Scheduler) runCached(
-	ctx context.Context, ref graph.Ref, req Request, base builtImage, why string, forced bool, refused error,
+	ctx context.Context, ref graph.Ref, req Request, base builtImage, why string, forced, regenerating bool,
+	refused error, open **tracing.Active,
 ) (_ *cache.ActionResult, err error) {
 	n := s.graph.Node(ref)
-	regenerated := why != "" && !forced
+	lost := regenerating // its result was found but can't be used, for attribution
 	target := n.Desc
 	a, key := req.Action, req.Key
 	ctx, span := tracing.StartTrack(ctx, target, target, "key", key.String(), "base", a.Base)
+	span.Set(targetArgs(n, a.Kind)...)
 	if n.Layer != nil {
 		span.Set("platform", n.Layer.Platform)
 	}
-	defer func() { span.EndWith(err) }()
+	defer func() {
+		if _, ok := s.regenerable(err); ok {
+			*open = span // for the walk to say whether it tries the target again, and end
+			return
+		}
+		if err != nil {
+			span.Set("outcome", failedOutcome(ctx))
+		}
+		span.EndWith(err)
+	}()
 	status := func(status string) {
-		span.Set("outcome", status)
+		span.Set("status", status)
 		s.events.Status(ref, status)
+	}
+	if regenerating {
+		span.Set("lost", lostCorrupt) // its files were found corrupt after it was reused, forced by --rebuild or not
 	}
 	if why == "" {
 		result, log, problem, err := s.lookup(ctx, a, key)
@@ -879,6 +925,7 @@ func (s *Scheduler) runCached(
 			why = "building"
 		case problem == nil:
 			status("cached")
+			span.Set("outcome", api.NodeHit)
 			if err := s.replay(ctx, ref, log); err != nil {
 				return nil, s.failed(ref, fmt.Errorf("replaying its output from the build cache: %w", err))
 			}
@@ -895,7 +942,8 @@ func (s *Scheduler) runCached(
 			return result, nil
 		default:
 			why = fmt.Sprintf("building, since the cached result can't be used: %v", problem)
-			regenerated = true // as good as lost, for attribution
+			lost = true
+			span.Set("lost", lostReason(problem))
 		}
 	}
 
@@ -904,8 +952,10 @@ func (s *Scheduler) runCached(
 		return nil, s.failed(ref, fmt.Errorf("its base %s is for %s, not %s; a layer's base must be for its platform",
 			s.graph.Node(n.Base()).Label, base.platform, n.Layer.Platform))
 	}
-	history := s.attributeMiss(ctx, span, n, a, key, base.index, forced, regenerated)
-	out := &targetOutput{s: s, ref: ref, why: why, status: status, ctx: ctx, cause: history.cause}
+	// A regeneration is lost, whether or not it was forced too, as its span says.
+	history := s.attributeMiss(ctx, span, n, a, key, base.index, forced && !regenerating, lost)
+	out := &targetOutput{s: s, ref: ref, why: why, status: status, ctx: ctx, span: span, cause: history.cause}
+	span.Set("outcome", api.NodeMiss) // unless the Runner says it joined another's attempt
 	rep, err := s.runner.Run(ctx, req, out)
 	if errors.Is(err, ErrEmulationNeeded) && refused != nil {
 		// The Runner found no emulating attempt for an unpermitted job to attach to, which it says before the
@@ -932,6 +982,7 @@ type targetOutput struct {
 	why    string
 	status func(string)
 	ctx    context.Context // the target's, within its span, which the attempt's cache write is recorded in
+	span   *tracing.Active // the target's, which says whose attempt served it
 	cause  string          // why it missed, as attribute found it
 	once   sync.Once
 
@@ -981,21 +1032,37 @@ func (o *targetOutput) Traced(t AttemptTrace) {
 	e := t.entry(o.ref, o.s.graph.Node(o.ref).Desc, starter == nil)
 	e.Cause = o.cause
 	trace.Record(e)
+	o.span.Set("outcome", e.Outcome, "attempt", t.ID)
+	markJoined(o.span, e.Outcome)
 	switch {
 	case starter == nil:
-		tracing.Relay(o.ctx, t.Write)
+		tracing.Relay(o.ctx, asShared(t.Write))
 	case !sameJob:
 		tracing.Relay(o.ctx, onSharedTrack(t.Write, o.s.graph.Node(o.ref).Desc))
 	}
 }
 
 // onSharedTrack returns spans, of an attempt another job started, moved to the shared track of the target desc,
-// part of no span, since the spans that held them are the other job's.
+// part of no span, since the spans that held them are the other job's, and marked as asShared marks them.
 func onSharedTrack(spans []tracing.Span, desc string) []tracing.Span {
 	shared := sharedTrack(desc)
+	out := asShared(spans)
+	for i := range out {
+		out[i].Track, out[i].Parent = shared, ""
+	}
+	return out
+}
+
+// asShared returns copies of spans of an attempt, such as its cache write, marked tracing.Shared, as a job keeps
+// them: what the attempt's sink was told, which none of the jobs it served need tell again.
+func asShared(spans []tracing.Span) []tracing.Span {
 	out := make([]tracing.Span, len(spans))
 	for i, s := range spans {
-		s.Track, s.Parent = shared, ""
+		s.Args = maps.Clone(s.Args)
+		if s.Args == nil {
+			s.Args = map[string]any{}
+		}
+		s.Args[tracing.Shared] = true
 		out[i] = s
 	}
 	return out
@@ -1008,6 +1075,7 @@ type pullOutput struct {
 	ref  graph.Ref
 	desc string
 	ctx  context.Context
+	span *tracing.Active // the pull's, which says whose attempt served it
 
 	mu     sync.Mutex
 	joined bool // the resolve runs in an attempt another job, or pull, started
@@ -1031,9 +1099,12 @@ func (o *pullOutput) Traced(t AttemptTrace) {
 	o.mu.Lock()
 	started := !o.joined
 	o.mu.Unlock()
-	jobTraceOf(o.ctx).Record(t.entry(o.ref, o.desc, started))
+	e := t.entry(o.ref, o.desc, started)
+	jobTraceOf(o.ctx).Record(e)
+	o.span.Set("outcome", e.Outcome, "attempt", t.ID)
+	markJoined(o.span, e.Outcome)
 	if started {
-		tracing.Relay(o.ctx, t.Write)
+		tracing.Relay(o.ctx, asShared(t.Write))
 		return
 	}
 	tracing.Relay(o.ctx, onSharedTrack(t.Write, o.desc))
@@ -1194,6 +1265,69 @@ func (s *Scheduler) lookup(ctx context.Context, a *Action, key digest.Digest) (
 		span.Set("unusable", problem.Error())
 	}
 	return result, log, problem, nil
+}
+
+// The kind of a pull's target span, whose Action's kind is KindResolve.
+const kindPull = "pull"
+
+// The outcomes of a target span whose target ended in an error, beside api.NodeHit, NodeMiss and NodeJoined:
+// cancelled if its job was, as a client's interrupt cancels it, and failed otherwise, so that a failure's count holds
+// no cancellation.
+// A target that found an input's files corrupt is retried, as the walk makes the input again and tries the target
+// again in a span of its own, rather than failed, when the walk does so, which it alone decides.
+const (
+	outcomeFailed    = "failed"
+	outcomeCancelled = "cancelled"
+	outcomeRetried   = "retried"
+)
+
+// failedOutcome returns the outcome of a target span, whose context is ctx, that ended in an error: decided by
+// whether its job's context ended, rather than by the error, since a cancelled step may fail with any error, as a
+// killed process does, and a timeout of the target's own, as a registry's, is a failure. An expired build, whose
+// context lives on, fails, as its job does. It is read as the span ends, so a step that fails just as its job is
+// cancelled counts as cancelled, as the job does.
+func failedOutcome(ctx context.Context) string {
+	if ctx.Err() != nil {
+		return outcomeCancelled
+	}
+	return outcomeFailed
+}
+
+// Why a target's cached result was lost, which its span's lost argument says, a bounded set, as metrics count by it.
+const (
+	lostMissing  = "missing"  // what it names is missing from the store
+	lostCorrupt  = "corrupt"  // what it names is corrupt, as found as it was checked or as a later target read it
+	lostUnusable = "unusable" // anything else, such as an image no longer where it was
+)
+
+// lostReason returns why a result whose problem is problem was lost.
+func lostReason(problem error) string {
+	switch {
+	case errors.Is(problem, cache.ErrMissing):
+		return lostMissing
+	case errors.Is(problem, cache.ErrCorrupt):
+		return lostCorrupt
+	default:
+		return lostUnusable
+	}
+}
+
+// markJoined marks span, a target's, as one that joined another's attempt, if outcome says so, so that whoever counts
+// joins tells it apart from a miss whatever its outcome then becomes, as a failure of the attempt it joined makes it.
+func markJoined(span *tracing.Active, outcome string) {
+	if outcome == api.NodeJoined {
+		span.Set("joined", true)
+	}
+}
+
+// targetArgs returns what every target span says of its target n, of kind, so that the spans of targets can be told
+// apart from the others without reading their names: its role, kind and configured target.
+func targetArgs(n *graph.Node, kind string) []any {
+	args := []any{tracing.Role, tracing.RoleTarget, "kind", kind}
+	if n.Target != "" {
+		args = append(args, "target", n.Target)
+	}
+	return args
 }
 
 // resultArgs returns what a trace records of a target's result: its image or its files, and its epoch.

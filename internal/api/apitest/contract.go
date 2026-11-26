@@ -1143,10 +1143,11 @@ func testPrune(t *testing.T, f Fixture) {
 	}
 }
 
-// testWorkspace checks that an executor ignores the workspace's name that a request carries: graph, push and publish
-// jobs given one behave as they do without one, and a named graph job after an unnamed one of the same graph finds
-// its result cached, since the name is no part of any key.
-// It can't check that the name arrives, since an executor that never received it would behave the same.
+// testWorkspace checks that an executor takes the metadata that a request carries, the workspace's name and the
+// outer trace it joins, without its changing what is built: graph, push and publish jobs given them behave as they
+// do without, and a named graph job after an unnamed one of the same graph finds its result cached, since neither is
+// part of any key. It can't check that they arrive, since an executor that never received them would behave the
+// same; a coordinator's tests do.
 func testWorkspace(t *testing.T, f Fixture) {
 	f.requireBuilds(t)
 	ex := f.New(t)
@@ -1156,11 +1157,12 @@ func testWorkspace(t *testing.T, f Fixture) {
 	host := strings.TrimPrefix(server.URL, "http://")
 	f.insecure(t, host)
 	const name = "com.acme.storefront"
+	const parent, state = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01", "ci=pipeline"
 
 	unnamed := layerGraph(t, f, ex, "named or not")
 	layer := runGraph(t, ex, unnamed)
 	named := unnamed
-	named.Workspace = name
+	named.Workspace, named.Parent, named.State = name, parent, state
 	id, err := ex.Submit(ctx, api.Request{Graph: &named})
 	if err != nil {
 		t.Fatal(err)
@@ -1178,7 +1180,7 @@ func testWorkspace(t *testing.T, f Fixture) {
 
 	push := api.PushRequest{Result: layer[0], Destination: host + "/app:v1"}
 	pushed := finishJob(t, ex, api.Request{Push: &push})
-	push.Workspace = name
+	push.Workspace, push.Parent, push.State = name, parent, state
 	if got := finishJob(t, ex, api.Request{Push: &push}); !reflect.DeepEqual(got.Pushed, pushed.Pushed) {
 		t.Errorf("a named push = %+v, want what an unnamed one pushed, %+v", got.Pushed, pushed.Pushed)
 	}
@@ -1188,7 +1190,7 @@ func testWorkspace(t *testing.T, f Fixture) {
 		Tags:   []string{"v1"},
 	}
 	published := finishJob(t, ex, api.Request{Publish: &publish})
-	publish.Workspace = name
+	publish.Workspace, publish.Parent, publish.State = name, parent, state
 	if got := finishJob(t, ex, api.Request{Publish: &publish}); !reflect.DeepEqual(got.Published, published.Published) {
 		t.Errorf("a named publication = %+v, want what an unnamed one published, %+v", got.Published,
 			published.Published)

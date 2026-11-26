@@ -73,23 +73,37 @@ type world struct {
 	coordinatorLocal  *run.Local           // the executor of GivenACoordinator's
 	// attemptTraceLimit bounds each attempt's stored trace on GivenACoordinator's, in bytes, if positive.
 	attemptTraceLimit  int
-	timeline           *jobTimeline       // what the events of the coordinator's jobs said, if a step watches them
-	otherJob           string             // the job of GivenAnotherClientBuildsOnTheCoordinator's client
-	otherBuild         *otherClient       // the client of GivenAnotherClientBuildsOnTheCoordinator, if started
-	jobs               atomic.Int64       // the jobs that the scenario's coordinator was given
-	toldMu             sync.Mutex         // guards told
-	told               []toldJob          // what each job the scenario's coordinator was given told it, in order
-	served             atomic.Int64       // the requests that the scenario's coordinator was sent
-	coordinatorServer  *httptest.Server   // that serves <coordinator>, counting what it is sent
-	coordinatorStarted time.Time          // when GivenACoordinatorWithAWorker started its coordinator
-	cgroupRoot         string             // where the scenario's worker makes its attempts' cgroups, if it has one
-	watching           chan struct{}      // told, if it has room, once front sends on a command's watch of a job
-	interruptedAt      time.Time          // when WhenIInterruptTheCoordinatorWhileIBuild interrupted the coordinator
-	buildTook          time.Duration      // how long after that the build ended
-	local              *server            // the coordinator that GivenALocalCoordinator started
-	interruptLocal     context.CancelFunc // interrupts it
-	localErr           error              // what it ended with, once interrupted
-	localTook          time.Duration      // how long it took to end, once interrupted
+	timeline           *jobTimeline     // what the events of the coordinator's jobs said, if a step watches them
+	otherJob           string           // the job of GivenAnotherClientBuildsOnTheCoordinator's client
+	otherBuild         *otherClient     // the client of GivenAnotherClientBuildsOnTheCoordinator, if started
+	jobs               atomic.Int64     // the jobs that the scenario's coordinator was given
+	toldMu             sync.Mutex       // guards told
+	told               []toldJob        // what each job the scenario's coordinator was given told it, in order
+	served             atomic.Int64     // the requests that the scenario's coordinator was sent
+	coordinatorServer  *httptest.Server // that serves <coordinator>, counting what it is sent
+	coordinatorStarted time.Time        // when GivenACoordinatorWithAWorker started its coordinator
+	cgroupRoot         string           // where the scenario's worker makes its attempts' cgroups, if it has one
+	watching           chan struct{}    // told, if it has room, once front sends on a command's watch of a job
+	interruptedAt      time.Time        // when WhenIInterruptTheCoordinatorWhileIBuild interrupted the coordinator
+	buildTook          time.Duration    // how long after that the build ended
+	local              *server          // the coordinator that GivenALocalCoordinator started
+	// telemetryEnv is the OTEL_* environment of the scenario's coordinator, which it reads through cli.Config.Getenv
+	// rather than the process's, so that scenarios with collectors of their own run at once.
+	telemetryEnv map[string]string
+	// workerTelemetryEnv is the OTEL_* environment of the scenario's workers, apart from the coordinator's, as a
+	// deployment gives each its own; empty, they export nothing.
+	workerTelemetryEnv map[string]string
+	collector          *otlpCollector  // the OTLP collector that GivenAnOTLPCollector started, if one did
+	metrics            *metricsScrapes // where the coordinator serves Prometheus, and what was scraped, if it does
+	chart              []string        // the objects WhenIRenderTheChart rendered
+	// workerLines are the connections of GivenACoordinatorWithTwoWorkers's workers to the coordinator, which a step
+	// cuts.
+	workerLines      []*workerLine
+	coordinatorCache string             // GivenACoordinatorWithAWorker's coordinator's --cache-dir
+	stopCoordinator  func() error       // interrupts it alone, and returns what it ended with
+	interruptLocal   context.CancelFunc // interrupts it
+	localErr         error              // what it ended with, once interrupted
+	localTook        time.Duration      // how long it took to end, once interrupted
 
 	prepared   string                 // the folder the next command sends to, if Given steps have put something there
 	outside    string                 // a folder outside the project, for files that commands read, such as secrets
@@ -148,27 +162,29 @@ type world struct {
 	tracePath    string          // where the last command wrote its trace, if traced() asked it to
 	printedTrace string          // the digest of the trace that ThenItPrintsItsTrace read
 	jobsMu       sync.Mutex
-	jobIDs       []string          // the jobs the scenario's coordinator accepted, in order
-	trace        *trace            // the trace there, once a step has read it
-	graph        *graph.Graph      // the graph that WhenIShowTheGraph showed last
-	graphErr     error             // what the last WhenIShowTheGraph failed with, if it did
-	ran          bool              // whether any command has run
-	ownStores    bool              // whether the scenario's stores are its own, rather than the suite's
-	other        func()            // releases what another vamos holds of the build cache, if one does
-	apart        *testenv.Stores   // the stores of GivenOtherStoresHoldAResult, apart from the scenario's
-	apartBefore  cached            // what they held once it built there
-	alsoNamed    map[string]string // the images that GivenACachedLayerIsAlsoNamed named, by name
-	cachedBefore cached            // what its own stores held as the last command began, alone
-	cachedAfter  cached            // and as it ended
-	emulating    string            // the platform whose programs the scenario runs under emulation, if any
-	askedDuring  int64             // the requests that the scenario's registry served as the last command ran
-	jobsDuring   int64             // the jobs that the scenario's coordinator was given as the last command ran
-	toldDuring   []toldJob         // what those jobs told it, in order
-	servedDuring int64             // the requests that the scenario's coordinator was sent as the last command ran
-	first        v1.Image          // the first image that the scenario saved
-	saved        []v1.Image        // the images that the scenario saved, in order
-	entries      map[string]entry  // the image's files, once a step has read them
-	exported     string            // the folder that the last command exported to, if it exported
+	jobIDs       []string // the jobs the scenario's coordinator accepted, in order
+	// acceptedDuring are the jobs the scenario's coordinator accepted during the last command, in order.
+	acceptedDuring []string
+	trace          *trace            // the trace there, once a step has read it
+	graph          *graph.Graph      // the graph that WhenIShowTheGraph showed last
+	graphErr       error             // what the last WhenIShowTheGraph failed with, if it did
+	ran            bool              // whether any command has run
+	ownStores      bool              // whether the scenario's stores are its own, rather than the suite's
+	other          func()            // releases what another vamos holds of the build cache, if one does
+	apart          *testenv.Stores   // the stores of GivenOtherStoresHoldAResult, apart from the scenario's
+	apartBefore    cached            // what they held once it built there
+	alsoNamed      map[string]string // the images that GivenACachedLayerIsAlsoNamed named, by name
+	cachedBefore   cached            // what its own stores held as the last command began, alone
+	cachedAfter    cached            // and as it ended
+	emulating      string            // the platform whose programs the scenario runs under emulation, if any
+	askedDuring    int64             // the requests that the scenario's registry served as the last command ran
+	jobsDuring     int64             // the jobs that the scenario's coordinator was given as the last command ran
+	toldDuring     []toldJob         // what those jobs told it, in order
+	servedDuring   int64             // the requests that the scenario's coordinator was sent as the last command ran
+	first          v1.Image          // the first image that the scenario saved
+	saved          []v1.Image        // the images that the scenario saved, in order
+	entries        map[string]entry  // the image's files, once a step has read them
+	exported       string            // the folder that the last command exported to, if it exported
 }
 
 // newBuildingWorld starts a scenario that builds, which it skips where buildah can't, as GivenBuildahCanBuildHere.
@@ -317,6 +333,9 @@ func (w *world) execute(fsys afero.Fs, args []string) {
 			w.refusedMu.Unlock()
 		}()
 	}
+	w.jobsMu.Lock()
+	acceptedBefore := len(w.jobIDs)
+	w.jobsMu.Unlock()
 	start := time.Now()
 	w.err = cmd.ExecuteContext(ctx)
 	w.endedAt = time.Now()
@@ -325,6 +344,9 @@ func (w *world) execute(fsys afero.Fs, args []string) {
 		tty.close()
 	}
 	w.askedDuring, w.jobsDuring = w.asked.Load()-asked, w.jobs.Load()-jobs
+	w.jobsMu.Lock()
+	w.acceptedDuring = slices.Clone(w.jobIDs[acceptedBefore:])
+	w.jobsMu.Unlock()
 	w.servedDuring = w.served.Load() - served
 	w.toldDuring = w.toldJobs()[told:]
 	if w.ownStores {
@@ -341,7 +363,7 @@ func (w *world) execute(fsys afero.Fs, args []string) {
 // commandConfig returns the configuration of a command that the scenario runs in the project fsys, on its stores,
 // asking its fake registry about tags if a step started one.
 func (w *world) commandConfig(fsys afero.Fs) cli.Config {
-	cfg := cli.Config{Fs: fsys, Store: &w.stores.Options}
+	cfg := cli.Config{Fs: fsys, Store: &w.stores.Options, Getenv: w.telemetryGetenv}
 	if w.fakeRegistry != nil { // rather than a nil *fakeRegistry, which isn't a nil cli.Registry
 		cfg.Registry = w.fakeRegistry
 	}

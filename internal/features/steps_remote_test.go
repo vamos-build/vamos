@@ -374,14 +374,29 @@ func onTheCoordinator(url string) option {
 // worker, which builds in stores of its own, registers with it. It waits until the worker has registered.
 func (w *world) GivenACoordinatorWithAWorker(args ...string) {
 	w.t.Helper()
+	w.startCoordinatorWithWorkers(1, 2, args)
+}
+
+// GivenACoordinatorWithTwoWorkers starts a coordinator as GivenACoordinatorWithAWorker does, but with two workers of
+// one slot each, each reaching it through a line of its own, which WhenTheWorkerRunningAStepIsStopped cuts.
+func (w *world) GivenACoordinatorWithTwoWorkers(args ...string) {
+	w.t.Helper()
+	w.startCoordinatorWithWorkers(2, 1, args)
+}
+
+// startCoordinatorWithWorkers starts a coordinator, with args, and n workers of capacity slots, as
+// GivenACoordinatorWithAWorker says; with more than one, each through a workerLine.
+func (w *world) startCoordinatorWithWorkers(n, capacity int, args []string) {
+	w.t.Helper()
 	w.hasNoCoordinator()
 	workerStores := testenv.PrivateStores(w.t)
 	w.cgroupRoot = testenv.CgroupRoot(w.t) // before the servers' cleanup, so that it is removed once they have ended
 	ctx, cancel := context.WithCancel(context.Background())
-	var coordinator, registered *server
+	var coordinator *server
+	var registered []*server
 	w.t.Cleanup(func() { // registered first, so that it runs however the step ends
 		cancel()
-		for _, s := range []*server{registered, coordinator} {
+		for _, s := range append(registered, coordinator) {
 			if s != nil {
 				_ = s.wait(w.t, time.Minute) // how it ended is for a step to check, if a scenario asks
 			}
@@ -394,22 +409,41 @@ func (w *world) GivenACoordinatorWithAWorker(args ...string) {
 			return
 		}
 		var started []*server
-		for _, s := range []*server{coordinator, registered} {
+		for _, s := range append([]*server{coordinator}, registered...) {
 			if s != nil {
 				started = append(started, s)
 			}
 		}
 		w.t.Logf("%s", outputsOf(started))
 	})
-	coordinator = w.serve(ctx, &w.stores.Options, append([]string{"coordinator", "--listen", "127.0.0.1:0",
-		"--cache-dir", w.t.TempDir(), "--cache-repository", w.atRegistry("<registry>/vamos-cache"), "--lease",
+	w.coordinatorCache = w.t.TempDir()
+	coordinatorCtx, stop := context.WithCancel(ctx)
+	coordinator = w.serve(coordinatorCtx, &w.stores.Options, append([]string{"coordinator", "--listen", "127.0.0.1:0",
+		"--cache-dir", w.coordinatorCache, "--cache-repository", w.atRegistry("<registry>/vamos-cache"), "--lease",
 		workerLease.String()}, w.allAtPlaceholders(args)...)...)
+	w.stopCoordinator = func() error {
+		stop()
+		return coordinator.wait(w.t, time.Minute)
+	}
 	address := w.front(coordinator)
 	w.coordinatorStarted = time.Now() // no earlier than the coordinator's: it says where it listens once started
-	// The worker reaches the coordinator itself, so that what it sends isn't counted as a command's.
-	registered = w.serve(ctx, &workerStores.Options, "worker", "--coordinator", address, "--capacity", "2")
-	// As the worker says, rather than as the coordinator's platforms do, which --offer gives before any registers.
-	registered.waitFor(w.t, "worker: registered as ", coordinator)
+	for i := range n {
+		// A worker reaches the coordinator itself, so that what it sends isn't counted as a command's.
+		reaches := address
+		if n > 1 {
+			line := w.newWorkerLine(address)
+			w.workerLines = append(w.workerLines, line)
+			reaches = line.url
+		}
+		stores := workerStores
+		if i > 0 {
+			stores = testenv.PrivateStores(w.t)
+		}
+		worker := w.serve(ctx, &stores.Options, "worker", "--coordinator", reaches, "--capacity", fmt.Sprint(capacity))
+		registered = append(registered, worker)
+		// As the worker says, rather than as the coordinator's platforms do, which --offer gives before any registers.
+		worker.waitFor(w.t, "worker: registered as ", coordinator)
+	}
 }
 
 // workerLease is the lease of GivenACoordinatorWithAWorker's coordinator: short, so that it settles quickly.
@@ -1034,8 +1068,12 @@ func (w *world) serve(ctx context.Context, store *storage.StoreOptions, args ...
 		w.t.Fatal("serve runs a command that serves, but was given no command line")
 	}
 	s := &server{name: "vamos " + args[0], ended: make(chan struct{})}
+	getenv := w.telemetryGetenv
+	if args[0] == "worker" {
+		getenv = w.workerTelemetryGetenv
+	}
 	cmd := cli.NewRootCommand(cli.Config{Fs: afero.NewMemMapFs(), Store: store, // which reads no project
-		CgroupRoot: w.cgroupRoot})
+		CgroupRoot: w.cgroupRoot, Getenv: getenv})
 	cmd.SetOut(s)
 	cmd.SetErr(s)
 	cmd.SetArgs(args)

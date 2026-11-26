@@ -40,7 +40,8 @@ type journal struct {
 	dir  string
 	lock *os.File
 
-	io sync.Mutex // held across each write, and taken before mu
+	io     sync.Mutex // held across each write, and taken before mu
+	failed func()     // called for each write that fails, if not nil; under io
 
 	mu          sync.Mutex
 	records     map[api.JobID]*record
@@ -83,6 +84,20 @@ const maxRecordSize = 16 << 20
 
 // errCorruptRecord says that a job's record holds what isn't a record, as a write cut short would leave it.
 var errCorruptRecord = errors.New("the record is corrupt")
+
+// outerTrace returns where the record's request keeps the outer trace its job joins, its traceparent and tracestate,
+// or nils for a prune's, which joins none.
+func (r *record) outerTrace() (parent, state *string) {
+	switch {
+	case r.Build != nil:
+		return &r.Build.Parent, &r.Build.State
+	case r.Push != nil:
+		return &r.Push.Parent, &r.Push.State
+	case r.Publish != nil:
+		return &r.Publish.Parent, &r.Publish.State
+	}
+	return nil, nil
+}
 
 // openJournal opens the journal in dir, making it if need be, and returns the coordinator's instance, made when the
 // journal was, and the jobs' records, the tombstones oldest first. A record that is corrupt is reported to warn and
@@ -298,7 +313,7 @@ func (j *journal) remove(id api.JobID) error {
 	if !ok {
 		return nil
 	}
-	if err := j.removeFile(j.path(id)); err != nil {
+	if err := j.fail(j.removeFile(j.path(id))); err != nil {
 		return err
 	}
 	j.mu.Lock()
@@ -349,7 +364,7 @@ func (j *journal) trim() error {
 		}
 		id := j.tombstones[0]
 		j.mu.Unlock()
-		if err := j.removeFile(j.path(id)); err != nil {
+		if err := j.fail(j.removeFile(j.path(id))); err != nil {
 			return err
 		}
 		j.mu.Lock()
@@ -398,8 +413,31 @@ func (j *journal) path(id api.JobID) string {
 	return filepath.Join(j.dir, "jobs", string(id)+".json")
 }
 
+// countFailures has failed called for every write or removal of a record that fails.
+func (j *journal) countFailures(failed func()) {
+	if j == nil {
+		return
+	}
+	j.io.Lock()
+	defer j.io.Unlock()
+	j.failed = failed
+}
+
+// fail returns err, counting it if it isn't nil; j.io must be held.
+func (j *journal) fail(err error) error {
+	if err != nil && j.failed != nil {
+		j.failed()
+	}
+	return err
+}
+
 // store writes r at its path, refusing a record larger than one can be read back; j.io must be held.
 func (j *journal) store(r *record) error {
+	return j.fail(j.storeRecord(r))
+}
+
+// storeRecord is store's, uncounted.
+func (j *journal) storeRecord(r *record) error {
 	data, err := json.Marshal(r)
 	if err != nil {
 		return err

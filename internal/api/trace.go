@@ -32,6 +32,10 @@ type JobTrace struct {
 	Entries []TraceEntry   `json:"entries"`
 	// Dropped counts the entries left out, from the end, since even they alone passed the cap.
 	Dropped int `json:"dropped,omitempty"`
+	// Exported is how the job's trace was exported over OpenTelemetry, if it was: its trace's ID, its span's and
+	// whether it was sampled; the zero value, as a manifest stored before vamos exported, or by an executor that
+	// exports nothing, has.
+	Exported tracing.Exported `json:"exported,omitzero"`
 }
 
 // TraceEntry says what became of one node of a job, and where the trace of the work that served it is.
@@ -69,10 +73,21 @@ type CommandJob struct {
 	Manifest *cache.Blob `json:"manifest,omitempty"`
 }
 
-// Encode returns the manifest encoded within tracing.MaxTraceSize, as a JobTrace of the current version.
+// Encode returns the manifest encoded within tracing.MaxTraceSize, as a JobTrace of the current version,
+// as Trimmed makes it.
+func (t JobTrace) Encode(lost tracing.Lost) ([]byte, error) {
+	trimmed, err := t.Trimmed(lost)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(trimmed)
+}
+
+// Trimmed returns the manifest as Encode encodes it, of the current version and within tracing.MaxTraceSize,
+// so that what is stored and what else is made of the same spans, such as what is exported, hold the same ones.
 // Its entries come first: if even they pass the cap, the last are dropped and counted in Dropped;
 // its spans, with what lost says the recorder refused, are then trimmed by tracing.Trim to fit beside them.
-func (t JobTrace) Encode(lost tracing.Lost) ([]byte, error) {
+func (t JobTrace) Trimmed(lost tracing.Lost) (JobTrace, error) {
 	t.Header = tracing.Header{Version: tracing.Version, Kind: KindJob}
 	spans := t.Spans
 	t.Spans = []tracing.Span{}
@@ -81,7 +96,7 @@ func (t JobTrace) Encode(lost tracing.Lost) ([]byte, error) {
 	}
 	empty, err := json.Marshal(t)
 	if err != nil {
-		return nil, err
+		return JobTrace{}, err
 	}
 	if len(empty) > tracing.MaxTraceSize {
 		// Drop the last entries, by their sizes, each with its comma, until the rest fit; Dropped's digits are allowed
@@ -95,7 +110,7 @@ func (t JobTrace) Encode(lost tracing.Lost) ([]byte, error) {
 			size -= len(data) + len(",")
 			if size <= tracing.MaxTraceSize {
 				if empty, err = json.Marshal(t); err != nil {
-					return nil, err
+					return JobTrace{}, err
 				}
 				size = len(empty)
 			}
@@ -104,7 +119,7 @@ func (t JobTrace) Encode(lost tracing.Lost) ([]byte, error) {
 	if t.Spans = tracing.Trim(spans, lost, tracing.MaxTraceSize-len(empty)+len("[]")); t.Spans == nil {
 		t.Spans = []tracing.Span{}
 	}
-	return json.Marshal(t)
+	return t, nil
 }
 
 // BlobPutter is what a trace document is stored in: a content store, or a part of one.
@@ -112,9 +127,9 @@ type BlobPutter interface {
 	PutBytes(ctx context.Context, data []byte) (cache.Blob, error)
 }
 
-// Save stores the manifest, encoded by Encode, in store, and returns its blob.
-func (t JobTrace) Save(ctx context.Context, store BlobPutter, lost tracing.Lost) (cache.Blob, error) {
-	data, err := t.Encode(lost)
+// Put stores the manifest as it is, which Trimmed made, trimming nothing more, in store, and returns its blob.
+func (t JobTrace) Put(ctx context.Context, store BlobPutter) (cache.Blob, error) {
+	data, err := json.Marshal(t)
 	if err != nil {
 		return cache.Blob{}, fmt.Errorf("encoding the job's trace: %w", err)
 	}

@@ -19,6 +19,7 @@ import (
 	"github.com/vamos-build/vamos/internal/graph"
 	"github.com/vamos-build/vamos/internal/remote"
 	"github.com/vamos-build/vamos/internal/sched"
+	"github.com/vamos-build/vamos/internal/tracing"
 
 	"github.com/containerd/platforms"
 	"github.com/opencontainers/go-digest"
@@ -403,9 +404,11 @@ func TestBuildsAcrossWorkers(t *testing.T) {
 }
 
 // TestRetriesLostWorker checks that an attempt whose worker stops heartbeating is lost once its lease expires and
-// tried again on another worker, that the build succeeds, and that the lost worker's late report is discarded.
+// tried again on another worker, as its stored tries and the counters say, that the build succeeds, and that the lost
+// worker's late report is discarded.
 func TestRetriesLostWorker(t *testing.T) {
-	f := newFixture(t, Config{Retries: 1})
+	cfg, reader := metered(t, Config{Retries: 1})
+	f := newFixture(t, cfg)
 	release := make(chan struct{})
 	dead := newWorker(t, f, amd64, 1, fakeRun(f, func(a *remote.Assignment, killed func() bool) error {
 		<-release // the attempt hangs until the test releases it, long after its lease
@@ -431,6 +434,9 @@ func TestRetriesLostWorker(t *testing.T) {
 	if outcome.Failure != nil {
 		t.Fatalf("outcome = %+v, want success after the retry", outcome.Failure)
 	}
+	checkTries(t, f, outcome, []string{"lost", "succeeded"})
+	checkMeasured(t, reader, 1, "vamos.leases.expired")
+	checkMeasured(t, reader, 1, "vamos.attempts.retries")
 	close(release)
 	waitFor(t, func() bool {
 		dead.mu.Lock()
@@ -775,7 +781,7 @@ func TestKilledAttemptSettles(t *testing.T) {
 			at := &attempt{id: "a", worker: w, lease: now.Add(p.cfg.Lease), done: make(chan struct{})}
 			p.attempts[at.id] = at
 			lease := at.lease
-			p.withdraw(at)
+			p.withdraw(at, killWithdrawn)
 			now = now.Add(p.cfg.Lease / 2)
 			if answer, err := p.Heartbeat(t.Context(), at.id, remote.Heartbeat{}); err != nil || !answer.Kill {
 				t.Fatalf("the heartbeat of a withdrawn attempt = %+v, %v; want it told to kill", answer, err)
@@ -1405,5 +1411,45 @@ func TestPruneHistories(t *testing.T) {
 				t.Errorf("the %s history kept = %v; want %v", name, h != nil, kept)
 			}
 		}
+	}
+}
+
+// checkTries checks that some attempt of the job that outcome ends stored tries that ended as want says, in order,
+// each after a wait for a worker, and that every other attempt stored one try, which succeeded.
+func checkTries(t *testing.T, f *fixture, outcome api.Outcome, want []string) {
+	t.Helper()
+	manifest := readManifest(t, f, outcome)
+	found := false
+	for _, e := range manifest.Entries {
+		if e.Trace == nil {
+			continue
+		}
+		var tries []string
+		waits := 0
+		for _, s := range readAttempt(t, f, manifest, e.Node).Spans {
+			switch s.Args[tracing.Role] {
+			case tracing.RoleWait:
+				waits++
+			case tracing.RoleTry:
+				tries = append(tries, fmt.Sprint(s.Args["try"], " ", s.Args["outcome"]))
+				if s.Args["platform"] == "" || s.Args["kind"] == "" {
+					t.Errorf("node %d's try %v names no platform or kind", e.Node, s.Args)
+				}
+			}
+		}
+		var numbered []string
+		for i, o := range want {
+			numbered = append(numbered, fmt.Sprint(i+1, " ", o))
+		}
+		switch {
+		case slices.Equal(tries, numbered) && waits == len(want):
+			found = true
+		case !slices.Equal(tries, []string{"1 succeeded"}) || waits != 1:
+			t.Errorf("node %d's attempt stored the tries %q after %d waits; want %q, or one that succeeded",
+				e.Node, tries, waits, numbered)
+		}
+	}
+	if !found {
+		t.Errorf("no attempt stored the tries %q", want)
 	}
 }

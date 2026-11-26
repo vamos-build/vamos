@@ -17,11 +17,13 @@ import (
 	"github.com/vamos-build/vamos/internal/graph"
 	"github.com/vamos-build/vamos/internal/remote"
 	"github.com/vamos-build/vamos/internal/sched"
+	"github.com/vamos-build/vamos/internal/telemetry"
 	"github.com/vamos-build/vamos/internal/tracing"
 
 	"github.com/containerd/platforms"
 	"github.com/opencontainers/go-digest"
 	imgspecv1 "github.com/opencontainers/image-spec/specs-go/v1"
+	"go.opentelemetry.io/otel/metric"
 )
 
 // Config says how a coordinator runs.
@@ -70,6 +72,11 @@ type Config struct {
 	State string
 	// Warn is told what goes wrong without failing a job, such as a job's record that can't be written; nil drops it.
 	Warn func(error)
+	// Telemetry, if set, returns the telemetry that exports the jobs' traces and the coordinator's metrics, given the
+	// coordinator's instance, which New reads from State before it resumes any job, and which every exported ID
+	// derives from; nil, or a nil result, exports nothing.
+	// What it makes is its caller's to shut down, whether or not New then succeeds, once the coordinator is closed.
+	Telemetry func(instance string) (*telemetry.Telemetry, error)
 }
 
 // NoRetries is the Config.Retries that tries no work again when its worker is lost.
@@ -123,10 +130,17 @@ type Coordinator struct {
 	jobs     *sched.Jobs
 	pool     *pool
 	sharing  *sched.Sharing
-	checker  *checker
-	stop     context.CancelFunc
-	started  time.Time // when this instance started, since a prune is refused for a lease after it
-	journal  *journal  // the jobs on disk; nil without Config.State
+	bridge   *telemetry.Bridge // exports the jobs' traces; nil for none
+	metrics  *Metrics
+	// cancels are those of the jobs running, with each one's kind, which Close calls itself before it closes the
+	// pool; nil once it has.
+	cancelsMu sync.Mutex
+	cancels   map[*context.CancelFunc]string
+	closed    bool // Close has cancelled the jobs: one that starts now is cancelled at once
+	checker   *checker
+	stop      context.CancelFunc
+	started   time.Time // when this instance started, since a prune is refused for a lease after it
+	journal   *journal  // the jobs on disk; nil without Config.State
 }
 
 var (
@@ -174,13 +188,41 @@ func New(content cache.ContentStore, records cache.RecordStore, cfg Config) (*Co
 	c.pool = newPool(cfg, c.instance, func() (uint64, error) {
 		return c.generation(context.Background())
 	})
-	c.sharing = sched.NewSharing(c.pool, content, records)
+	var sharing []sched.SharingOption
+	var meter metric.Meter
+	if cfg.Telemetry != nil {
+		tel, err := cfg.Telemetry(c.instance)
+		if err != nil {
+			c.journal.close() // so that the state's lock is free for a coordinator started again
+			return nil, err
+		}
+		if tel != nil && tel.Bridge != nil { // as an interface, a nil *Bridge isn't nil
+			c.bridge = tel.Bridge
+			sharing = append(sharing, sched.WithSpanSink(tel.Bridge))
+		}
+		// A meter that exports nothing is left out, so that the stores aren't counted for nothing.
+		if tel.ExportsMetrics() {
+			meter = tel.Meter.Meter(meterName)
+		}
+	}
+	metrics, err := newMetrics(meter)
+	if err == nil {
+		err = metrics.register(c)
+	}
+	if err != nil {
+		c.journal.close()
+		return nil, err
+	}
+	c.metrics, c.pool.metrics = metrics, metrics
+	c.journal.countFailures(func() { metrics.count(metrics.journalFailures) })
+	c.sharing = sched.NewSharing(c.pool, content, records, sharing...)
 	c.checker = &checker{content: content, images: cfg.Images}
 	ctx, cancel := context.WithCancel(context.Background())
 	c.stop = cancel
 	c.started = time.Now()
 	if err := c.recover(kept); err != nil {
 		c.Close()
+		c.metrics.unregister()
 		return nil, fmt.Errorf("resuming the jobs recorded in %s: %w", cfg.State, err)
 	}
 	// The jobs' sweep runs apart from the leases', since its evictions write records, so that no write delays the
@@ -270,11 +312,22 @@ func (c *Coordinator) resume(r *record) error {
 	if native == nil {
 		native = c.configuredNames()
 	}
-	if err := c.journal.update(r.ID, func(r *record) { r.Restarts, r.Native = restarts, native }); err != nil {
+	// A record journaled by an older coordinator, which didn't check its outer trace, has it checked and repaired
+	// with the restarts, so that what it can't take is reported once, as the build resumes, rather than at each; one
+	// that doesn't export traces repairs it without a word, as it ignores the outer trace anyway. A journal that
+	// records nothing more, once closed, keeps the record as it was, which the next restart reports again.
+	build := *r.Build // a copy, as the journal's index shares r.Build until the repair is recorded
+	var problem error
+	build.Parent, build.State, problem = c.outerTrace(build.Parent, build.State)
+	if err := c.journal.update(r.ID, func(r *record) {
+		r.Restarts, r.Native = restarts, native
+		r.Build = &build
+	}); err != nil {
 		reserved.Cancel()
 		return fmt.Errorf("recording that it resumed: %w", err)
 	}
-	_, err = reserved.Start(c.build(*r.Build, native))
+	c.reportOuterTrace(r.ID, problem) // once the repair is recorded, whether or not the build then starts
+	_, err = reserved.Start(c.build(&build, native, restarts))
 	return err
 }
 
@@ -317,6 +370,8 @@ func (c *Coordinator) RetainEvents(n int) {
 // so that the next run resumes it rather than finding it ended by the shutdown.
 func (c *Coordinator) Close() error {
 	c.journal.close()
+	c.pool.closing() // so that the jobs the shutdown cancels aren't counted as withdrawn by their clients
+	c.cancelJobs()
 	c.stop()
 	c.pool.close()
 	c.jobs.Stop()
@@ -425,26 +480,37 @@ func (c *Coordinator) Submit(ctx context.Context, req api.Request) (api.JobID, e
 	}
 	g := req.Graph
 	if g.Version != graph.Version {
+		c.metrics.refuse(refusedVersion)
 		return "", fmt.Errorf("graph version %d isn't supported; this coordinator runs version %d", g.Version,
 			graph.Version)
 	}
 	if !c.offered(g.Platform) {
+		c.metrics.refuse(refusedPlatform)
 		return "", fmt.Errorf("the graph was configured for an executor on %s, which this coordinator doesn't offer; "+
 			"it offers %v", platforms.Format(platforms.Normalize(g.Platform)), c.platformNames())
 	}
 	native := c.platformNames()
-	return c.begin(ctx, record{Build: g, Native: native}, sched.Spec{Build: true}, c.build(*g, native))
+	return c.begin(ctx, record{Build: g, Native: native}, sched.Spec{Build: true}, c.build(g, native, 0))
 }
 
 // build returns the work of a build of g, whose actions run natively on the platforms native names, as they were
 // offered when it was submitted and as its record has them, and on those offered later, as offer says.
-func (c *Coordinator) build(g api.GraphRequest, native []string) func(ctx context.Context,
+// It reads request as it starts, as begin leaves it, its outer trace checked; run is which run of the build it is, 0
+// for its first, and its restarts for a resumption.
+func (c *Coordinator) build(request *api.GraphRequest, native []string, run int64) func(ctx context.Context,
 	ev sched.Events) api.Outcome {
 	return func(ctx context.Context, ev sched.Events) api.Outcome {
-		return c.traced(ctx, func(ctx context.Context) api.Outcome {
+		g := *request
+		return c.traced(ctx, telemetry.JobInfo{Kind: "build", Workspace: g.Workspace, Parent: g.Parent,
+			State: g.State, Run: run}, func(ctx context.Context) api.Outcome {
 			// The generation is checked once the build is open, since no prune starts then: checked before, a prune
 			// could run between the check and the build's start.
 			if err := c.checkGeneration(ctx, g.Generation); err != nil {
+				// Counted as refused only on the build's first run, not a resumption of one accepted before, and
+				// not as a failure to read the generation.
+				if errors.Is(err, errPruned) && run == 0 {
+					c.metrics.refuse(refusedGeneration)
+				}
 				return sched.Failed(err)
 			}
 			results, err := c.run(ctx, g, native, ev)
@@ -456,12 +522,92 @@ func (c *Coordinator) build(g api.GraphRequest, native []string) func(ctx contex
 	}
 }
 
+// outerTrace returns parent and state, a request's traceparent and tracestate, as a job joins them, and the problem,
+// if one isn't a W3C traceparent or tracestate, which it drops, naming it with as much of its value as identifies it.
+func (c *Coordinator) outerTrace(parent, state string) (string, string, error) {
+	p, s, err := telemetry.OuterTrace(parent, state)
+	if err == nil {
+		return p, s, nil
+	}
+	kind, value := "traceparent", parent
+	if errors.Is(err, telemetry.ErrNotTracestate) {
+		kind, value = "tracestate", state
+	}
+	return p, s, fmt.Errorf("its %s %s is %w, and is ignored", kind, telemetry.ShowTraceValue(value), err)
+}
+
+// reportOuterTrace reports problem, of the outer trace of the job id, to Warn, if the coordinator exports traces:
+// one that doesn't, or exports metrics alone, ignores the outer trace anyway.
+func (c *Coordinator) reportOuterTrace(id api.JobID, problem error) {
+	if problem != nil && c.bridge.Exports() {
+		c.cfg.Warn(fmt.Errorf("the job %s: %w", id, problem))
+	}
+}
+
+// cancelOnClose registers cancel, a job's, for Close to call before it closes the pool, or calls it now if Close has,
+// and returns what unregisters it.
+func (c *Coordinator) cancelOnClose(cancel *context.CancelFunc, kind string) func() {
+	c.cancelsMu.Lock()
+	defer c.cancelsMu.Unlock()
+	if c.closed {
+		(*cancel)()
+		return func() {}
+	}
+	if c.cancels == nil {
+		c.cancels = map[*context.CancelFunc]string{}
+	}
+	c.cancels[cancel] = kind
+	return func() {
+		c.cancelsMu.Lock()
+		defer c.cancelsMu.Unlock()
+		delete(c.cancels, cancel)
+	}
+}
+
+// openJobs returns how many jobs run, by kind.
+func (c *Coordinator) openJobs() map[string]int {
+	c.cancelsMu.Lock()
+	defer c.cancelsMu.Unlock()
+	open := map[string]int{}
+	for _, kind := range c.cancels {
+		open[kind]++
+	}
+	return open
+}
+
+// cancelJobs cancels every job running, synchronously, so that each sees its context end before the pool closes; a
+// prune, which exports no trace, isn't one of them, and is cancelled by the jobs' own stop, after the pool closes.
+func (c *Coordinator) cancelJobs() {
+	c.cancelsMu.Lock()
+	defer c.cancelsMu.Unlock()
+	c.closed = true
+	for cancel := range c.cancels {
+		(*cancel)()
+	}
+	c.cancels = nil
+}
+
 // traced runs work, a job's, as sched.RunJob does, storing its manifest in the coordinator's content store, and
-// reporting a manifest that can't be stored to Warn.
-func (c *Coordinator) traced(ctx context.Context, work func(context.Context) api.Outcome) api.Outcome {
+// reporting a manifest that can't be stored to Warn; and exports its trace, as info describes the job, with the
+// coordinator's bridge, if it has one, so that a job resumed after a restart joins the outer trace it was submitted
+// with, which info names, as its request does, checked as begin journaled it, or as resume resumed it.
+func (c *Coordinator) traced(ctx context.Context, info telemetry.JobInfo,
+	work func(context.Context) api.Outcome) api.Outcome {
 	id := jobOf(ctx)
+	info.ID = string(id)
+	ctx = c.bridge.StartJob(ctx, info)
+	var sink sched.SpanSink
+	if c.bridge != nil {
+		sink = c.bridge
+	}
+	// A job's context ends as Close begins, before the pool does, so that a job cut short by the coordinator's
+	// shutdown is cancelled, as its spans and its outcome then say, rather than failed on the pool's shutdown; one
+	// whose work returned failed before Close began is failed still, as RunJob decides as the work returns.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	defer c.cancelOnClose(&cancel, info.Kind)()
 	return sched.RunJob(ctx, func() (cache.ContentStore, error) { return c.content, nil },
-		func(err error) { c.cfg.Warn(fmt.Errorf("the job %s: %w", id, err)) }, work)
+		func(err error) { c.cfg.Warn(fmt.Errorf("the job %s: %w", id, err)) }, sink, work)
 }
 
 // begin starts a job as spec says, which runs work, with r its record, which the journal writes once the job is
@@ -472,10 +618,20 @@ func (c *Coordinator) begin(ctx context.Context, r record, spec sched.Spec,
 	spec.ID = sched.NewJobID()
 	spec.Ending = c.ending(spec.ID)
 	reserved, err := c.jobs.Reserve(spec)
+	if errors.Is(err, sched.ErrBusy) {
+		c.metrics.refuse(refusedBusy)
+	}
 	if err != nil {
 		return "", err
 	}
 	r.ID, r.Submission = spec.ID, remote.Submission(ctx)
+	// The outer trace is checked once the request is, before it is journaled and its work reads it, so that both hold
+	// only what a job joins, at most a traceparent's length and a tracestate's 32 members; a problem is reported once
+	// the job has started.
+	var problem error
+	if parent, state := r.outerTrace(); parent != nil {
+		*parent, *state, problem = c.outerTrace(*parent, *state)
+	}
 	if err := c.journal.put(&r); err != nil {
 		reserved.Cancel()
 		return "", fmt.Errorf("recording the job: %w", err)
@@ -488,6 +644,7 @@ func (c *Coordinator) begin(ctx context.Context, r record, spec sched.Spec,
 		}
 		return "", err
 	}
+	c.reportOuterTrace(id, problem)
 	return id, nil
 }
 
@@ -526,11 +683,14 @@ func (c *Coordinator) checkGeneration(ctx context.Context, captured uint64) erro
 		return err
 	}
 	if captured != current {
-		return errors.New("the build cache was pruned while the build's sources were being captured, so what " +
-			"was captured may be gone; run the command again")
+		return errPruned
 	}
 	return nil
 }
+
+// errPruned refuses a graph captured against a generation other than the current one.
+var errPruned = errors.New("the build cache was pruned while the build's sources were being captured, so what " +
+	"was captured may be gone; run the command again")
 
 // platforms returns the platforms the deployment offers: by configuration, and those of the workers registered now.
 func (c *Coordinator) platforms() []imgspecv1.Platform {
@@ -630,7 +790,12 @@ func (c *Coordinator) Watch(ctx context.Context, id api.JobID, from int64, fn fu
 	if err != nil {
 		return err
 	}
-	return j.Watch(ctx, from, fn)
+	return j.Watch(ctx, from, func(e api.Event) error {
+		if e.Kind == api.EventGap {
+			c.metrics.count(c.metrics.gaps)
+		}
+		return fn(e)
+	})
 }
 
 // Cancel asks the job id to stop: its demand is withdrawn, and attempts no build needs are killed.
@@ -732,7 +897,8 @@ func (c *Coordinator) submitPush(ctx context.Context, req api.PushRequest) (api.
 		return "", err
 	}
 	return c.begin(ctx, record{Push: &req}, sched.Spec{}, func(ctx context.Context, ev sched.Events) api.Outcome {
-		return c.traced(ctx, func(ctx context.Context) api.Outcome {
+		return c.traced(ctx, telemetry.JobInfo{Kind: "push", Workspace: req.Workspace, Parent: req.Parent,
+			State: req.State}, func(ctx context.Context) api.Outcome {
 			ctx, span := tracing.StartTrack(ctx, "push", "push to "+req.Destination)
 			ctx = withBuild(ctx, buildInfo{job: jobOf(ctx)})
 			rep, err := c.pool.attempt(ctx, nil, &remote.PushWork{Mode: remote.ModePush, Result: req.Result,
@@ -774,7 +940,8 @@ func (c *Coordinator) submitPublish(ctx context.Context, req api.PublishRequest)
 		}
 	}
 	return c.begin(ctx, record{Publish: &req}, sched.Spec{}, func(ctx context.Context, ev sched.Events) api.Outcome {
-		return c.traced(ctx, func(ctx context.Context) api.Outcome {
+		return c.traced(ctx, telemetry.JobInfo{Kind: "publish", Workspace: req.Workspace, Parent: req.Parent,
+			State: req.State}, func(ctx context.Context) api.Outcome {
 			ctx, span := tracing.StartTrack(ctx, "publish", "publish")
 			ctx = withBuild(ctx, buildInfo{job: jobOf(ctx)})
 			uploads, i, err := c.uploadAll(ctx, req, ev)

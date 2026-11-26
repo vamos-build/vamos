@@ -146,6 +146,17 @@ completed targets are restored from the cache, while in-progress targets restart
 Running coordinators acquire an exclusive lock on `--cache-dir`;
 two coordinators cannot share the same state directory.
 
+### Joining a CI trace
+
+A coordinator that exports traces over OpenTelemetry exports each job as a trace of its own.
+A client building on it with `TRACEPARENT` set, as CI tools that trace their pipelines set it, sends that W3C
+`traceparent`, with `TRACESTATE` if set, on each job of the command, so that each job's span is a child of the
+pipeline's span, in its trace, and is kept or dropped as its flags say under the default parent-based sampler.
+A malformed `TRACEPARENT`, or a `TRACESTATE` that isn't a W3C tracestate, is warned about once and ignored,
+and an empty one is taken as unset.
+Without a coordinator, vamos ignores both.
+The coordinator keeps them with the job, so that a job resumed after a restart stays in the pipeline's trace.
+
 ### Remote cache pruning
 
 Run `vamos prune --coordinator <URL>` to prune the remote cache:

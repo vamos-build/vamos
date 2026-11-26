@@ -239,6 +239,9 @@ reads it;
 [steps_interrupt_test.go](../../internal/features/steps_interrupt_test.go) interrupting a command, as Ctrl-C does;
 [steps_terminal_test.go](../../internal/features/steps_terminal_test.go) a terminal as a command's standard output;
 [steps_remote_test.go](../../internal/features/steps_remote_test.go) coordinators that a command builds on;
+[steps_telemetry_test.go](../../internal/features/steps_telemetry_test.go) the traces a coordinator exports, to an
+OTLP collector of the scenario's own that `GivenAnOTLPCollector` starts, configured through the coordinator's own
+environment, `GivenTheCoordinatorEnvironmentSets`, rather than the process's, so that its rules run in parallel;
 and [steps_cache_test.go](../../internal/features/steps_cache_test.go) the build cache and the container store as
 other programs see them: steps that damage or hold them, as something outside vamos might, and see what they hold,
 on stores of the scenario's own.

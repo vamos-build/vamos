@@ -3,6 +3,17 @@ The coordinator: one instance, which keeps its build cache and its jobs on a vol
 starts again, on this node or another.
 A StatefulSet, so that a replacement starts only once the old instance has stopped writing the cache and the jobs.
 */}}
+{{- $t := include "vamos.telemetryValues" . | fromYaml }}
+{{- $port := 0 }}
+{{- if $t.prometheus.enabled }}
+{{- $port = $t.prometheus.port | toString | atoi }}
+{{- if or (lt $port 1) (gt $port 65535) (ne ($port | toString) ($t.prometheus.port | toString)) }}
+{{- fail (printf "telemetry.prometheus.port %v isn't a port, a whole number from 1 to 65535" $t.prometheus.port) }}
+{{- end }}
+{{- if has $port (list (.Values.coordinator.service.port | toString | atoi) 8080) }}
+{{- fail (printf "telemetry.prometheus.port %v is the coordinator's API's port, its Service's or its own, 8080" $port) }}
+{{- end }}
+{{- end }}
 apiVersion: v1
 kind: Service
 metadata:
@@ -16,7 +27,9 @@ metadata:
   {{- end }}
 spec:
   {{- $service := .Values.coordinator.service }}
-  {{- include "vamos.serviceSpec" (dict "root" . "component" "coordinator" "service" $service) | nindent 2 }}
+  {{- $metrics := ternary $port nil $t.prometheus.enabled }}
+  {{- include "vamos.serviceSpec" (dict "root" . "component" "coordinator" "service" $service
+        "metricsPort" $metrics) | nindent 2 }}
 ---
 apiVersion: apps/v1
 kind: StatefulSet
@@ -40,11 +53,17 @@ spec:
         {{- toYaml . | nindent 8 }}
         {{- end }}
       annotations:
-        # A change of registry settings restarts the coordinator, which reads them once.
-        checksum/registries: {{ include (print $.Template.BasePath "/registries-configmap.yaml") . | sha256sum }}
-        {{- with .Values.coordinator.podAnnotations }}
-        {{- toYaml . | nindent 8 }}
+        {{- /* A change of registry settings restarts the coordinator, which reads them once. Scrape annotations, if
+               asked for, come before the pod's own, which override them, all rendered once. */}}
+        {{- $annotations := dict }}
+        {{- if and $t.prometheus.enabled $t.prometheus.podAnnotations }}
+        {{- $annotations = dict "prometheus.io/scrape" "true" "prometheus.io/port" ($port | toString)
+              "prometheus.io/path" "/metrics" }}
         {{- end }}
+        {{- $annotations = mergeOverwrite $annotations (deepCopy (.Values.coordinator.podAnnotations | default dict)) }}
+        {{- $_ := set $annotations "checksum/registries"
+              (include (print $.Template.BasePath "/registries-configmap.yaml") . | sha256sum) }}
+        {{- toYaml $annotations | nindent 8 }}
     spec:
       automountServiceAccountToken: false
       {{- with .Values.imagePullSecrets }}
@@ -107,6 +126,10 @@ spec:
             {{- if .Values.coordinator.authSecret }}
             {{- include "vamos.authEnv" (dict "secret" .Values.coordinator.authSecret) | nindent 12 }}
             {{- end }}
+            {{- with include "vamos.telemetryEnv" (dict "root" . "role" "coordinator"
+                  "extraEnv" .Values.coordinator.extraEnv) | trim }}
+            {{- . | nindent 12 }}
+            {{- end }}
             {{- with .Values.coordinator.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -114,6 +137,11 @@ spec:
             - name: http
               containerPort: 8080
               protocol: TCP
+            {{- if $t.prometheus.enabled }}
+            - name: metrics
+              containerPort: {{ $port }}
+              protocol: TCP
+            {{- end }}
           # The capabilities answer once the coordinator serves; until then clients get nothing from it anyway.
           readinessProbe:
             httpGet:
@@ -141,9 +169,21 @@ spec:
             {{- if .Values.coordinator.authSecret }}
             {{- include "vamos.authMount" (dict "secret" .Values.coordinator.authSecret) | nindent 12 }}
             {{- end }}
-      # The coordinator cuts its connections and closes its cache within ten seconds of being told to stop; its jobs
-      # are on the volume as they were, for the next instance to resume.
-      terminationGracePeriodSeconds: 30
+      # The coordinator cuts its connections within ten seconds of being told to stop, then sends what its telemetry
+      # holds within ten more; its jobs are on the volume as they were, for the next instance to resume.
+      {{- $grace := "" }}
+      {{- $raw := .Values.coordinator.terminationGracePeriodSeconds }}
+      {{- if and (kindIs "float64" $raw) (eq (floor $raw) $raw) (lt $raw 9e15) }}
+      {{- /* A YAML number, which Helm reads as a float, such as 1e+06, while it is exact; a larger one is refused. */}}
+      {{- $grace = $raw | int64 | toString }}
+      {{- else if not (kindIs "invalid" $raw) }}
+      {{- $grace = $raw | toString | trim }}
+      {{- end }}
+      {{- if and (ne $grace "") (or (lt ($grace | atoi) 0) (ne ($grace | atoi | toString) $grace)) }}
+      {{- fail (printf "coordinator.terminationGracePeriodSeconds %q isn't a whole number of seconds, 0 or more, written as an integer"
+            $grace) }}
+      {{- end }}
+      terminationGracePeriodSeconds: {{ ternary 45 ($grace | atoi) (eq $grace "") }}
       volumes:
         {{- include "vamos.registriesVolume" . | nindent 8 }}
         {{- if .Values.coordinator.authSecret }}

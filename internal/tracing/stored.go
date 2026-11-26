@@ -78,17 +78,32 @@ func EncodeAttempt(id string, spans []Span, lost Lost) ([]byte, error) {
 // MaxTraceSize, so that a test can see a trace cut short without recording megabytes of spans.
 // A limit too small for the document with none of its spans gives it none, and the instant that says so if it fits.
 func EncodeAttemptWithin(id string, spans []Span, lost Lost, limit int) ([]byte, error) {
+	a, err := NewAttempt(id, spans, lost, limit)
+	if err != nil {
+		return nil, err
+	}
+	return a.Encode()
+}
+
+// NewAttempt returns the stored trace of the attempt id as EncodeAttemptWithin encodes it, its spans trimmed already,
+// so that what is stored and what else is made of the same spans, such as what is exported, hold the same ones.
+func NewAttempt(id string, spans []Span, lost Lost, limit int) (Attempt, error) {
 	if len(id) > maxAttemptID {
-		return nil, fmt.Errorf("an attempt's ID of %d bytes is longer than %d", len(id), maxAttemptID)
+		return Attempt{}, fmt.Errorf("an attempt's ID of %d bytes is longer than %d", len(id), maxAttemptID)
 	}
 	a := Attempt{Version: Version, Kind: KindAttempt, ID: id, Spans: []Span{}}
 	empty, err := json.Marshal(a)
 	if err != nil {
-		return nil, err
+		return Attempt{}, err
 	}
 	if a.Spans = Trim(spans, lost, min(limit, MaxTraceSize)-len(empty)+len("[]")); a.Spans == nil {
 		a.Spans = []Span{}
 	}
+	return a, nil
+}
+
+// Encode returns a, which NewAttempt made, as it is stored, trimming nothing more.
+func (a Attempt) Encode() ([]byte, error) {
 	return json.Marshal(a)
 }
 
