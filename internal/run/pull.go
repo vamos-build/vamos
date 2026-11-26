@@ -28,7 +28,7 @@ import (
 	"go.podman.io/storage"
 )
 
-// tagRecord is what a pull()'s tag named when vamos last resolved it, kept in the record store
+// tagRecord is what a pull()'s tag named when Vamos last resolved it, kept in the record store
 // so that later builds pull the same images, without reaching the registry; a pinned pull keeps a record of its pin
 // instead, under its digest, and never reads or writes its tag's.
 type tagRecord = cache.TagRecord
@@ -462,7 +462,7 @@ func forPlatform(sys *types.SystemContext, platform imgspecv1.Platform) *types.S
 	return &c
 }
 
-// HostPlatform is the platform of the machine vamos runs on, whose programs need no emulator.
+// HostPlatform is the platform of the machine Vamos runs on, whose programs need no emulator.
 var HostPlatform = platforms.Normalize(platforms.DefaultSpec())
 
 // imageIdentity returns the image ID of the image that storeID names in store, the digest of its config,

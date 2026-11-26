@@ -258,9 +258,9 @@ func TestDefaultStoreHelper(t *testing.T) {
 	must(t, cmd.Execute())
 }
 
-// TestDefaultStore checks that vamos, given no store, works on the one that containers/storage finds,
+// TestDefaultStore checks that Vamos, given no store, works on the one that containers/storage finds,
 // with the build cache beside it, against a default store of its own.
-// containers/storage reads its defaults once per process, so vamos runs in a new one.
+// containers/storage reads its defaults once per process, so Vamos runs in a new one.
 func TestDefaultStore(t *testing.T) {
 	if os.Geteuid() != 0 {
 		t.Skip("configures the default container store, which needs root")

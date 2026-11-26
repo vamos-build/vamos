@@ -6,7 +6,7 @@ import (
 )
 
 // newInterruptWorld starts a scenario of the interrupt feature, from its background: a project that pulls busybox,
-// which builds. Interrupting vamos, as Ctrl-C does, stops what it is doing promptly, and it reports the interruption.
+// which builds. Interrupting Vamos, as Ctrl-C does, stops what it is doing promptly, and it reports the interruption.
 func newInterruptWorld(t *testing.T) *world {
 	t.Helper()
 	w := newBuildingWorld(t)

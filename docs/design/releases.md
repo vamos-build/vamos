@@ -1,6 +1,6 @@
 # Releases
 
-This document describes how vamos is built, tested, packaged, and distributed: the multi-architecture release pipeline,
+This document describes how Vamos is built, tested, packaged, and distributed: the multi-architecture release pipeline,
 binary portability and glibc requirements, packaging decisions, and the installation script design.
 Operational instructions for triggering a release are in the
 [contributor guide](../../.agents/kb/remote-environment.md#releases).
@@ -77,7 +77,7 @@ changes to image verification or storage logic must be validated against release
 
 ## Installation with install.sh
 
-`install.sh` is the canonical installation script for vamos.
+`install.sh` is the canonical installation script for Vamos.
 It is designed for execution within container Dockerfiles (pinned to an explicit release version URL)
 or on developer machines (downloading the latest release).
 

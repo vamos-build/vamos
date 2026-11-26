@@ -422,7 +422,7 @@ func (answeringClock) Capabilities(ctx context.Context) (api.Capabilities, error
 
 // TestAssembleNamesExportedTrace checks that a job's top-level spans name the OpenTelemetry trace the job was exported
 // in, and whether it was sampled, when its manifest says it was, and that spans within them, the spans of a job not
-// exported, and those of a manifest stored before vamos exported, name none.
+// exported, and those of a manifest stored before Vamos exported, name none.
 func TestAssembleNamesExportedTrace(t *testing.T) {
 	a := newAssembly(t)
 	top := a.span("t1", "main", "build", 0, 60)

@@ -128,7 +128,7 @@ func (w *world) GivenACoordinatorThatOffers(offered []string, preferred string) 
 }
 
 // GivenACoordinatorOfAnotherGraphVersionThatOffers starts a coordinator, at <coordinator>, that says it runs commands
-// on offered, preferring the first, but runs only graphs of another version than this vamos's, as one of another
+// on offered, preferring the first, but runs only graphs of another version than this Vamos's, as one of another
 // release does, and answers nothing else, not finding it.
 func (w *world) GivenACoordinatorOfAnotherGraphVersionThatOffers(offered ...string) {
 	w.t.Helper()
@@ -975,7 +975,7 @@ func (w *world) ThenTheCacheRepositoryHoldsALayer() {
 	}
 }
 
-// server is a vamos command that serves, run by serve, until its context ends.
+// server is a Vamos command that serves, run by serve, until its context ends.
 type server struct {
 	name  string // the command, such as "vamos worker", for a failure's message
 	mu    sync.Mutex
@@ -1060,7 +1060,7 @@ func outputsOf(servers []*server) string {
 	return b.String()
 }
 
-// serve runs the vamos command line args, which reads no project, on the stores that store gives, until ctx ends,
+// serve runs the Vamos command line args, which reads no project, on the stores that store gives, until ctx ends,
 // stopping the scenario if args is empty.
 func (w *world) serve(ctx context.Context, store *storage.StoreOptions, args ...string) *server {
 	w.t.Helper()

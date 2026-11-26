@@ -339,7 +339,7 @@ func TestTrace_ShowsPulls(t *testing.T) {
 	})
 }
 
-// TestTrace_IsWrittenEvenIfTheCommandFails specifies that once tracing starts, vamos writes the trace even if
+// TestTrace_IsWrittenEvenIfTheCommandFails specifies that once tracing starts, Vamos writes the trace even if
 // execution fails, ending at the failing step, with its error, and reports the command's error.
 func TestTrace_IsWrittenEvenIfTheCommandFails(t *testing.T) {
 	parallelRule(t)

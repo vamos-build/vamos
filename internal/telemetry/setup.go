@@ -36,7 +36,7 @@ type Config struct {
 	Role Role
 	// Instance is the process's service.instance.id: a coordinator's instance, or a worker's host name.
 	Instance string
-	Version  string // vamos's, its service.version
+	Version  string // Vamos's, its service.version
 	// Getenv reads the OTEL_* variables; os.Getenv if nil.
 	// A test passes its own, so that coordinators of different settings can run in one process at once.
 	// It decides every setting Setup checks, those it leaves unset taking their defaults, and whether an unset

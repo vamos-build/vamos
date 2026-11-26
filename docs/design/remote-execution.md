@@ -1,6 +1,6 @@
 # Remote execution
 
-This document describes remote execution in vamos: the distributed topology of coordinator and workers,
+This document describes remote execution in Vamos: the distributed topology of coordinator and workers,
 communication protocols, attempt leasing and worker fencing, crash recovery, and Kubernetes deployment.
 Instructions for launching the local development environment are in the
 [contributor guide](../../.agents/kb/remote-environment.md).
@@ -336,9 +336,9 @@ as [observability](observability.md) describes; a resumed job goes on in the sam
 
 ## Kubernetes deployment
 
-The Helm chart in [remote/helm/vamos](../../remote/helm/vamos/values.yaml) deploys vamos services to Kubernetes.
+The Helm chart in [remote/helm/vamos](../../remote/helm/vamos/values.yaml) deploys Vamos services to Kubernetes.
 
-The following diagram shows the Kubernetes deployment topology defined in the vamos Helm chart.
+The following diagram shows the Kubernetes deployment topology defined in the Vamos Helm chart.
 
 ```mermaid
 flowchart TB

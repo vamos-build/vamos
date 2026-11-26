@@ -106,7 +106,7 @@ func TestResultProvenance(t *testing.T) {
 	}
 }
 
-// version returns the version of vamos that a result made by this test binary records:
+// version returns the version of Vamos that a result made by this test binary records:
 // its main module's, unless that is unknown, as for a development build.
 func version(t *testing.T) string {
 	t.Helper()

@@ -9,9 +9,9 @@ const repo = mkdtempSync(path.join(tmpdir(), "links-"));
 after(() => rmSync(repo, { recursive: true, force: true }));
 const pages = path.join(repo, "docs/user");
 mkdirSync(path.join(pages, "reference"), { recursive: true });
-for (const file of ["README.md", "tutorial.md", "reference/cli.md"]) writeFileSync(path.join(pages, file), "");
+for (const file of ["README.md", "fundamentals.md", "reference/cli.md"]) writeFileSync(path.join(pages, file), "");
 writeFileSync(path.join(repo, "main.go"), "");
-const from = path.join(pages, "tutorial.md");
+const from = path.join(pages, "fundamentals.md");
 const resolve = (source) => resolveMarkdownLinks(source, from, { pages, repo });
 
 test("links to pages go to their Markdown", () => {
@@ -72,9 +72,9 @@ test("a link to a directory goes to its README's page", () => {
 });
 
 test("a malformed link throws, naming the file and the link", () => {
-  assert.throws(() => resolve("[bad](%FF.md)"), /docs\/user\/tutorial\.md: malformed link %FF\.md/);
+  assert.throws(() => resolve("[bad](%FF.md)"), /docs\/user\/fundamentals\.md: malformed link %FF\.md/);
 });
 
 test("a link of only a query goes to its own page", () => {
-  assert.equal(resolve("[same](?plain=1#x)"), "[same](/tutorial.md?plain=1#x)");
+  assert.equal(resolve("[same](?plain=1#x)"), "[same](/fundamentals.md?plain=1#x)");
 });

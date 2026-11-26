@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// TestDeadlineInBuildFile checks that a program embedding vamos, whose context has a deadline, gets the deadline's
+// TestDeadlineInBuildFile checks that a program embedding Vamos, whose context has a deadline, gets the deadline's
 // error when it passes while a BUILD file runs, loading or configuring a target, rather than a mistake in the file.
 // A user's interrupt is specified by the interrupt feature; only a program sets a deadline.
 func TestDeadlineInBuildFile(t *testing.T) {

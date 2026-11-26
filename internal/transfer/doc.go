@@ -5,7 +5,7 @@
 //
 // Both sides of the executor boundary copy images: the executor pulls, pushes and publishes them,
 // and the client delivers them; this package serves both and imports neither buildah nor the container store.
-// Policy trusts local storage and layouts, where vamos has just put the images, and follows the system's policy
+// Policy trusts local storage and layouts, where Vamos has just put the images, and follows the system's policy
 // for the rest.
 //
 // # Changes

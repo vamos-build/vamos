@@ -1,6 +1,6 @@
 /*
-  vamos design tokens, direction "Lovechild": Bazel green and buildah yellow.
-  Starlight reads its own --sl-* properties; this file defines vamos tokens once and maps them onto Starlight.
+  Vamos design tokens, direction "Lovechild": Bazel green and buildah yellow.
+  Starlight reads its own --sl-* properties; this file defines Vamos tokens once and maps them onto Starlight.
   Starlight's scale runs from --sl-color-white (strongest text) to --sl-color-black (page),
   so light mode inverts the gray steps rather than renaming them.
   Every text pairing meets WCAG 2.2 AA; marigold fails as text on the light page,
@@ -9,7 +9,7 @@
 
 :root {
   /* Type */
-  --vamos-font-display: "Bricolage Grotesque Variable", "Bricolage Grotesque", system-ui, sans-serif;
+  --vamos-font-display: "Schibsted Grotesk Variable", "Schibsted Grotesk", system-ui, sans-serif;
   --vamos-font-body: "Figtree Variable", "Figtree", system-ui, sans-serif;
   --vamos-font-mono: "Martian Mono Variable", "Martian Mono", ui-monospace, monospace;
 
@@ -123,7 +123,7 @@ h3,
 h4,
 .sl-markdown-content :is(h1, h2, h3, h4) {
   font-family: var(--vamos-font-display);
-  font-weight: 700;
+  font-weight: 600;
   letter-spacing: -0.02em;
   text-wrap: balance;
 }
@@ -226,4 +226,32 @@ pre.mermaid foreignObject hr {
   margin: 0 0 -1px !important;
   border: 0;
   border-top: 1px solid var(--sl-color-gray-5);
+}
+
+/*
+  The fundamentals page's artifact grid: one small diagram per cell, so inputs, operations and outputs line up in rows,
+  which a single Mermaid layout cannot guarantee. The diagrams keep their natural size so all cells share a scale.
+*/
+.sl-markdown-content .artifact-grid {
+  display: table;
+  table-layout: fixed;
+  width: 100%;
+}
+
+.sl-markdown-content .artifact-grid thead th:first-child {
+  width: 5rem;
+}
+
+.sl-markdown-content .artifact-grid :is(th, td) {
+  vertical-align: middle;
+  padding: 0.5rem;
+}
+
+.sl-markdown-content .artifact-grid td {
+  text-align: center;
+}
+
+.sl-markdown-content .artifact-grid td pre.mermaid {
+  margin: 0;
+  padding: 0.5rem;
 }

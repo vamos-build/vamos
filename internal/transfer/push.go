@@ -148,7 +148,7 @@ func (r uploadReference) NewImageDestination(ctx context.Context, sys *types.Sys
 // containers/image, in v5.41.2 and still in v5.42.0, stores an index's signatures even when there are none,
 // and a destination with no tag refuses them, since it never learns the index's digest,
 // so an index can't otherwise be uploaded by digest.
-// Hiding the destination's private interface from the copy costs what vamos doesn't use:
+// Hiding the destination's private interface from the copy costs what Vamos doesn't use:
 // reusing a layer in a compression the options require, partial uploads and sigstore signatures.
 type uploadDestination struct{ types.ImageDestination }
 

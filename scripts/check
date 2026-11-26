@@ -34,7 +34,7 @@ go build -o vamos .
 step 'lint'
 golangci-lint run
 
-# Fails only for a vulnerability that vamos's code reaches; it needs the network, for vuln.go.dev.
+# Fails only for a vulnerability that Vamos's code reaches; it needs the network, for vuln.go.dev.
 step 'vulnerabilities'
 govulncheck ./...
 

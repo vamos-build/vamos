@@ -50,6 +50,6 @@
 // and UpdateLock, which holds the workspace's lock, an flock of its root on disk, while it reads the lockfile again and
 // writes it durably through a temporary file renamed over it, so that concurrent writers each keep their pins;
 // WouldUpdateLock says whether it would write, writing nothing.
-// Fields that this vamos doesn't know are kept on rewrite, a pin's while the pin is unchanged, so raise LockVersion
-// only for a change that an older vamos would get wrong even so.
+// Fields that this Vamos doesn't know are kept on rewrite, a pin's while the pin is unchanged, so raise LockVersion
+// only for a change that an older Vamos would get wrong even so.
 package load

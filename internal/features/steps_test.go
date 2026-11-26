@@ -143,7 +143,7 @@ type world struct {
 	sentAs       string          // the image name that the last command pushed or loaded as, if it pushed or loaded
 	docker       func() [][]byte // the images that the scenario's own Docker daemon has loaded, if it has one
 	daemon       string          // which Docker daemon a Given step gave: "fake", "none" or "host"
-	dockerHost   string          // the host's Docker daemon, as vamos finds it, if the scenario loads into it
+	dockerHost   string          // the host's Docker daemon, as Vamos finds it, if the scenario loads into it
 	loadedBefore int             // how many images the scenario's own daemon had loaded before the last command
 	loadRan      bool            // whether the last command loaded into Docker, or tried to
 	traceTo      string          // where the command running is to write its trace, if traced() asked it to
@@ -170,7 +170,7 @@ type world struct {
 	graphErr       error             // what the last WhenIShowTheGraph failed with, if it did
 	ran            bool              // whether any command has run
 	ownStores      bool              // whether the scenario's stores are its own, rather than the suite's
-	other          func()            // releases what another vamos holds of the build cache, if one does
+	other          func()            // releases what another Vamos holds of the build cache, if one does
 	apart          *testenv.Stores   // the stores of GivenOtherStoresHoldAResult, apart from the scenario's
 	apartBefore    cached            // what they held once it built there
 	alsoNamed      map[string]string // the images that GivenACachedLayerIsAlsoNamed named, by name
@@ -234,7 +234,7 @@ func newWorld(t *testing.T) *world {
 	return w
 }
 
-// run runs the vamos command line with args, in the scenario's project, as main does.
+// run runs the Vamos command line with args, in the scenario's project, as main does.
 // It forgets what earlier commands saved and exported, so that checks see only this one's.
 func (w *world) run(args ...string) {
 	w.t.Helper()
@@ -265,7 +265,7 @@ func (w *world) commandLine(fsys afero.Fs, args []string) []string {
 	return append([]string{"-C", dir}, args...)
 }
 
-// execute runs the vamos command line with exactly args, none for none, in the project fsys, as main does.
+// execute runs the Vamos command line with exactly args, none for none, in the project fsys, as main does.
 func (w *world) execute(fsys afero.Fs, args []string) {
 	w.t.Helper()
 	w.image, w.index, w.archive, w.entries, w.exported, w.sentAs = nil, nil, "", nil, "", ""

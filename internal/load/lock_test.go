@@ -150,7 +150,7 @@ func TestLockKeepsEveryWritersPins(t *testing.T) {
 	}
 }
 
-// TestLockKeepsFieldsItDoesntKnow checks that rewriting a lockfile keeps the fields that this vamos doesn't know,
+// TestLockKeepsFieldsItDoesntKnow checks that rewriting a lockfile keeps the fields that this Vamos doesn't know,
 // as a newer one of the same version may write: the lockfile's, and those of each pin that it doesn't change,
 // after the fields it knows, sorted; a pin that it changes loses them, since they may describe what it pinned before.
 func TestLockKeepsFieldsItDoesntKnow(t *testing.T) {

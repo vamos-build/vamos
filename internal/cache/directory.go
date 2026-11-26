@@ -136,7 +136,7 @@ func (d *Directory) blobPath(b Blob) string {
 
 // pendingFile is a file being written into the directory.
 // It is written to a temporary file and renamed into place once complete,
-// so that it is never seen partly written, even by another vamos process.
+// so that it is never seen partly written, even by another Vamos process.
 // Its digest and size are worked out as it is written.
 type pendingFile struct {
 	f        *os.File

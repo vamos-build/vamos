@@ -1,6 +1,6 @@
 # Scheduling and concurrency
 
-This document describes the scheduling and concurrency model in vamos: how the scheduler traverses target graphs,
+This document describes the scheduling and concurrency model in Vamos: how the scheduler traverses target graphs,
 coordinates runner backends, deduplicates concurrent attempts, streams events, and enforces synchronization.
 
 Both the local executor and the remote coordinator schedule graph execution using [sched](../../internal/sched/doc.go).

@@ -1,7 +1,7 @@
-# Building vamos with vamos
+# Building Vamos with Vamos
 
-The repository root is a vamos workspace: [WORKSPACE](../../WORKSPACE) marks it,
-and [BUILD](../../BUILD) builds and checks vamos with vamos.
+The repository root is a Vamos workspace: [WORKSPACE](../../WORKSPACE) marks it,
+and [BUILD](../../BUILD) builds and checks Vamos with Vamos.
 It is a first step, not yet part of the development process:
 the [Dockerfile](../../Dockerfile) still makes the release, the remote environment's images and the smoke checks' image,
 and [scripts/check](../../scripts/check) still runs the checks, as [testing.md](testing.md) says.
@@ -31,7 +31,7 @@ Without one, `-C examples/<name>` would find the root's `WORKSPACE` and make the
 ignoring its `vamos.lock` and resolving `//:` labels against the root `BUILD`.
 A new example needs a `WORKSPACE` file as well.
 
-## Before vamos can take itself on
+## Before Vamos can take itself on
 
 - **No Go build cache.**
   Every check task compiles all its packages from scratch, since nothing persists `GOCACHE` between runs:

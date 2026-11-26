@@ -1,9 +1,9 @@
-// Package tracing records spans independently of vamos's build implementation, and encodes them for storage.
+// Package tracing records spans independently of Vamos's build implementation, and encodes them for storage.
 //
 // # Invariants
 //
 // Spans are transportable data; recording is optional and context-scoped.
-// This package imports no other vamos package.
+// This package imports no other Vamos package.
 // Synchronous spans on a track must nest; overlapping work needs separate tracks or asynchronous spans.
 // A recorder that keeps spans keeps at most twice MaxTraceSize of them, by their encoded size,
 // refusing each span that would pass that and counting it as Lost, so that its memory is bounded

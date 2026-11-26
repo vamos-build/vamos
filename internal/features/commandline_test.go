@@ -24,7 +24,7 @@ func newCommandLineWorld(t *testing.T) *world {
 // aDigest is a digest, for an image name that must not include one.
 var aDigest = "@sha256:" + strings.Repeat("0123456789abcdef", 4)
 
-// TestCommandLine_HelpListsTheCommands specifies that vamos without a command shows its help,
+// TestCommandLine_HelpListsTheCommands specifies that Vamos without a command shows its help,
 // which lists the commands.
 func TestCommandLine_HelpListsTheCommands(t *testing.T) {
 	t.Run("vamos without a command shows the commands", func(t *testing.T) {

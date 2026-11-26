@@ -396,7 +396,7 @@ func (b *Bridge) Job(ctx context.Context, spans []tracing.Span, start, end time.
 	b.metrics.job(b.instance, j, spans, start, end, outcome, queued)
 }
 
-// export exports spans, one snapshot of a job's or an attempt's, each under the span of the vamos span it is part of,
+// export exports spans, one snapshot of a job's or an attempt's, each under the span of the Vamos span it is part of,
 // or under top, the job's or the attempt's span, if that isn't in the snapshot.
 // What the snapshot's own spans produced, a span using it links to first, wherever it lies in the snapshot,
 // and the bridge then remembers it for the snapshots exported later.

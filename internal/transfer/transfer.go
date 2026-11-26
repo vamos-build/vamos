@@ -172,7 +172,7 @@ func shortDigest(d digest.Digest) string {
 }
 
 // Policy returns the signature policy to copy images under: the system's, as buildah follows when committing,
-// but trusting local storage and layouts, where vamos has just put the images.
+// but trusting local storage and layouts, where Vamos has just put the images.
 // The storage transport is named rather than imported, since this package must not reach the container store;
 // a client never uses it, so trusting it there changes nothing.
 // The caller must destroy it.

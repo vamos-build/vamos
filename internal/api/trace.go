@@ -33,7 +33,7 @@ type JobTrace struct {
 	// Dropped counts the entries left out, from the end, since even they alone passed the cap.
 	Dropped int `json:"dropped,omitempty"`
 	// Exported is how the job's trace was exported over OpenTelemetry, if it was: its trace's ID, its span's and
-	// whether it was sampled; the zero value, as a manifest stored before vamos exported, or by an executor that
+	// whether it was sampled; the zero value, as a manifest stored before Vamos exported, or by an executor that
 	// exports nothing, has.
 	Exported tracing.Exported `json:"exported,omitzero"`
 }
@@ -49,7 +49,7 @@ type TraceEntry struct {
 	Cause   string `json:"cause,omitempty"`
 	Attempt string `json:"attempt,omitempty"` // the ID of the attempt that served it, or made the result it reused
 	// Trace is the stored trace of that attempt: the one it took, or the one that made the result it reused.
-	// It is nil if the job left the attempt running, or the result was made before vamos kept traces.
+	// It is nil if the job left the attempt running, or the result was made before Vamos kept traces.
 	Trace *cache.Blob `json:"trace,omitempty"`
 	// Left says the job left the attempt running, so that it took no trace of it.
 	Left bool `json:"left,omitempty"`

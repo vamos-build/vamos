@@ -30,7 +30,7 @@ type WorkerInfo struct {
 	Platform      imgspecv1.Platform   `json:"platform"`           // the one its run() steps run on without emulation
 	Emulates      []imgspecv1.Platform `json:"emulates,omitempty"` // the platforms it can run under emulation
 	Isolation     string               `json:"isolation"`          // how it runs commands, such as "chroot"
-	Version       string               `json:"version"`            // of vamos
+	Version       string               `json:"version"`            // of Vamos
 	ActionVersion int                  `json:"action_version"`     // what its keys mean; it must be the coordinator's
 	Capacity      int                  `json:"capacity"`           // how many attempts it runs at once
 	// Publishes says the worker makes a publication's uploads and taggings, which a worker from before them can't.

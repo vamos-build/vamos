@@ -12,7 +12,7 @@ type pin struct {
 	image, tag, digest string
 }
 
-// lockfilePinning returns a lockfile, as vamos writes it, that pins each of pins, which the caller gives in the order
+// lockfilePinning returns a lockfile, as Vamos writes it, that pins each of pins, which the caller gives in the order
 // of their images.
 func lockfilePinning(pins ...pin) string {
 	var entries []string
@@ -34,7 +34,7 @@ func pullOfBase(tag string) string {
 }
 
 // TestUpdate_TheLockfilePinsEachPulledTag specifies that the workspace root's vamos.lock pins each pulled image and
-// tag to the tag it resolved to and the digest of the manifest that tag named, and that a lockfile vamos can't read
+// tag to the tag it resolved to and the digest of the manifest that tag named, and that a lockfile Vamos can't read
 // fails every command that loads it.
 func TestUpdate_TheLockfilePinsEachPulledTag(t *testing.T) {
 	parallelRule(t)

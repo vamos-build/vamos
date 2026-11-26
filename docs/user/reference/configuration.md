@@ -3,7 +3,7 @@ title: "Configuration reference"
 description: "Workspaces, parameters, platforms, and shared .star files."
 ---
 
-vamos uses packages to organize projects, parameters to vary target behavior,
+Vamos uses packages to organize projects, parameters to vary target behavior,
 and platforms to manage cross-compilation and container architectures.
 This reference explains workspace discovery, target labels, configuration parameters, multi-platform builds,
 and shared Starlark modules.
@@ -31,7 +31,7 @@ project/
     └── BUILD.vms
 ```
 
-To locate the workspace root, vamos searches upward from the directory specified by `-C` for a `WORKSPACE` file.
+To locate the workspace root, Vamos searches upward from the directory specified by `-C` for a `WORKSPACE` file.
 If no `WORKSPACE` file is found, the directory specified by `-C` is treated as the workspace root.
 
 Target labels identify targets across packages:
@@ -59,19 +59,19 @@ task(
 
 Label paths must be normalized relative paths without symbolic links.
 Globs evaluate paths relative to their declaring package directory.
-vamos loads only the packages needed by the requested build targets and reports dependency cycles as errors.
+Vamos loads only the packages needed by the requested build targets and reports dependency cycles as errors.
 
 ### Naming a workspace
 
-The `WORKSPACE` file is a Starlark file, which vamos evaluates whenever a command opens the workspace,
+The `WORKSPACE` file is a Starlark file, which Vamos evaluates whenever a command opens the workspace,
 before it loads any `BUILD` file.
 An empty `WORKSPACE` file is valid, as is a workspace without one, and either leaves the workspace unnamed.
 Only the `WORKSPACE` file at the root of the workspace that holds `-C` is evaluated;
-one in a directory beneath it marks another workspace, which vamos doesn't read.
+one in a directory beneath it marks another workspace, which Vamos doesn't read.
 A `WORKSPACE` that isn't a regular file, such as a directory, marks the root without being evaluated.
 A `WORKSPACE` file written for another tool, such as Bazel, is evaluated too,
-and fails on what vamos doesn't offer, such as `load()`;
-give vamos a root of its own, with an empty `WORKSPACE` file, or run it where no such file is above `-C`.
+and fails on what Vamos doesn't offer, such as `load()`;
+give Vamos a root of its own, with an empty `WORKSPACE` file, or run it where no such file is above `-C`.
 
 `WORKSPACE` may call `workspace()` once, to give the workspace a symbolic name:
 
@@ -89,12 +89,12 @@ A mistake in `WORKSPACE`, such as a name that breaks these rules, fails every co
 
 Every request that a command sends to an executor, to build, push, publish or export, carries the name,
 or none for an unnamed workspace, as metadata that changes nothing the executor does.
-vamos derives no name from anything else: not the workspace's directory, its repository or the repository's remotes.
+Vamos derives no name from anything else: not the workspace's directory, its repository or the repository's remotes.
 A workspace that doesn't call `workspace()` is unnamed.
 A name is trusted as declared, so choosing one that no other workspace uses is up to the workspace;
 a reverse-DNS name of a domain you control, such as `com.acme.storefront`, is one.
 
-vamos never adds the name to an action's key, the graph or a step,
+Vamos never adds the name to an action's key, the graph or a step,
 so identical targets in workspaces named differently, or unnamed, share cached results,
 and renaming a workspace rebuilds nothing.
 A glob that selects the `WORKSPACE` file, such as `**` in the root package, builds on its contents
@@ -268,7 +268,7 @@ This pattern runs compiler tools natively on the host architecture while produci
 A task using native tools can share a single cached result across target architectures
 if its inputs and commands are platform-independent (such as bundled web assets).
 When compiler environment variables depend on `ctx.os` or `ctx.arch`,
-vamos generates a separate cached result for each target architecture.
+Vamos generates a separate cached result for each target architecture.
 A layer's base image must match the layer's platform; use a task to decouple build tools from the final runtime image.
 
 #### Execution platform selection

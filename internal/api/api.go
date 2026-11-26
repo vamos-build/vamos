@@ -85,7 +85,7 @@ type Capabilities struct {
 	ExecPlatform  *imgspecv1.Platform `json:"exec_platform,omitempty"`
 	GraphVersions []int               `json:"graph_versions"`      // the graph versions it runs
 	Isolation     string              `json:"isolation,omitempty"` // how it runs commands, such as "chroot"
-	Version       string              `json:"version,omitempty"`   // of vamos
+	Version       string              `json:"version,omitempty"`   // of Vamos
 	Clock         time.Time           `json:"clock"`               // the time by its clock, when it answered
 	// Instance identifies the executor's jobs: new each time it starts without those of an earlier run, so that a
 	// client whose connection dropped can tell a restart that lost its jobs from a drop alone. A coordinator keeps

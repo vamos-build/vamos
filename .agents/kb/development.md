@@ -35,7 +35,7 @@ Cheap validation belongs before execution, without an extra project scan.
 Keep filesystem selection checks on reachable globs' actual reads.
 Command-line mistakes print usage; runtime failures do not.
 `main` owns the final `vamos: <error>` prefix and Cobra error printing stays silenced.
-Buildah's chroot helper can write failure noise directly to stderr; vamos cannot suppress that output.
+Buildah's chroot helper can write failure noise directly to stderr; Vamos cannot suppress that output.
 
 Before adding a dependency, inspect [go.mod](../../go.mod):
 useful libraries may already be indirect buildah dependencies.

@@ -178,7 +178,7 @@ func TestCloseCancelsRunningJobs(t *testing.T) {
 }
 
 // TestCloseLeavesOthersMounts checks that Close neither warns about nor unmounts a layer that something else mounted
-// in the same container store, as another vamos building at the same time does: the store records mounts for every
+// in the same container store, as another Vamos building at the same time does: the store records mounts for every
 // process that shares it, and they are that process's to unmount.
 func TestCloseLeavesOthersMounts(t *testing.T) {
 	testenv.RequireBuildah(t)

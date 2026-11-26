@@ -26,7 +26,7 @@ Publishing proceeds in two distinct phases:
    The command reports which tags succeeded and which failed; rerunning the command finishes untagged destinations
    without re-uploading existing layer blobs.
 
-On completion, vamos prints a summary line for each repository and tag:
+On completion, Vamos prints a summary line for each repository and tag:
 
 ```text
 Image built! ghcr.io/team/app:1.4.2 sha256:abcd...

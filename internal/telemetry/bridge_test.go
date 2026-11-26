@@ -74,7 +74,7 @@ func at(n int) time.Time {
 }
 
 // TestBridgeJob checks how a job's own spans are exported: under the job's span, which is the trace's root, each
-// under the span it is part of, with vamos's times, an instant as a zero-length span, an error as the span's status,
+// under the span it is part of, with Vamos's times, an instant as a zero-length span, an error as the span's status,
 // and the attributes the design names, the workspace's on every span.
 func TestBridgeJob(t *testing.T) {
 	b, exporter := newTestBridge(t, nil)
@@ -511,7 +511,7 @@ func TestBridgeDropsWholeSnapshots(t *testing.T) {
 	}
 }
 
-// TestBridgeBoundsWhatASpanHolds checks that an exported span holds at most the bridge's budget, whatever vamos
+// TestBridgeBoundsWhatASpanHolds checks that an exported span holds at most the bridge's budget, whatever Vamos
 // recorded: its name, its status's description, each key and string cut, each list cut short, and no attributes past
 // maxAttributesSize but vamos.truncated.
 func TestBridgeBoundsWhatASpanHolds(t *testing.T) {

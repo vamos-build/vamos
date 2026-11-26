@@ -62,7 +62,7 @@ type Config struct {
 	Getenv func(string) string
 }
 
-// app is the vamos command line: what every invocation shares.
+// app is the Vamos command line: what every invocation shares.
 // Each command is a method of invocation, which holds the state of one run, so that a handler can be tested
 // without constructing the root command.
 type app struct {
@@ -201,7 +201,7 @@ func (inv *invocation) release(ex api.Executor) {
 	inv.holds = nil
 }
 
-// NewRootCommand returns the vamos command line, with its subcommands, as cfg says.
+// NewRootCommand returns the Vamos command line, with its subcommands, as cfg says.
 func NewRootCommand(cfg Config) *cobra.Command {
 	a := &app{fs: cfg.Fs, store: cfg.Store, registry: cfg.Registry, cgroups: cfg.CgroupRoot, getenv: cfg.Getenv}
 	defaults := defaultOptions()
@@ -737,7 +737,7 @@ func (inv *invocation) coordinator() error {
 		return err
 	}
 	// OpenTelemetry's error handler is the process's, so it is installed here, rather than by Setup, once the
-	// coordinator listens, and the last coordinator to listen in a process replaces it: vamos runs one a process,
+	// coordinator listens, and the last coordinator to listen in a process replaces it: Vamos runs one a process,
 	// though tests that run several share it. What fails to export before then, as a resumed job's export may, goes to
 	// whichever handler the process has, the SDK's own if none.
 	stderr := inv.stderr
@@ -1119,7 +1119,7 @@ func (inv *invocation) systemContext() (*types.SystemContext, error) {
 }
 
 // capabilities asks ex what it offers, before the graph is loaded, refuses an executor that doesn't run this
-// vamos's graphs, as Submit would, and returns the execution platform to configure the graph for,
+// Vamos's graphs, as Submit would, and returns the execution platform to configure the graph for,
 // which EXEC_PLATFORM names.
 func (inv *invocation) capabilities(ex api.Executor) (imgspecv1.Platform, error) {
 	caps, err := ex.Capabilities(inv.ctx)

@@ -34,7 +34,7 @@ app.kubernetes.io/instance: {{ .root.Release.Name }}
 app.kubernetes.io/component: {{ .component }}
 {{- end }}
 
-{{/* The vamos image. */}}
+{{/* The Vamos image. */}}
 {{- define "vamos.image" -}}
 {{- printf "%s:%s" .Values.image.repository (default .Chart.AppVersion .Values.image.tag) }}
 {{- end }}
@@ -103,7 +103,7 @@ An upstream mapped twice fails, since the coordinator would keep only one of the
 {{- end }}
 {{- end }}
 
-{{/* The registry settings volume and its mount, which every vamos process reads as $CONTAINERS_REGISTRIES_CONF. */}}
+{{/* The registry settings volume and its mount, which every Vamos process reads as $CONTAINERS_REGISTRIES_CONF. */}}
 {{- define "vamos.registriesVolume" -}}
 - name: registries
   configMap:
@@ -253,7 +253,7 @@ alone, so they get no sampler, and serve no Prometheus.
       (has "OTEL_EXPORTER_OTLP_ENDPOINT" $endpoints) (has "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT" $endpoints) }}
 {{- $env = append $env (dict "name" "OTEL_METRICS_EXPORTER"
       "value" (ternary "otlp,prometheus" "prometheus" $otlp)) }}
-{{- /* Every address, which vamos takes as a listener with no host, as the API's, IPv6's and IPv4's alike, or IPv4's
+{{- /* Every address, which Vamos takes as a listener with no host, as the API's, IPv6's and IPv4's alike, or IPv4's
       alone on a node without IPv6, so that every cluster's scrapes reach it. */}}
 {{- $env = append $env (dict "name" "OTEL_EXPORTER_PROMETHEUS_HOST" "value" "::") }}
 {{- $env = append $env (dict "name" "OTEL_EXPORTER_PROMETHEUS_PORT" "value" ($t.prometheus.port | toString)) }}

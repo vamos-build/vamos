@@ -92,7 +92,7 @@ func TestPrune_RemovesCachedResults(t *testing.T) {
 	})
 }
 
-// TestPrune_WaitsForNoOtherVamos specifies that a prune is refused while another vamos is using the build cache,
+// TestPrune_WaitsForNoOtherVamos specifies that a prune is refused while another Vamos is using the build cache,
 // removing nothing, and that a build is refused while a prune runs.
 func TestPrune_WaitsForNoOtherVamos(t *testing.T) {
 	parallelRule(t)

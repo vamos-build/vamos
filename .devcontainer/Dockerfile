@@ -82,7 +82,7 @@ RUN case "$(uname -m)" in \
 # Tools with no Fedora package:
 # - kubeconform, to check rendered Helm manifests against the Kubernetes schemas
 # - actionlint, to check the release workflow
-# - govulncheck, which scripts/check runs, to find known vulnerabilities that vamos's code reaches
+# - govulncheck, which scripts/check runs, to find known vulnerabilities that Vamos's code reaches
 RUN GOBIN=/usr/local/bin GOMODCACHE=/tmp/gomodcache GOCACHE=/tmp/gocache \
       go install github.com/yannh/kubeconform/cmd/kubeconform@v0.8.0 \
  && GOBIN=/usr/local/bin GOMODCACHE=/tmp/gomodcache GOCACHE=/tmp/gocache \

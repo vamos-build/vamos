@@ -14,7 +14,7 @@ index(
 `index()` bundles multiple single-platform images into a multi-platform OCI image index.
 `name` and `layer` are required.
 When `layer` names a single pull or layer, `platforms` must be a nonempty list.
-vamos builds that target once for each platform and preserves the listed order in the index.
+Vamos builds that target once for each platform and preserves the listed order in the index.
 
 To use distinct targets for each platform, pass a dictionary to `layer` and omit `platforms`:
 

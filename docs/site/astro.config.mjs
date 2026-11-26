@@ -19,7 +19,7 @@ export default defineConfig({
       mermaidConfig: { themeVariables: { fontFamily: '"Figtree Variable", Figtree, system-ui, sans-serif' } },
     }),
     starlight({
-      title: "vamos",
+      title: "Vamos",
       logo: { light: "./src/assets/logo-light.svg", dark: "./src/assets/logo-dark.svg", replacesTitle: true },
       favicon: "/favicon.svg",
       expressiveCode: {
@@ -28,13 +28,13 @@ export default defineConfig({
         useStarlightUiThemeColors: true,
       },
       customCss: [
-        "@fontsource-variable/bricolage-grotesque",
+        "@fontsource-variable/schibsted-grotesk",
         "@fontsource-variable/figtree",
         "@fontsource-variable/martian-mono",
         "./src/styles/vamos.css",
       ],
       social: [{ icon: "github", label: "GitHub", href: github }],
-      // Page paths are relative to this directory, as ../user/tutorial.md.
+      // Page paths are relative to this directory, as ../user/fundamentals.md.
       editLink: { baseUrl: `${github}/edit/main/docs/site/` },
       routeMiddleware: "./src/routeData.ts",
       sidebar,

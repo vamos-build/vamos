@@ -10,16 +10,19 @@ Link to the owner when another scope needs it.
 | Design | [docs/design/](../../docs/design/README.md) | Components, boundaries, data flow and the decisions behind them, with diagrams |
 | Repository | An atomic file in this directory | Contributor workflows, where to change a subsystem and the tests that guard it |
 | Routing | [AGENTS.md](../../AGENTS.md) | Task/path to documentation links only |
-| User workflow | [docs/user/](../../docs/user/README.md), example project READMEs | Tutorial, references and runnable project setup |
+| User workflow | [docs/user/](../../docs/user/README.md), example project READMEs | Fundamentals, install pages, references and runnable project setup |
 
 Do not add Go package READMEs.
-The root [README.md](../../README.md) introduces vamos and links to the user guide, the design documents
+The root [README.md](../../README.md) introduces Vamos and links to the user guide, the design documents
 and contributor instructions.
-The [tutorial](../../docs/user/tutorial.md) owns the introductory walkthrough;
+The [fundamentals](../../docs/user/fundamentals.md) page owns the introductory walkthrough;
+the [install pages](../../docs/user/install/README.md) own installing Vamos in a container image or on a host;
 the references in `docs/user/reference/` own CLI, BUILD language, configuration, cache and remote execution behavior.
+The release's smoke test builds the Dockerfile in `install/dockerfile-ubuntu.md`,
+so keep it that page's only `dockerfile` block.
 The [example index](../../examples/README.md) helps users choose projects and build patterns.
 Example project READMEs own project-specific setup and checks, including non-Go toolchains,
-and link to the tutorial for shared vamos setup.
+and link to the fundamentals or the install pages for shared Vamos setup.
 
 [docs/site](../../docs/site/astro.config.mjs) publishes `docs/user/` as a Starlight site on Cloudflare Workers;
 each Markdown file there is a page, and a README is its directory's index.
@@ -99,7 +102,7 @@ Check local links and inspect `go doc ./internal/<package>` after changing packa
 
 ## Design documents
 
-[docs/design](../../docs/design/README.md) explains vamos's design to its developers:
+[docs/design](../../docs/design/README.md) explains Vamos's design to its developers:
 what spans packages, how the parts interact, and why, including rejected alternatives.
 A knowledge-base file on the same subject links to its design page and keeps only what a change needs:
 the symbols to inspect, the tests that guard each decision, gotchas and commands.
@@ -111,6 +114,18 @@ a sequence diagram for an interaction, and a state diagram for a lifecycle.
 Diagrams name real packages and symbols, so update them in the same change as the code they describe.
 Mermaid reserves some words as node IDs, such as `graph` and `end`; give such a node another ID and a label.
 A semicolon ends a statement in a sequence diagram, so keep it out of messages.
+A build pipeline's flowchart, such as an example README's target graph, starts with this config:
+
+```yaml
+---
+config:
+  flowchart:
+    padding: 6
+    minNodeWidth: 80
+    wrappingWidth: 400
+---
+```
+
 A diagram that parses can still be unreadable, so look at it rendered after changing it.
 The devcontainer's `mmdc` renders every diagram of a Markdown file to an image each, numbered from 1:
 `mmdc -q -i docs/design/storage.md -o <scratch>/storage.md -e png -s 2`, with `<scratch>` outside the repository.

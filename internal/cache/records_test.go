@@ -9,7 +9,7 @@ import (
 )
 
 // TestResultTrace checks that a result's trace and the timing of the run that made it round-trip,
-// that a result written before vamos kept them still decodes without them, and that a negative duration is refused.
+// that a result written before Vamos kept them still decodes without them, and that a negative duration is refused.
 func TestResultTrace(t *testing.T) {
 	trace := &Blob{Digest: digest.FromString("trace"), Size: 5}
 	started := time.Date(2026, 11, 15, 12, 0, 0, 0, time.UTC)

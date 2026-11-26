@@ -1,4 +1,4 @@
-# vamos builds itself: the release image's targets mirror the Dockerfile's stages,
+# Vamos builds itself: the release image's targets mirror the Dockerfile's stages,
 # and the check tasks run what scripts/check runs, but the full test suite, which needs container storage.
 # The Dockerfile and scripts/check remain what the release and contributors use;
 # see .agents/kb/self-build.md for what is still missing before this file can replace them.
@@ -168,7 +168,7 @@ task(
     ],
 )
 
-# Fails only for a vulnerability that vamos's code reaches; it needs the network, for vuln.go.dev,
+# Fails only for a vulnerability that Vamos's code reaches; it needs the network, for vuln.go.dev,
 # and finds a new vulnerability only once its inputs change or it runs with --rebuild.
 task(
     name = "vulnerabilities",

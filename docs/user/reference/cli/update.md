@@ -14,14 +14,14 @@ see [`pull()`](../build/pull.md).
 
 ## Tag resolution
 
-For each pull target, vamos queries the remote registry for available repository tags.
+For each pull target, Vamos queries the remote registry for available repository tags.
 It resolves the target's tag to the latest stable release matching the tag's version prefix,
 preserving leading `v` prefixes and custom suffixes:
 - Tag `1.3` resolves to the latest `1.3.x`.
 - Tag `24-alpine` resolves to the latest `24.x.y-alpine`.
 - Non-version tags (such as `latest`), prereleases, and explicit patch versions resolve to their own current digest.
 
-vamos fetches the manifest digest (for an image or multi-platform index) and records the pin in `vamos.lock`.
+Vamos fetches the manifest digest (for an image or multi-platform index) and records the pin in `vamos.lock`.
 If a registry forbids listing tags, the specified tag resolves directly to its current digest.
 
 ## Workspace discovery

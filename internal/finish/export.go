@@ -142,7 +142,7 @@ func makeStaging(dir string) (string, error) {
 
 // setMetadata sets the times of everything within root, root included, to epoch,
 // so that the same tree exports the same files,
-// and, if vamos runs as root, gives each the owner and group of root's parent folder,
+// and, if Vamos runs as root, gives each the owner and group of root's parent folder,
 // so that files written into a project belong to its owner, not root.
 // Neither follows links: a link may point anywhere on the host, and following it would change a file there.
 // Each folder is set after what it holds.

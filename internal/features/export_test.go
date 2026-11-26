@@ -166,7 +166,7 @@ func TestExport_FolderIsReplacedAsAWhole(t *testing.T) {
 	})
 }
 
-// TestExport_AsRootFilesTakeTheParentsOwner specifies that when vamos runs as root, exported files receive the owner
+// TestExport_AsRootFilesTakeTheParentsOwner specifies that when Vamos runs as root, exported files receive the owner
 // and group of the destination's parent directory, keeping their setuid and setgid bits, which changing an owner
 // clears, where the task's mode_mask retains them.
 func TestExport_AsRootFilesTakeTheParentsOwner(t *testing.T) {

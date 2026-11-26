@@ -86,7 +86,7 @@ func TestWorkspaces_LabelsNameOtherPackagesTargets(t *testing.T) {
 	})
 }
 
-// TestWorkspaces_OnlyNeededTargetsLoad specifies that vamos loads only the packages and targets
+// TestWorkspaces_OnlyNeededTargetsLoad specifies that Vamos loads only the packages and targets
 // that the requested targets need.
 func TestWorkspaces_OnlyNeededTargetsLoad(t *testing.T) {
 	parallelRule(t)
@@ -109,7 +109,7 @@ func TestWorkspaces_OnlyNeededTargetsLoad(t *testing.T) {
 	})
 }
 
-// TestWorkspaces_RootIsTheNearestWorkspaceFile specifies that vamos searches for the nearest WORKSPACE
+// TestWorkspaces_RootIsTheNearestWorkspaceFile specifies that Vamos searches for the nearest WORKSPACE
 // in -C's directory and its ancestors, and that without one, -C's directory is the workspace root.
 // A WORKSPACE that can't be checked stops the search, rather than letting another directory become the root.
 func TestWorkspaces_RootIsTheNearestWorkspaceFile(t *testing.T) {
@@ -512,7 +512,7 @@ func TestWorkspaces_MistakesAreReportedWhereTheyAre(t *testing.T) {
 const anApp = `layer(name="app", base="scratch")`
 
 // TestWorkspaces_WorkspaceIsAStarlarkFileThatVamosEvaluates specifies that the WORKSPACE file is a Starlark file,
-// which vamos evaluates whenever a command opens the workspace, before it loads any BUILD file;
+// which Vamos evaluates whenever a command opens the workspace, before it loads any BUILD file;
 // that an empty WORKSPACE file is valid, as is a workspace without one, and either leaves the workspace unnamed;
 // that only the WORKSPACE file at the root of the workspace that holds -C is evaluated;
 // and that a WORKSPACE that isn't a regular file, such as a directory, marks the root without being evaluated.
@@ -705,7 +705,7 @@ const anAppOfAFile = `
 	layer(name="app", base="scratch", steps=[add("src", "/data")])
 `
 
-// TestWorkspaces_VamosDerivesNoWorkspaceName specifies that vamos derives no name from anything else:
+// TestWorkspaces_VamosDerivesNoWorkspaceName specifies that Vamos derives no name from anything else:
 // not the workspace's directory, its repository or the repository's remotes;
 // and that a workspace that doesn't call workspace() is unnamed.
 func TestWorkspaces_VamosDerivesNoWorkspaceName(t *testing.T) {
@@ -787,7 +787,7 @@ func TestWorkspaces_TheNameTravelsWithEveryRequestToAnExecutor(t *testing.T) {
 	})
 }
 
-// TestWorkspaces_TheNameNeverAffectsWhatIsBuiltOrCached specifies that vamos never adds the name to an action's key,
+// TestWorkspaces_TheNameNeverAffectsWhatIsBuiltOrCached specifies that Vamos never adds the name to an action's key,
 // the graph or a step, so identical targets in workspaces named differently, or unnamed, share cached results,
 // and renaming a workspace rebuilds nothing;
 // and that a glob that selects the WORKSPACE file builds on its contents as on any other file's, the name included,

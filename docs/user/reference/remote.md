@@ -3,7 +3,7 @@ title: "Remote execution reference"
 description: "Distribute builds across a coordinator and worker pool on a shared network."
 ---
 
-vamos supports distributed builds across a cluster of worker machines managed by a central coordinator.
+Vamos supports distributed builds across a cluster of worker machines managed by a central coordinator.
 A team can share a single build cache and worker pool:
 targets already built by any team member are reused immediately,
 independent targets run concurrently on separate workers,
@@ -154,14 +154,14 @@ A client building on it with `TRACEPARENT` set, as CI tools that trace their pip
 pipeline's span, in its trace, and is kept or dropped as its flags say under the default parent-based sampler.
 A malformed `TRACEPARENT`, or a `TRACESTATE` that isn't a W3C tracestate, is warned about once and ignored,
 and an empty one is taken as unset.
-Without a coordinator, vamos ignores both.
+Without a coordinator, Vamos ignores both.
 The coordinator keeps them with the job, so that a job resumed after a restart stays in the pipeline's trace.
 
 ### Remote cache pruning
 
 Run `vamos prune --coordinator <URL>` to prune the remote cache:
 - Removes coordinator build records and uploaded workspace files.
-- Deletes all cached layer tags from the cache repository (dedicate this repository to the vamos cache).
+- Deletes all cached layer tags from the cache repository (dedicate this repository to the Vamos cache).
 - Preserves recorded tag resolutions and cached upstream layers in the pull-through cache.
 
 The cache repository registry must have deletion enabled.

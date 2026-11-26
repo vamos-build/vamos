@@ -464,7 +464,7 @@ func TestGlob_SelectionIsBounded(t *testing.T) {
 	}
 }
 
-// TestGlob_ReadBeforeExecution specifies that vamos captures reachable globs once before execution,
+// TestGlob_ReadBeforeExecution specifies that Vamos captures reachable globs once before execution,
 // and that globs that no requested target uses are not read.
 func TestGlob_ReadBeforeExecution(t *testing.T) {
 	parallelRule(t)

@@ -38,7 +38,7 @@ func TestMain(m *testing.M) {
 // privateStores is the stores of the test that asked for its own, while it runs; see usePrivateStores.
 var privateStores *testenv.Stores
 
-// stores returns the stores that vamos runs against: the test's own, if it asked for them, or else the suite's.
+// stores returns the stores that Vamos runs against: the test's own, if it asked for them, or else the suite's.
 func stores(t *testing.T) *testenv.Stores {
 	t.Helper()
 	if privateStores != nil {
@@ -83,7 +83,7 @@ func withStore(t *testing.T, use func(storage.Store)) {
 	}))
 }
 
-// result is the outcome of one vamos invocation.
+// result is the outcome of one Vamos invocation.
 type result struct {
 	stdout, stderr string
 	err            error

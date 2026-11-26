@@ -1,17 +1,17 @@
 ---
 title: "CLI reference"
-description: "The vamos commands for building, publishing, loading, saving, and exporting images."
+description: "The Vamos commands for building, publishing, loading, saving, and exporting images."
 ---
 
 Run `vamos --help` or `vamos <command> --help` for command-line help; invoking `vamos` without arguments shows help too.
 Targets are declared names in the current directory's `BUILD` file,
 or [workspace labels](../configuration.md#workspaces).
-If a target name is misspelled, vamos suggests close matches or lists available targets in the package.
+If a target name is misspelled, Vamos suggests close matches or lists available targets in the package.
 
 The `-C <dir>` flag selects the working directory whose targets can be referenced without a package label.
-Relative paths passed to `-C` are evaluated relative to where you invoke vamos.
+Relative paths passed to `-C` are evaluated relative to where you invoke Vamos.
 The `-C` flag does not change the process's current working directory:
-output paths on your host remain relative to where you run vamos.
+output paths on your host remain relative to where you run Vamos.
 
 ## Commands
 

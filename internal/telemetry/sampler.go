@@ -23,7 +23,7 @@ var samplersTaken = []string{
 
 // readSampler returns the sampler that OTEL_TRACES_SAMPLER and OTEL_TRACES_SAMPLER_ARG name,
 // parentbased_always_on if they are unset, or the first mistake, naming the variable and its value.
-// vamos parses them rather than the SDK, which reads them from the process's environment and falls back to its default
+// Vamos parses them rather than the SDK, which reads them from the process's environment and falls back to its default
 // with only a log line for a value it can't take, where a mistake should fail the start.
 func readSampler(getenv func(string) string) (sampler, error) {
 	name := strings.ToLower(strings.TrimSpace(getenv("OTEL_TRACES_SAMPLER")))

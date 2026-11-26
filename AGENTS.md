@@ -1,4 +1,4 @@
-# vamos contributor index
+# Vamos contributor index
 
 Read the routes relevant to the change before editing.
 
@@ -9,7 +9,7 @@ Read the routes relevant to the change before editing.
 | Validation and test design | [.agents/kb/testing.md](.agents/kb/testing.md) |
 | Behavior specifications: `internal/features/`, features, rules and scenarios | [.agents/kb/testing.md](.agents/kb/testing.md) |
 | Manual build, destination, example and release checks | [.agents/kb/smoke-checks.md](.agents/kb/smoke-checks.md) |
-| Building and checking vamos with vamos: the root `BUILD` and `WORKSPACE` | [.agents/kb/self-build.md](.agents/kb/self-build.md) |
+| Building and checking Vamos with Vamos: the root `BUILD` and `WORKSPACE` | [.agents/kb/self-build.md](.agents/kb/self-build.md) |
 | Documentation changes and `doc.go` template | [.agents/kb/documentation.md](.agents/kb/documentation.md) |
 | Documentation site, `docs/site/` | [.agents/kb/documentation.md](.agents/kb/documentation.md) |
 | Design: components, boundaries, interactions and why, `docs/design/` | [docs/design/README.md](docs/design/README.md), [.agents/kb/documentation.md](.agents/kb/documentation.md#design-documents) |
@@ -22,7 +22,7 @@ Read the routes relevant to the change before editing.
 | Telemetry: OpenTelemetry export, `TRACEPARENT`, metrics | [docs/design/observability.md](docs/design/observability.md), [internal/telemetry/doc.go](internal/telemetry/doc.go) |
 | Remote execution environment, `remote/`, its Helm chart and published image | [docs/design/remote-execution.md](docs/design/remote-execution.md), [.agents/kb/remote-environment.md](.agents/kb/remote-environment.md) |
 | Updating dependencies, lockfiles, image tags and the devcontainer's tools | [.claude/skills/update-dependencies/SKILL.md](.claude/skills/update-dependencies/SKILL.md) |
-| Releases, `release.yml`, `install.sh` | [docs/design/releases.md](docs/design/releases.md), [.agents/kb/remote-environment.md](.agents/kb/remote-environment.md#releases) |
+| Releases, `release.yml`, `install.sh` | [docs/design/releases.md](docs/design/releases.md), [.agents/kb/remote-environment.md](.agents/kb/remote-environment.md#releases), [docs/user/install/](docs/user/install/README.md) |
 | Root startup / `main.go` | [doc.go](doc.go) |
 | `internal/api/` | [internal/api/doc.go](internal/api/doc.go) |
 | `internal/cli/` | [internal/cli/doc.go](internal/cli/doc.go) |

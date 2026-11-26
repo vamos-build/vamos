@@ -103,6 +103,8 @@ The release pipeline, its decisions and `install.sh`'s behavior are explained in
 [docs/design/releases.md](../../docs/design/releases.md).
 Start a release from the Actions tab, or with `gh workflow run release.yml --ref <branch> -f tag=<version>`;
 the version is required, such as `0.1.0` or `0.2.0-rc.1`, and one already tagged is refused.
+After a release that is not a prerelease, update the version the [install pages](../../docs/user/install/README.md) pin:
+the `releases/download/v‹version›/install.sh` URLs and the `ghcr.io/vamos-build/vamos:‹version›` image.
 [Smoke check 11](smoke-checks.md) runs the release's install check on the devcontainer's platform.
 The devcontainer's own builds, and the test suite, keep gpgme and btrfs, which the release binary excludes,
 so a change to signature checking or storage drivers needs a release image smoke check as well.

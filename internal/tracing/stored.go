@@ -13,7 +13,7 @@ import (
 // It is below what one remote ReadMany may return, so that stored traces batch as trees and logs do.
 const MaxTraceSize = 16 << 20
 
-// Version is the version of the stored trace encoding that this vamos writes, and the only one it reads.
+// Version is the version of the stored trace encoding that this Vamos writes, and the only one it reads.
 const Version = 1
 
 // KindAttempt is the Kind of an attempt's stored trace, which Attempt holds.
@@ -30,7 +30,7 @@ type Header struct {
 	Kind    string `json:"kind"`
 }
 
-// ErrNotTrace is returned for data that isn't a stored trace document of a version this vamos reads.
+// ErrNotTrace is returned for data that isn't a stored trace document of a version this Vamos reads.
 var ErrNotTrace = errors.New("not a stored trace")
 
 // ReadHeader returns the header of the stored trace document data,

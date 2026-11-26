@@ -13,7 +13,9 @@ only the compiled file and the runtime dependencies reach the image.
 ---
 config:
   flowchart:
+    minNodeWidth: 80
     padding: 6
+    wrappingWidth: 400
 ---
 flowchart TD
     node[<div style="text-align:left"><i>pull node</i><hr/>node:26-alpine</div>]

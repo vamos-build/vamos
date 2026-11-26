@@ -10,7 +10,7 @@ import (
 
 // newSecretWorld starts a scenario of the secrets feature, from its background.
 // A run() step that needs a credential is given it as a secret, whose value the command line gives with --secret,
-// from an environment variable of the vamos process or a file.
+// from an environment variable of the Vamos process or a file.
 // Its project pulls busybox.
 func newSecretWorld(t *testing.T) *world {
 	t.Helper()
@@ -206,7 +206,7 @@ func TestSecrets_KeyCoversHowTheStepGetsASecretNotItsValue(t *testing.T) {
 	}
 }
 
-// TestSecrets_VariableMustBeSet specifies that env= reads an environment variable of the vamos process,
+// TestSecrets_VariableMustBeSet specifies that env= reads an environment variable of the Vamos process,
 // which must be set, though it may be empty.
 func TestSecrets_VariableMustBeSet(t *testing.T) {
 	t.Run("A secret from an unset variable fails", func(t *testing.T) {

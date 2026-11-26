@@ -18,5 +18,5 @@ Destination names must be lowercase image references without a digest.
   using the client's credentials and `--tls-verify` settings.
 
 Pushes retry transient registry errors according to `containers.conf`.
-After pushing, vamos reads the tag back from the destination registry (bypassing mirrors)
+After pushing, Vamos reads the tag back from the destination registry (bypassing mirrors)
 to verify that the tag points to the expected manifest digest.
