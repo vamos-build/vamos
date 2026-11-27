@@ -25,7 +25,8 @@
         "ms-python.vscode-pylance",
         "openai.chatgpt",
         "streetsidesoftware.code-spell-checker",
-        "tamasfe.even-better-toml"
+        "tamasfe.even-better-toml",
+        "timonwong.shellcheck"
       ]
     }
   },

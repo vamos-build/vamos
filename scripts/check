@@ -15,7 +15,7 @@ case $tier in
 esac
 [ $# -le 1 ] || { echo "$usage" >&2; exit 2; }
 
-cd -- "$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+cd -- "$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)"
 
 for tool in go golangci-lint markdownlint-cli2 govulncheck; do
     command -v "$tool" >/dev/null || {
