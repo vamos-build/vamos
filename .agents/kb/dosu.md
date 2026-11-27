@@ -14,6 +14,7 @@ Running it from `/root` keeps it from modifying the repository's `AGENTS.md`.
 The instructions below are Dosu's own, kept between the markers that `dosu setup` writes,
 so a newer version can replace them.
 
+<!-- markdownlint-disable MD013 -->
 <!-- dosu:mcp:start v2 -->
 The team you are assisting maintains shared knowledge in Dosu: consult it to build on prior work, and contribute durable knowledge so future teammates and agents do not have to rediscover it. Always use only tools currently listed by the server.
 
@@ -25,3 +26,4 @@ Use `review_knowledge` only when the user asks to inspect or manage pending know
 
 When `read_knowledge` or `write_knowledge` returned a `receipt_item_id` this turn, call `finalize_session_knowledge` exactly once at the end of the turn — after completing the task, immediately before your final reply — passing all receipt_item_ids from this turn. Avoid calling it when the current turn produced no receipt_item_id (it will succeed but render an empty state), and never call it more than once per turn.
 <!-- dosu:mcp:end -->
+<!-- markdownlint-enable MD013 -->

@@ -77,6 +77,11 @@ These are the exceptions to wrapping:
 - Leave text that a tool writes as the tool wrote it, such as the instructions between the `dosu:mcp` markers in
   [dosu.md](dosu.md), which `dosu setup` replaces whole.
 
+Run `markdownlint-cli2` from the repository root after changing Markdown and fix what it reports.
+[.markdownlint-cli2.jsonc](../../.markdownlint-cli2.jsonc) sets its rules to these conventions
+and skips the files that OpenSpec writes and the archived change proposals.
+It can't measure semantic line breaks, only the width.
+
 Each `doc.go` follows this shape, with sections omitted when they add no information:
 
 ```go
