@@ -7,6 +7,7 @@ The phase transitions separating load, run, and finish are documented in [Archit
 ## Build lifecycle
 
 Build execution follows a strict sequence:
+
 1. The loader configures every reachable target and captures referenced source trees into the content store.
 2. Base image pulls resolve and download necessary image layers.
 3. Target actions execute in dependency order.
@@ -114,6 +115,7 @@ The local executor does not yet require this opt-in, executing emulated targets 
 
 Indexes serve as command-line build roots or publication units.
 How an index is evaluated depends on the requested CLI operation:
+
 - `build`, `push`, and `publish` commands build and preserve multi-platform indexes.
 - `load` and `save` commands select a single platform manifest before evaluating dependencies,
   avoiding building image variants that Docker daemons or single-image archives cannot consume.
@@ -129,6 +131,7 @@ Wherever possible, builds should use native cross-compilation toolchains
 When steps execute foreign binaries directly, execution relies on the Linux kernel's `binfmt_misc` facility.
 
 Kernel `binfmt_misc` handlers belong to the host kernel rather than individual containers:
+
 - Handlers registered with the `F` (fix-binary) flag—including those registered by Docker Desktop
   and the `tonistiigi/binfmt` container—open the emulator binary at registration time.
   They execute foreign binaries in any container without needing `/proc/sys/fs/binfmt_misc` mounted,
@@ -176,6 +179,7 @@ flowchart TD
 ```
 
 Delivery mechanics adapt to the execution environment:
+
 - In local builds, the executor runs an export job publishing image blobs to the content store,
   and delivery streams blobs directly to Docker or local archives without network transport.
 - In remote builds, the coordinator does not export blobs to the content store;
@@ -219,6 +223,7 @@ sequenceDiagram
 ```
 
 The publication phases enforce specific guarantees:
+
 1. **Phase 1: Content upload by digest**:
    Every layer blob and manifest is uploaded to destination registries strictly by content digest.
    Because digest uploads do not move tags, failed uploads leave existing tags unaffected.
@@ -250,6 +255,7 @@ stateDiagram-v2
 ```
 
 The installation sequence stages outputs before placing them at the destination path:
+
 - Preflight checks confirm filesystem permissions before extracting outputs.
 - Files are staged in a temporary sibling directory beside the destination.
 - Installation swaps the staged directory into place using atomic directory exchange (`exchange`).

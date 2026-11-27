@@ -4,6 +4,7 @@ description: "Progress states, confirmation messages, errors, and common problem
 ---
 
 Build output reports progress states for each target:
+
 - `building`: Target is currently executing.
 - `cached`: Target inputs have not changed; previous output is replayed.
 - `rebuilding`: Target was forced to rerun via `--rebuild`.

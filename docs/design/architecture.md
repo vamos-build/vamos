@@ -11,11 +11,11 @@ Docker is a destination for built images, not the build engine.
 
 Every command runs across three distinct phases, which [cli](../../internal/cli/doc.go) coordinates:
 
-| Phase  | Placement          | Owner                                  | Boundary                                               |
-| ------ | ------------------ | -------------------------------------- | ------------------------------------------------------ |
-| Load   | Client             | [load](../../internal/load/doc.go)     | Project files and Starlark evaluate into a graph and cached sources |
-| Run    | Executor           | [run](../../internal/run/doc.go)       | Cached graph and sources execute into images or task files |
-| Finish | Client or executor | [finish](../../internal/finish/doc.go) | Completed artifacts reach requested destinations       |
+| Phase | Placement | Owner | Boundary |
+| --- | --- | --- | --- |
+| Load | Client | [load](../../internal/load/doc.go) | Project files and Starlark evaluate into a graph and cached sources |
+| Run | Executor | [run](../../internal/run/doc.go) | Cached graph and sources execute into images or task files |
+| Finish | Client or executor | [finish](../../internal/finish/doc.go) | Completed artifacts reach requested destinations |
 
 The following diagram shows how a build progresses through the three phases and what data crosses between them.
 
@@ -113,6 +113,7 @@ The local executor and the coordinator are interchangeable implementations of th
 Clients interact with both through the same methods and distinguish them only by their reported capabilities.
 Both implementations use the same scheduling engine, [sched](../../internal/sched/doc.go),
 differing only in their `sched.Runner` backend:
+
 - The local executor uses a runner that calls buildah routines in-process.
 - The coordinator uses a pool runner that assigns actions to workers over HTTP,
   where each worker executes actions in isolated subprocesses using the same buildah runner.
@@ -123,6 +124,7 @@ The API contract and execution sequence are detailed in [Client/executor protoco
 ## Target identity across phases
 
 Vamos distinguishes between two notions of package:
+
 - A BUILD package is a directory in a source workspace containing a `BUILD` file, addressed as `//dir:name`.
 - A Go package is an internal Go module subsystem, such as `internal/sched`.
 

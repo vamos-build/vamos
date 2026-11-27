@@ -39,7 +39,7 @@ So the user invokes this skill the same way both times, and a session that was c
 | --- | --- |
 | Go toolchain | Fedora `golang` in the devcontainer ≥ the `go` line of [go.mod](../../../go.mod); [Dockerfile](../../../Dockerfile)'s `golang:1.NN-bookworm` and the root [BUILD](../../../BUILD)'s `golang` pull have go.mod's minor |
 | Go in the example | the devcontainer's Go minor; [examples/golang-cli/go.mod](../../../examples/golang-cli/go.mod)'s `go` line, its [BUILD](../../../examples/golang-cli/BUILD) tag `1.NN-alpine`, [vamos.lock](../../../examples/golang-cli/vamos.lock), its README's "`1.NN.x-alpine`", and the comment on line 62 of [smoke-checks.md](../../../.agents/kb/smoke-checks.md) |
-| Node.js major | Fedora `nodejs26`/`nodejs26-npm`; `node:26-alpine` in the BUILD files of typescript-mcp, typescript-ui and strawberry-react/ui; [docs/user/fundamentals.md](../../../docs/user/fundamentals.md) (its BUILD walkthrough and mermaid diagrams); the example READMEs' mermaid diagrams; `engines` and `@types/node` in typescript-mcp's package.json; `engines` in docs/site's package.json |
+| Node.js major | Fedora `nodejs26`/`nodejs26-npm`, in the devcontainer and the root BUILD's `markdown-tools`; `node:26-alpine` in the BUILD files of typescript-mcp, typescript-ui and strawberry-react/ui; [docs/user/fundamentals.md](../../../docs/user/fundamentals.md) (its BUILD walkthrough and mermaid diagrams); the example READMEs' mermaid diagrams; `engines` and `@types/node` in typescript-mcp's package.json; `engines` in docs/site's package.json |
 | pnpm | Fedora `pnpm`; `packageManager` in [docs/site/package.json](../../../docs/site/package.json) and [examples/typescript-ui/package.json](../../../examples/typescript-ui/package.json); `pnpm@X` in [examples/typescript-ui/BUILD](../../../examples/typescript-ui/BUILD), [examples/strawberry-react/ui/BUILD](../../../examples/strawberry-react/ui/BUILD) and fundamentals.md |
 | Python minor | Fedora `python3`; `python:3.NN` / `3.NN-slim` in the fastmcp and strawberry-react/backend BUILD files and vamos.lock files; `--python-version 3.NN` in each lockfile header and README command; `target-version`/`pythonVersion` in [examples/fastmcp/pyproject.toml](../../../examples/fastmcp/pyproject.toml); `uv venv --python 3.NN` in the strawberry-react README |
 | kubectl | Fedora `kubernetes1.NN-client` matches the Kubernetes minor of the default node image of the `kind` that Fedora ships |
@@ -85,6 +85,8 @@ The only file is [.devcontainer/Dockerfile](../../../.devcontainer/Dockerfile).
   `npm view @mermaid-js/mermaid-cli@<v> peerDependencies`.
   The browser is Fedora's `chromium-headless`, unpinned like the other packages; if a Fedora release moves
   `headless_shell` out of `/usr/lib64/chromium-browser/`, update the path in the Dockerfile's Puppeteer config.
+- **markdownlint-cli2**: its version in the same `npm install -g` line, newest from `npm view markdownlint-cli2 time --json`.
+  The root BUILD's `markdown-tools` installs the same version.
 - **Coding agents** (Claude, Codex, herdr, Antigravity) are installed from their `install.sh` scripts unpinned,
   and they update themselves. Nothing to edit; the rebuild refreshes them.
   Check only that each installer URL still answers: `curl -fsSI <url>`.
@@ -104,6 +106,7 @@ Skip this step if nothing needs an edit: step 3 checks the running container dir
 - Prove the Dockerfile builds before asking for a rebuild. The Docker socket is the host's.
   Build without the cache: the `dnf install` line doesn't change when Fedora's packages do,
   so a cached build reuses the old layer and reports the old versions.
+
   ```sh
   docker build --pull --no-cache -t vamos-devcontainer-candidate .devcontainer
   docker run --rm vamos-devcontainer-candidate sh -c \
@@ -114,24 +117,31 @@ Skip this step if nothing needs an edit: step 3 checks the running container dir
      printf "flowchart LR\n  a --> b\n" | mmdc -q -i - -o /tmp/check.png && echo mmdc renders'
   docker rmi vamos-devcontainer-candidate
   ```
+
   It checks only this machine's architecture. The other architecture's sums were checked when you downloaded them.
 
 ### 3. Hand over, or continue
 
 Phase 1 is done, and phase 2 may start **in this session**, only when:
+
 - the Dockerfile needed no edits, and
 - the running container already has what it pins (compare the `docker run` line above, run directly here), and
 - the repoquery showed no newer `golang`, `nodejs26`, `pnpm`, `python3` or `uv` than is installed.
   Newer builds of other packages don't matter.
 
 Otherwise:
+
 1. Commit the Dockerfile, if it changed, as "Update the devcontainer's dependencies".
    List in the body what the candidate image reported and any majors the user declined. That is the record phase 2 reads.
    If only Fedora's packages are newer, there is nothing to commit; phase 2 re-derives what it needs.
    But if the user declined a major, record it anyway, with `git commit --allow-empty`, so the next session reads it.
 2. Tell the user, and stop. Ask for a rebuild **without cache**: a plain rebuild reuses the cached `dnf install`
    layer and gets none of Fedora's newer packages.
-   > The devcontainer is ready to update (commit `<sha>`, or "no file changes, only newer Fedora packages"). Rebuild it with **Dev Containers: Rebuild Without Cache and Reopen in Container**. This session ends with it. Then start a new session and run `/update-dependencies` again: it will confirm the rebuild and update everything else.
+   > The devcontainer is ready to update (commit `<sha>`, or "no file changes, only newer Fedora packages").
+   > Rebuild it with **Dev Containers: Rebuild Without Cache and Reopen in Container**.
+   > This session ends with it.
+   > Then start a new session and run `/update-dependencies` again:
+   > it will confirm the rebuild and update everything else.
 
 Don't start phase 2 in a container that is out of date. Its toolchains would check the updates against the wrong versions.
 
@@ -143,8 +153,13 @@ Ask once about the new majors found in this phase. Leave declined majors alone u
 ### Go modules: [go.mod](../../../go.mod), [go.sum](../../../go.sum)
 
 1. List updates to direct dependencies, with their dates:
-   `go list -m -u -f '{{if and .Update (not .Indirect)}}{{.Path}} {{.Version}} {{.Update.Version}} {{.Update.Time}}{{end}}' all`.
-   If the newest is under two weeks old, take the newest version that isn't. Check it with `go list -m -versions <mod>`,
+
+   ```sh
+   go list -m -u -f '{{if and .Update (not .Indirect)}}{{.Path}} {{.Version}} {{.Update.Version}} {{.Update.Time}}{{end}}' all
+   ```
+
+   If the newest is under two weeks old, take the newest version that isn't.
+   Check it with `go list -m -versions <mod>`,
    then `go list -m -json <mod>@<v>` for its `Time`.
 2. The `go.podman.io/*` modules (buildah, common, image, storage) move together.
    Take buildah's release, then the versions of the other three that buildah's own go.mod requires.
@@ -152,11 +167,14 @@ Ask once about the new majors found in this phase. Leave declined majors alone u
 3. `go get <mod>@<v> ...`, then `go mod tidy`.
    If this raises go.mod's `go` line, it must stay ≤ the devcontainer's `go version`.
    The line's minor must also match the Dockerfile's `golang:1.NN-bookworm` and the root BUILD's `golang` pull.
-4. **[Dockerfile](../../../Dockerfile)** and the root **[BUILD](../../../BUILD)**: `golang:1.NN-bookworm` follows go.mod's minor; keep bookworm (see glibc floor).
+4. **[Dockerfile](../../../Dockerfile)** and the root **[BUILD](../../../BUILD)**:
+   `golang:1.NN-bookworm` follows go.mod's minor; keep bookworm (see glibc floor).
    `fedora:NN` in the runtime stage, the root BUILD's `fedora` pull and
-   [docs/user/install/dockerfile-fedora.md](../../../docs/user/install/dockerfile-fedora.md)'s `FROM` follow the devcontainer's Fedora.
+   [docs/user/install/dockerfile-fedora.md](../../../docs/user/install/dockerfile-fedora.md)'s `FROM`
+   follow the devcontainer's Fedora.
    Fedora's `containers-common` and `netavark` are unpinned.
-5. In the root BUILD's `check-tools`, keep the `go install` versions of golangci-lint and govulncheck at the devcontainer's versions.
+5. In the root BUILD's `check-tools`, keep the `go install` versions of golangci-lint and govulncheck
+   at the devcontainer's versions.
 
 ### Go example: [examples/golang-cli](../../../examples/golang-cli)
 
@@ -177,18 +195,21 @@ All of them pin exact versions, and their settings refuse releases under two wee
 | [examples/typescript-mcp](../../../examples/typescript-mcp/package.json) | `package.json`, `package-lock.json` (npm) | `.npmrc` |
 
 For each pnpm project, in its directory:
+
 1. Run `pnpm outdated` and note the new majors.
 2. Run `pnpm update --latest` to take everything, or `pnpm update --latest <pkg>...` to leave a declined major out.
    Then run `pnpm install`.
    Check that `package.json` still has exact versions, with no `^` or `~`.
 
 For typescript-mcp:
+
 1. Run `npm outdated`.
 2. Run `npm install <pkg>@<version> ...` with versions at least two weeks old. Look them up with `npm view <pkg> time --json`.
 3. Run `npm update` to move the transitive dependencies in the lockfile.
 4. Keep `@types/node` on the Node.js major in use.
 
 Three more things:
+
 - **`engines.node`**: a package may raise its own Node.js minimum within a major, as astro 7.4.2 did.
   For each project with `engines`, compare its floor with `npm view <pkg>@<version> engines.node`
   for its direct dependencies, and raise the floor to the highest they need.
@@ -230,7 +251,8 @@ Find it with `curl -fsSL https://nodejs.org/dist/index.json | jq -r '[.[] | sele
 | [examples/strawberry-react](../../../examples/strawberry-react/vamos.lock) | `backend/BUILD`: `python:3.15`; `ui/BUILD`: `node:26-alpine`, `nginx:alpine` | `vamos.lock` (one for the workspace) |
 
 1. Build the CLI: `go build -o vamos .`.
-2. For each project, run `./vamos update --dry-run -C <project>` and then `./vamos update -C <project>`; use `-C .` for the repository root.
+2. For each project, run `./vamos update --dry-run -C <project>` and then `./vamos update -C <project>`;
+   use `-C .` for the repository root.
    The dry run reports newer major and minor tags, which are majors to ask about.
    The update re-pins each tag to its newest release and digest.
    (`vamos update` asks Docker Hub directly. It doesn't apply the two-week rule, and doesn't need to:
@@ -279,10 +301,12 @@ Review the diff like any other.
 ### Sweep for stragglers
 
 New pins appear over time. Before validating, search for versions this list doesn't cover:
+
 ```sh
 git grep -nE '(@v?[0-9]+\.[0-9]+|:[0-9]+(\.[0-9]+)*(-[a-z]+)?["[:space:]]|tag *= *"|version *[:=])' \
   -- ':!*lock*' ':!go.sum' ':!openspec/changes/archive' ':!internal' ':!docs/site/src/content'
 ```
+
 Also run `git ls-files | grep -iE 'dockerfile|requirements|package\.json|go\.mod|\.lock$|ya?ml$'`.
 Compare both against the files named here.
 Update anything new, and add it to this skill, so that the next run covers it.
@@ -290,6 +314,7 @@ Update anything new, and add it to this skill, so that the next run covers it.
 ### Validate
 
 Follow [.agents/kb/testing.md](../../../.agents/kb/testing.md) for every scope touched. That means:
+
 - `scripts/check full`: the build, lint and both test suites.
 - Each changed example's own checks, from its README:
   - typescript-ui: `pnpm check`, `pnpm build` and `./examples/typescript-ui/check.sh`
@@ -298,7 +323,8 @@ Follow [.agents/kb/testing.md](../../../.agents/kb/testing.md) for every scope t
   - strawberry-react: the backend's `pyright && pytest` and the UI's `pnpm check`
 - The smoke checks in [.agents/kb/smoke-checks.md](../../../.agents/kb/smoke-checks.md) for the examples and the Dockerfile.
   For the release workflow, smoke check 11, which runs `actionlint`.
-  For the chart, `helm lint --strict remote/helm/vamos` and `helm template vamos remote/helm/vamos | kubeconform -strict -summary`.
+  For the chart, `helm lint --strict remote/helm/vamos`
+  and `helm template vamos remote/helm/vamos | kubeconform -strict -summary`.
 - docs/site: `pnpm install && pnpm build && pnpm test`. Neither starts workerd, so if Wrangler or the date moved,
   also run `pnpm exec wrangler dev --port 8799` and fetch a page, as HTML and with `Accept: text/markdown`.
   If Mermaid moved, ask the user to look at fundamentals.md's diagrams in a browser: they render client-side.
@@ -310,6 +336,7 @@ Record it in the report instead of forcing it through.
 
 Commit as "Update dependencies", or as separate commits per area if the diff is large.
 Then report to the user:
+
 - what moved, per area
 - the majors that were declined or deferred
 - any update that was reverted, and why

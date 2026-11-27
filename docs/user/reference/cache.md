@@ -11,6 +11,7 @@ and performance tracing.
 ## What changes a result
 
 A target's cache key is determined by its configured inputs:
+
 - The base image identity and layers.
 - Configured steps, executable paths, and arguments.
 - Contents, permission modes, and symbolic links of added filesets.
@@ -19,6 +20,7 @@ A target's cache key is determined by its configured inputs:
 - The execution platform for targets configured with `EXEC_PLATFORM`.
 
 The following factors do not affect cache keys:
+
 - Secret values supplied via `--secret`.
 - Modification times (mtimes) of source files on your host.
 - Target names.
@@ -100,7 +102,7 @@ A prune is refused while another Vamos uses the build cache, so it never deletes
 The command reports what it removed; it counts the tool caches it removed from use,
 whose deletion, if it fails, is a warning that the next standalone prune retries:
 
-```
+```text
 Removed 3 images from the container store, and 12 results, 40 files, 2 tool caches and 0 target histories from the build cache
 ```
 
@@ -165,6 +167,7 @@ Either file opens in [Perfetto](https://ui.perfetto.dev), which reads it in your
 A command's trace holds all of its work: this process's, and each job's on its executor, local or a coordinator and
 its workers.
 It shows:
+
 - `BUILD` file parsing and package loading.
 - Input glob evaluation and source file hashing.
 - Execution steps for pulls, tasks, and layers, with their files and bytes.

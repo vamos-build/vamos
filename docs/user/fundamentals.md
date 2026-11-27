@@ -18,10 +18,12 @@ Vamos provides two operations to act on these artifacts:
 - A **task** starts from a base image, adds filesets, runs commands, and collects selected files into a new fileset.
 
 Two operations bring external inputs into a build:
+
 - **`pull()`** fetches an image from a container registry.
 - **`glob()`** selects local files into a fileset.
 
 Delivery commands take results out of the build:
+
 - `vamos push` and `vamos load` send images to a registry or Docker.
 - `vamos export` writes a task's fileset into a local folder.
 - `vamos run` (planned) shows a task's output in the terminal.
@@ -158,6 +160,7 @@ flowchart TB
 ## Example: Set up Node.js
 
 For example, to set up Node.js and packages:
+
 - Pull the Node.js image
 - Add the package manifests for `pnpm`
 - Run `pnpm install`
@@ -238,6 +241,7 @@ flowchart TD
 ## Example: Build a JS UI
 
 Building on the example above, we can build a TypeScript UI and install it into an nginx container:
+
 - Pull Node.js
 - Add install files and run pnpm install
 - Add source files and run pnpm build
@@ -320,6 +324,7 @@ layer(
 ```
 
 Steps execute in order:
+
 1. `workdir()` creates `/workspace` and sets it as the working directory for later steps and the resulting image.
 2. `add()` copies the fileset from `install-files` into `/workspace`.
 3. `run()` executes an argument list inside the container.

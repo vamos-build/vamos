@@ -11,13 +11,15 @@ A change to one of them needs the same change in `BUILD` until `BUILD` replaces 
 | --- | --- | --- |
 | `build` | The release binary: cgo, built on its target platform, with the release's tags; `--set version=v0.1.0` stamps it | The Dockerfile's `build` stage |
 | `image` | The release image, on Fedora with `containers-common` and `netavark` | The Dockerfile's final stage |
-| `lint`, `vulnerabilities`, `test` | Check tasks: golangci-lint, govulncheck and `go test -short -count=1 ./...` | `scripts/check`, except its full tier; `-count=1` because Vamos gives every added file the same time |
+| `lint`, `markdown`, `vulnerabilities`, `test` | Check tasks: golangci-lint, markdownlint-cli2, govulncheck and `go test -short -count=1 ./...` | `scripts/check`, except its full tier; `-count=1` because Vamos gives every added file the same time |
 | `release` | A publication of the checks and the image, to `localhost:5000/vamos` unless `--set repository=` names another; `vamos build release` runs all of them without publishing | Nothing yet |
 
 The checks run in `check-tools`, an image of the devcontainer's environment:
 Fedora's Go with the gpgme and btrfs headers that the default build tags need,
 `containers-common` for the image policy that the push and publish tests read,
 and golangci-lint and govulncheck at the [devcontainer](../../.devcontainer/Dockerfile)'s versions.
+`markdown` runs in `markdown-tools` instead, Fedora's Node.js with markdownlint-cli2 at the devcontainer's version,
+so that Node.js stays out of the environment that names the Go checks' cache.
 
 The workspace is named `build.vamos` in [WORKSPACE](../../WORKSPACE),
 so that `build`, `lint`, `vulnerabilities` and `test` can mount

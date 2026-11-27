@@ -11,7 +11,7 @@ TMP=$(mktemp -d)
 The MCP checks send `examples/typescript-mcp/echo-request.jsonl` over stdin and should end with its reply:
 `{"result":{"content":[{"type":"text","text":"hola"}]},"jsonrpc":"2.0","id":2}`.
 
-```
+```sh
 # 1. Command line: help works; mistakes print `vamos: ...` and exit 1
 go build -o vamos . && ./vamos --help && ./vamos nope; ./vamos load
 
@@ -52,7 +52,7 @@ S=examples/strawberry-react
 
 Check 6's reply is `{"data":{"increment":{"value":1}}}`.
 
-```
+```sh
 # 7. The golang-cli example: an index, cross-compiled; load sends the daemon's platform's image.
 # Its pull is pinned in vamos.lock, which the builds require, so that they write no lockfile.
 # Expect "hola", from each platform's image.
@@ -63,7 +63,7 @@ VAMOS_PINS=require ./vamos load echo vamos-echo -C examples/golang-cli && docker
 ./vamos update --dry-run -C examples/golang-cli
 ```
 
-```
+```sh
 # 8. export: the strawberry-react UI's generated GraphQL types, written to a temp dir, then again over them.
 # Expect src/gql's files, owned by you, and "it isn't empty" from the second, until --replace.
 S=examples/strawberry-react
@@ -72,7 +72,7 @@ S=examples/strawberry-react
   --replace -C $S
 ```
 
-```
+```sh
 # 9. A trace, queried with Perfetto's trace processor, which the devcontainer has.
 # Expect the slowest spans, then arrows from what each glob, pull or target made to the steps that use it:
 # none if every target was reused.

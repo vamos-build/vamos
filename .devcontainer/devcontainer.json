@@ -15,22 +15,32 @@
         "astro-build.astro-vscode",
         "bierner.markdown-mermaid",
         "charliermarsh.ruff",
+        "davidanson.vscode-markdownlint",
         "dbaeumer.vscode-eslint",
         "golang.go",
+        "google.google-antigravity",
         "ms-azuretools.vscode-docker",
         "ms-kubernetes-tools.vscode-kubernetes-tools",
         "ms-python.python",
         "ms-python.vscode-pylance",
         "openai.chatgpt",
         "streetsidesoftware.code-spell-checker",
-        "tamasfe.even-better-toml"
+        "tamasfe.even-better-toml",
+        "timonwong.shellcheck"
       ]
     }
   },
-  "forwardPorts": [4321, 8787],
+  "forwardPorts": [
+    4321,
+    8787
+  ],
   "portsAttributes": {
-    "4321": { "label": "docs: astro dev" },
-    "8787": { "label": "docs: wrangler dev" }
+    "4321": {
+      "label": "docs: astro dev"
+    },
+    "8787": {
+      "label": "docs: wrangler dev"
+    }
   },
   "mounts": [
     "source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind",

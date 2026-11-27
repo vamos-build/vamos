@@ -91,6 +91,7 @@ Build targets requiring secrets using local execution.
 
 Workers register their native platform architecture (such as `linux/amd64` or `linux/arm64`) with the coordinator.
 The coordinator assigns each target to a worker matching its base image's platform:
+
 - A cluster with both `linux/amd64` and `linux/arm64` workers builds multi-platform image indexes natively,
   executing each platform's build steps on native hardware.
 - Pulls and targets that only add files without running commands run on any available worker
@@ -171,6 +172,7 @@ The coordinator keeps them with the job, so that a job resumed after a restart s
 ### Remote cache pruning
 
 Run `vamos prune --coordinator <URL>` to prune the remote cache:
+
 - Removes coordinator build records and uploaded workspace files.
 - Deletes all cached layer tags from the cache repository (dedicate this repository to the Vamos cache).
 - Preserves recorded tag resolutions and cached upstream layers in the pull-through cache.
@@ -183,6 +185,7 @@ Storage space in the registry is reclaimed when the registry's garbage collectio
 ### Docker Compose
 
 The `remote/compose.yaml` file runs a local cluster for development and evaluation:
+
 - A coordinator (`coordinator:8080`) offering `${VAMOS_PLATFORM:-linux/amd64}`.
 - Two local workers (scale with `--scale worker=3`).
 - A local registry (`registry:5000`) serving as the cache repository.
@@ -206,6 +209,7 @@ vamos build //:app --coordinator http://coordinator:8080
 
 The `remote/helm/vamos` directory provides a Helm chart for Kubernetes clusters.
 The chart deploys:
+
 - A coordinator StatefulSet and Service with persistent volume storage for `--cache-dir`.
 - Worker Deployments across node pools of differing CPU architectures,
   configuring a private cgroup namespace for each worker container.
@@ -222,6 +226,7 @@ See [`vamos coordinator`](cli/coordinator.md) and [`vamos worker`](cli/worker.md
 ## Worker requirements
 
 Worker daemons have specific host and container requirements:
+
 - **Root privileges**: Workers must run as root to manage container namespaces and filesystem layers.
 - **cgroup v2 and namespaces**: Workers manage target processes within cgroup hierarchies under `/sys/fs/cgroup/vamos`.
   Workers require a private cgroup namespace (standard in Docker; configured in Kubernetes via the Helm chart).

@@ -32,7 +32,7 @@ docker build . -t vamos
 
 ## Test
 
-```
+```sh
 go test ./...          # everything, including image builds; needs root
 go test -short ./...   # command line and BUILD file checks only
 ```

@@ -11,7 +11,8 @@ and shared Starlark modules.
 ## Workspaces
 
 A **package** is any directory containing a `BUILD` or `BUILD.vms` file.
-A **workspace** groups packages beneath a common root directory containing a `WORKSPACE` file (which can be empty), which may [name the workspace](#naming-a-workspace).
+A **workspace** groups packages beneath a common root directory containing a `WORKSPACE` file (which can be empty),
+which may [name the workspace](#naming-a-workspace).
 
 Name a package file `BUILD.vms` if the directory also contains a `build` output directory.
 On case-insensitive filesystems (such as macOS default filesystems or Git repositories with `core.ignorecase`),
@@ -278,6 +279,7 @@ A layer's base image must match the layer's platform; use a task to decouple bui
 #### Execution platform selection
 
 The execution platform is resolved before reading `BUILD` files:
+
 1. The platform specified by `--exec-platform`.
 2. The coordinator's `--default-exec-platform` when building remotely.
 3. The host platform if supported by the executor.

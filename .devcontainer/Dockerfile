@@ -40,6 +40,8 @@ RUN dnf -y install \
     zip \
  && dnf clean all
 
+RUN git config --system credential.https://github.com.helper '!gh auth git-credential'
+
 # Perfetto's trace processor, to query the traces that `vamos --trace` writes, by SQL.
 RUN case "$(uname -m)" in \
       x86_64) arch=amd64 sum=7deb8c2572c6ae7ec80cd719d388041079827b0c44a1659694d5d88faa4f501e ;; \
@@ -91,12 +93,14 @@ RUN GOBIN=/usr/local/bin GOMODCACHE=/tmp/gomodcache GOCACHE=/tmp/gocache \
       go install golang.org/x/vuln/cmd/govulncheck@v1.9.0 \
  && rm -rf /tmp/gomodcache /tmp/gocache
 
+# markdownlint-cli2, the engine behind the davidanson.vscode-markdownlint extension, to report the same
+# Markdown problems at the command line.
 # Mermaid's CLI, mmdc, to render the diagrams in Markdown, such as docs/design's, to images for review.
 # Puppeteer drives Fedora's headless Chromium rather than downloading its own, with Chromium's sandbox off,
 # since Chromium won't start as root with it on; the wrapper gives mmdc both through a Puppeteer config.
 # min-release-age takes dependencies at least two weeks old, as the repository's npm projects do.
 RUN PUPPETEER_SKIP_DOWNLOAD=1 npm install -g --min-release-age=14 --no-fund --no-audit \
-      @mermaid-js/mermaid-cli@12.2.0 puppeteer@25.16.0 \
+      markdownlint-cli2@0.24.1 @mermaid-js/mermaid-cli@12.2.0 puppeteer@25.16.0 \
  && printf '%s\n' '{ "executablePath": "/usr/lib64/chromium-browser/headless_shell", "args": ["--no-sandbox"] }' \
       > /usr/local/etc/mmdc-puppeteer.json \
  && rm -f /usr/local/bin/mmdc \
@@ -109,6 +113,9 @@ RUN PUPPETEER_SKIP_DOWNLOAD=1 npm install -g --min-release-age=14 --no-fund --no
 # Their installers append PATH lines to .bashrc or .bash_profile; restore both, and set PATH once instead,
 # for every process rather than only interactive shells.
 # Fedora's .bashrc adds ~/.local/bin and ~/bin unless PATH already starts with them, so it starts with both.
+# Then install herdr's Claude, Codex and Antigravity integrations, and skip its first-run onboarding, which would ask
+# for them. herdr installs a hook only into an existing agent config directory, which Antigravity creates only on first
+# run. Panes start bash, since herdr falls back from an unset $SHELL to /bin/sh.
 ENV PATH=/root/.local/bin:/root/bin:$PATH
 RUN cp /root/.bashrc /root/.bash_profile /tmp/ \
  && curl -LfsS https://antigravity.google/cli/install.sh | bash \
@@ -116,7 +123,12 @@ RUN cp /root/.bashrc /root/.bash_profile /tmp/ \
  && curl -LfsS https://chatgpt.com/codex/install.sh | bash \
  && curl -LfsS https://herdr.dev/install.sh | bash \
  && curl -fsSL https://cli.dosu.dev/install | sh \
- && mv /tmp/.bashrc /tmp/.bash_profile /root/
+ && mv /tmp/.bashrc /tmp/.bash_profile /root/ \
+ && mkdir -p /root/.claude /root/.codex /root/.gemini/config /root/.config/herdr \
+ && herdr integration install claude \
+ && herdr integration install codex \
+ && herdr integration install antigravity-cli \
+ && printf '%s\n' 'onboarding = false' '' '[terminal]' 'default_shell = "/bin/bash"' > /root/.config/herdr/config.toml
 
 # Run build steps with chroot isolation, so no OCI runtime is needed.
 ENV BUILDAH_ISOLATION=chroot

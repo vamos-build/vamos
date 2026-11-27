@@ -174,6 +174,7 @@ sequenceDiagram
 ```
 
 Sharing operates under specific coordination rules:
+
 - **Cache miss attachment**: An ordinary job encountering a cache miss attaches to an existing in-flight attempt
   for that action key, including an attempt initiated by a forced rebuild.
 - **Forced rebuilds**: A job running with `--rebuild` bypasses cache lookups and does not attach to existing attempts.
@@ -205,6 +206,7 @@ The `sched.Jobs` registry manages all active jobs on an executor.
 Each job runs in its own goroutine with a context that terminates only upon cancellation via `Cancel`.
 Jobs stream progress events to a bounded buffer that enforces limits on both event count and total bytes.
 Clients read events by position without blocking execution:
+
 - If a client requests a position that has expired from the buffer, the stream emits a gap event.
 - If a client falls behind the stream write buffer, the watch connection drops with `api.ErrFellBehind`,
   requiring the client to reconnect from its last received position.
@@ -355,6 +357,7 @@ sequenceDiagram
 ```
 
 Both build and prune operations request non-blocking locks (`flock`):
+
 - If a prune request encounters an active build holding a shared lock,
   or a build encounters an active prune holding an exclusive lock,
   the operation fails immediately with an error identifying the conflicting store access.

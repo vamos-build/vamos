@@ -1,0 +1,27 @@
+// markdownlint-cli2 and the davidanson.vscode-markdownlint extension both read this file.
+// Run `markdownlint-cli2` from the repository root to lint every Markdown file.
+{
+  "config": {
+    // .agents/kb/documentation.md wraps prose within 120 columns; tables and literal examples stay intact.
+    "MD013": { "line_length": 120, "tables": false, "code_blocks": false },
+    // The README's logo and the fundamentals page's artifact grid need HTML that Markdown can't express.
+    "MD033": {
+      "allowed_elements": ["h1", "img", "p", "picture", "source", "table", "tbody", "td", "th", "thead", "tr"]
+    },
+    // Tables are written `| cell |` without padding, so one changed cell doesn't realign the whole table in diffs.
+    "MD060": { "style": "compact" },
+    // CLAUDE.md opens with an @-import, and skills open with front matter that has no title.
+    "MD041": false
+  },
+  "globs": ["**/*.md"],
+  "gitignore": true,
+  "ignores": [
+    // Written by `openspec init` and `openspec update`, which would overwrite any fixes.
+    ".agents/skills/openspec-*/**",
+    ".agents/workflows/**",
+    ".claude/commands/opsx/**",
+    ".claude/skills/openspec-*/**",
+    // Archived change proposals are a record, kept as they were written.
+    "openspec/changes/archive/**"
+  ]
+}

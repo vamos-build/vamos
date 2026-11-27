@@ -96,6 +96,7 @@ flowchart LR
 ```
 
 Compatibility across versions is guarded by two independent version identifiers:
+
 - `graph.Version` increments when the serialized representation or validation of a graph changes.
   An executor verifies this version to ensure it does not misinterpret a graph submitted by a newer client.
 - `sched.ActionVersion` increments when cache key computation or execution semantics change.

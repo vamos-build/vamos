@@ -115,6 +115,7 @@ classDiagram
 ```
 
 Data transfer adheres to strict serialization formats:
+
 - Protocol metadata serializes as JSON matching `api` structures.
 - Blobs stream as raw HTTP request bodies, verified by sha256 checksums on both read and write.
   This verification distinguishes transmission corruption from missing objects.
@@ -150,6 +151,7 @@ sequenceDiagram
 ```
 
 Communication is designed for network fault tolerance:
+
 - Submissions (both `Submit` and `Prune`) include a client-generated UUID.
   If an acknowledgement is lost, resubmitting with the same UUID returns the existing job handle
   without duplicating execution.
@@ -199,6 +201,7 @@ sequenceDiagram
 ```
 
 Execution timing enforces strict ordering:
+
 - A worker spawns the attempt subprocess only after its initial lease renewal succeeds,
   compensating for transmission latency during assignment dispatch.
 - Output logs and trace spans stream through bounded in-memory buffers;
@@ -223,7 +226,8 @@ The runner deletes an attempt's caches itself before it removes the container, w
 since `DeleteContainer` holds the store's locks throughout and would stall the worker's other attempts.
 What a killed or crashed attempt leaves goes with its container: `run.RemoveAttempt`, which the worker calls after
 every attempt and, on starting, for each one a crash left, deletes the container directory's `tool-caches/` first,
-outside the store's locks, then removes the container, whose own removal tries the delete again if that failed, and returns the
+outside the store's locks, then removes the container,
+whose own removal tries the delete again if that failed, and returns the
 failure, wrapped to say it was the caches. It takes a container whose layer is gone as already unmounted, so that a
 removal that failed partway, as one racing a process that a failed kill left writing can, is finished by the next.
 
@@ -264,6 +268,7 @@ stateDiagram-v2
 ```
 
 Fencing operates through cooperative timeouts:
+
 - The worker calculates lease expiration using its local monotonic clock.
   It fences an attempt at a conservative fraction of the lease duration,
   measured from when the heartbeat request was *sent*.
@@ -285,10 +290,12 @@ Fencing operates through cooperative timeouts:
 ### Assignment
 
 The coordinator dispatches work using balanced scheduling priorities:
+
 1. Actions from builds with the fewest currently running attempts are dispatched first.
 2. Older actions within a build take priority over newer ones.
 
 Platform matching guarantees native execution:
+
 - A build treats a platform as native if it was offered when the build was submitted,
   either by configuration (`--offer`) or by a registered worker, or if one is offered later as the build reaches it.
   Command-running actions for a native platform run only on workers of that platform,
@@ -338,6 +345,7 @@ flowchart LR
 ```
 
 Journaling enforces specific crash invariants:
+
 - A job's record is written, synced, and renamed into place immediately upon admitting the job,
   before returning the submission response to the client.
   An exclusive lock file (`lock`) in the state directory prevents multiple coordinator processes

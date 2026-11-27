@@ -2,7 +2,7 @@
 # Check the fundamentals page's image and exported website from the repository root.
 set -eu
 
-project_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+project_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 vamos_cli=${VAMOS:-./vamos}
 scratch=$(mktemp -d)
 container="vamos-typescript-ui-check-$$"
