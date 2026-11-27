@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"iter"
 	"os"
 	"path"
 	"path/filepath"
@@ -71,14 +72,28 @@ type resolution struct {
 	// through is every directory it passed through on the way, in order, its end and the root, which no cache can be,
 	// left out.
 	through []string
+	// unfollowable says why the kernel couldn't follow the path to its location, where a step would fail to reach it:
+	// a ".." after a missing component or a file, or a component beneath a file; "" if it could. Setup makes only
+	// missing components that end the path, which it can.
+	unfollowable string
 }
+
+// maxSymlinks is how many symbolic links Linux follows in resolving one path before it fails with ELOOP.
+const maxSymlinks = 40
 
 // resolveIn resolves p, an absolute path, in the root filesystem at root, following symbolic links within it as
 // securejoin does, a ".." at its top staying there and a missing component taken as it is, and returns where it
-// leads and what it passed through.
+// leads and what it passed through, and whether the kernel could follow it there.
 func resolveIn(root, p string) (resolution, error) {
 	var res resolution
 	current := "/"
+	// What current is, as long as the kernel could follow the path that far: a directory, missing, or something else.
+	missing, notDir := false, false
+	block := func(why string) {
+		if res.unfollowable == "" {
+			res.unfollowable = why
+		}
+	}
 	pending := strings.Split(p, "/")
 	links := 0
 	for len(pending) > 0 {
@@ -86,23 +101,38 @@ func resolveIn(root, p string) (resolution, error) {
 		pending = pending[1:]
 		switch component {
 		case "", ".":
+			// The kernel looks a trailing "/" or a "." up as current itself, which must be a directory.
+			if notDir {
+				block(fmt.Sprintf("it goes beneath %s, which isn't a directory", current))
+			}
 			continue
 		case "..":
+			switch {
+			case missing:
+				block(fmt.Sprintf("it goes back up from %s, which doesn't exist", current))
+			case notDir:
+				block(fmt.Sprintf("it goes back up from %s, which isn't a directory", current))
+			}
 			res.pass(current)
 			current = path.Dir(current)
 			continue
 		}
 		res.pass(current)
+		if notDir {
+			block(fmt.Sprintf("it goes beneath %s, which isn't a directory", current))
+		}
 		next := path.Join(current, component)
 		info, err := os.Lstat(filepath.Join(root, next))
 		switch {
-		case errors.Is(err, os.ErrNotExist), errors.Is(err, syscall.ENOTDIR):
+		case errors.Is(err, os.ErrNotExist):
+			current, missing = next, true
+		case errors.Is(err, syscall.ENOTDIR):
 			current = next
 		case err != nil:
 			return resolution{}, err
 		case info.Mode()&os.ModeSymlink != 0:
 			links++
-			if links > 255 {
+			if links > maxSymlinks {
 				return resolution{}, fmt.Errorf("resolving %s: too many levels of symbolic links", p)
 			}
 			target, err := os.Readlink(filepath.Join(root, next))
@@ -114,7 +144,7 @@ func resolveIn(root, p string) (resolution, error) {
 			}
 			pending = append(strings.Split(target, "/"), pending...)
 		default:
-			current = next
+			current, notDir = next, !info.IsDir()
 		}
 	}
 	res.location = current
@@ -130,9 +160,6 @@ func (res *resolution) pass(dir string) {
 
 // within reports whether the clean absolute path p is dir, or beneath it.
 func within(p, dir string) bool { return graph.Within(p, dir) }
-
-// overlap reports whether one of the clean absolute paths a and b is, or holds, the other.
-func overlap(a, b string) bool { return within(a, b) || within(b, a) }
 
 // idMappingName names the builder's ID mappings in a cache's directory: the digest of the UID and GID mappings, or
 // "host" without any, so that a builder that maps IDs otherwise finds another directory.
@@ -431,6 +458,11 @@ func (st *targetState) checkCaches(overlapping, passing []watched, locate bool) 
 			return fmt.Errorf("tool cache path %s resolves through %s, to %s, where buildah mounts the host's own",
 				m.Path, root, res.location)
 		}
+		if res.unfollowable != "" {
+			return fmt.Errorf("tool cache path %s leads to %s only as Vamos resolves it, not as a run() step "+
+				"would follow it: %s; mount the cache at a path that a step can reach", m.Path, res.location,
+				res.unfollowable)
+		}
 		if locate {
 			m.location = res.location
 		} else if res.location != m.location {
@@ -438,32 +470,80 @@ func (st *targetState) checkCaches(overlapping, passing []watched, locate bool) 
 				"mount the cache at a path that the target's steps leave alone", m.Path, res.location, m.location)
 		}
 	}
-	for i, m := range tc.mounts {
-		for _, other := range tc.mounts[:i] {
-			if overlap(m.location, other.location) {
-				return fmt.Errorf("tool cache paths %s and %s resolve to %s and %s, one within the other",
-					other.Path, m.Path, other.location, m.location)
-			}
+	var index locations
+	for _, m := range tc.mounts {
+		if other := index.overlapping(m.location); other != nil {
+			return fmt.Errorf("tool cache paths %s and %s resolve to %s and %s, one within the other",
+				other.Path, m.Path, other.location, m.location)
 		}
+		index.add(m)
 	}
 	for _, w := range overlapping {
 		res, err := st.resolve(w.path)
 		if err != nil {
 			return err
 		}
-		for _, m := range tc.mounts {
-			if overlap(res.location, m.location) {
-				return fmt.Errorf("%s resolves to %s, which overlaps the tool cache at %s, mounted at %s",
-					w.what, res.location, m.Path, m.location)
-			}
+		if m := index.overlapping(res.location); m != nil {
+			return fmt.Errorf("%s resolves to %s, which overlaps the tool cache at %s, mounted at %s",
+				w.what, res.location, m.Path, m.location)
 		}
 	}
-	return st.checkPassesThrough(passing)
+	return st.checkPassesThrough(&index, passing)
+}
+
+// locations indexes the locations of caches, so that a check of a path against them walks the path's ancestors,
+// however many caches there are, rather than comparing it with each.
+type locations struct {
+	at    map[string]*toolCacheMount // the cache at each location
+	above map[string]*toolCacheMount // a cache at or beneath each directory, the root included
+}
+
+// add adds m's location to the index.
+func (l *locations) add(m *toolCacheMount) {
+	if l.at == nil {
+		l.at, l.above = map[string]*toolCacheMount{}, map[string]*toolCacheMount{}
+	}
+	l.at[m.location] = m
+	for dir := range ancestry(m.location) {
+		if _, ok := l.above[dir]; !ok {
+			l.above[dir] = m
+		}
+	}
+}
+
+// within returns a cache whose location is p or holds it, or nil.
+func (l *locations) within(p string) *toolCacheMount {
+	for dir := range ancestry(p) {
+		if m, ok := l.at[dir]; ok {
+			return m
+		}
+	}
+	return nil
+}
+
+// overlapping returns a cache whose location is p, holds it, or lies beneath it, or nil.
+func (l *locations) overlapping(p string) *toolCacheMount {
+	if m := l.within(p); m != nil {
+		return m
+	}
+	return l.above[p]
+}
+
+// ancestry yields p, a clean absolute path, then each directory above it, ending with the root.
+func ancestry(p string) iter.Seq[string] {
+	return func(yield func(string) bool) {
+		for {
+			if !yield(p) || p == "/" {
+				return
+			}
+			p = path.Dir(p)
+		}
+	}
 }
 
 // checkPassesThrough refuses a cache path, the working directory or one of watched whose resolution passes through
 // a cache's location before its end, its own included: what a warm cache holds could lead it elsewhere once mounted.
-func (st *targetState) checkPassesThrough(watchedPaths []watched) error {
+func (st *targetState) checkPassesThrough(index *locations, watchedPaths []watched) error {
 	tc := st.caches
 	// The working directory as it is, and as buildah cleans it before it enters it.
 	paths := append([]watched{{what: "the working directory " + st.workdir(), path: st.workdir()}}, watchedPaths...)
@@ -482,11 +562,9 @@ func (st *targetState) checkPassesThrough(watchedPaths []watched) error {
 			return err
 		}
 		for _, p := range res.through {
-			for _, m := range tc.mounts {
-				if within(p, m.location) {
-					return fmt.Errorf("%s resolves through %s, within the tool cache at %s, whose contents could "+
-						"lead it elsewhere", w.what, p, m.Path)
-				}
+			if m := index.within(p); m != nil {
+				return fmt.Errorf("%s resolves through %s, within the tool cache at %s, whose contents could "+
+					"lead it elsewhere", w.what, p, m.Path)
 			}
 		}
 	}
@@ -688,12 +766,15 @@ func (st *targetState) afterSteps() error {
 	if err := st.checkWorkdir(); err != nil {
 		return err
 	}
-	if st.caches.prepared {
-		if err := st.checkMountPoints(); err != nil {
-			return err
-		}
+	// Where each path leads first, as before a run() step: a step that made an ancestor a link would otherwise have
+	// the mount point inspected through it.
+	if err := st.checkCaches(st.watchedPaths(nil), st.watchedPaths(st.caches.secrets), false); err != nil {
+		return err
 	}
-	return st.checkCaches(st.watchedPaths(nil), st.watchedPaths(st.caches.secrets), false)
+	if st.caches.prepared {
+		return st.checkMountPoints()
+	}
+	return nil
 }
 
 // checkInto refuses what, a path a step writes to or output is collected from, that resolves at or beneath a cache.

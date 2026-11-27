@@ -72,7 +72,8 @@ func TestToolCaches_TheToolCacheRuleDeclaresACache(t *testing.T) {
 
 // TestToolCaches_AToolCacheIsMountedNeverBuilt specifies that a tool_cache rule is no target: every command that takes
 // a target refuses its label, and a base, dep(), add() or publication check that names it fails, each saying that a
-// tool cache is mounted with mount(); and that vamos update passes over it.
+// tool cache is mounted with mount(); that vamos update passes over it; and that a name that is neither suggests
+// tool caches only to mount(), and targets only elsewhere.
 func TestToolCaches_AToolCacheIsMountedNeverBuilt(t *testing.T) {
 	parallelRule(t)
 	t.Run("Building a tool cache", func(t *testing.T) {
@@ -108,6 +109,30 @@ func TestToolCaches_AToolCacheIsMountedNeverBuilt(t *testing.T) {
 		w.WhenIUpdate()
 		w.ThenItSucceeds()
 		w.ThenTheLockfileIs(lockfilePinning(pin{"<registry>/base:v1", "v1", "<digest of <registry>/base:v1>"}))
+	})
+
+	t.Run("A misspelled target suggests targets alone", func(t *testing.T) {
+		w := newToolCacheMistakeWorld(t)
+		w.GivenTheBuildFileDeclares(`
+			tool_cache(name = "gocache", path = "/cache")
+			layer(name = "app", base = "scratch")
+		`)
+		w.WhenIBuild("gocahce")
+		w.ThenItFailsWith(`/project/BUILD has no target "gocahce"; its targets are "app"`)
+		w.ThenNoTargetRan()
+	})
+
+	t.Run("A misspelled cache that a function of ctx mounts suggests tool caches alone", func(t *testing.T) {
+		w := newToolCacheMistakeWorld(t)
+		w.GivenTheBuildFileDeclares(`
+			tool_cache(name = "gocache", path = "/cache")
+			layer(name = "gobuild", base = "scratch")
+			task(name = "app", base = "scratch", tool_caches = lambda ctx: [mount("gobuld")], steps = [run(["true"])])
+		`)
+		w.WhenIBuild("app")
+		w.ThenItFailsWith(`/project/BUILD:3:5: task "app": tool_caches[0] "gobuld": ` +
+			`/project/BUILD has no tool cache "gobuld"; its tool caches are "gocache" (configuring //:app)`)
+		w.ThenNoTargetRan()
 	})
 
 	t.Run("Depending on a tool cache", func(t *testing.T) {
@@ -1159,7 +1184,7 @@ func TestToolCaches_AnExecutorRefusesAWorkingDirectoryInACache(t *testing.T) {
 			layer(name = "aliased", base = "busybox", steps = [env(CACHE = "/cache")])
 			tool_cache(name = "tool", path = "/cache")
 			task(name = "build", base = "aliased", tool_caches = [mount("tool")],
-			     steps = [workdir("$CACHE"), run(["sh", "-c", "echo step ran > out"])])
+			     steps = [workdir("$CACHE"), run(["sh", "-c", "echo step ran; echo > out"])])
 		`)
 		w.WhenIBuild("build")
 		w.ThenItFailsWith(`task "build"`, "/cache", "working directory")

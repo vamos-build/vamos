@@ -456,9 +456,10 @@ task(name = "app", base = "base", tool_caches = [mount("tool")], steps = [run(["
 	}
 }
 
-// TestToolCachesOfAConfiguredTarget checks that a target given by a function of ctx keeps the lists it was declared
-// with, which a later append doesn't change, even one list given for two arguments, and that tool_caches given by a
-// function resolve as the target is configured, once every BUILD file has run.
+// TestToolCachesOfAConfiguredTarget checks that a target given by a function of ctx keeps the tool_caches it was
+// declared with, by name or by position, which a later append doesn't change, even one list given for two arguments,
+// while its other lists are read as it is configured, as they always were; and that tool_caches given by a function
+// resolve as the target is configured, once every BUILD file has run.
 func TestToolCachesOfAConfiguredTarget(t *testing.T) {
 	g, err := loadNamed(t, `
 caches = []
@@ -468,21 +469,29 @@ task(name = "appended", base = "scratch", tool_caches = caches, steps = lambda c
 task(name = "given", base = "scratch", tool_caches = lambda ctx: [mount("tool")], steps = [run(["true"])])
 shared = []
 layer(name = "aliased", base = "scratch", command = shared, tool_caches = shared, steps = lambda ctx: [])
+positional = []
+layer("positional", "scratch", lambda ctx: [], [], [], positional)
 tool_cache(name = "tool", path = "/cache")
 caches.append(mount("tool"))
 include.append("b")
 shared.append("echo")
-`, nil, "appended", "given", "aliased")
+positional.append(mount("tool"))
+`, nil, "appended", "given", "aliased", "positional")
 	testenv.Must(t, err)
 	appended := g.Node(g.Roots[0]).Task
 	if appended.ToolCaches != nil {
 		t.Errorf("appended mounts %+v; want none, as declared", appended.ToolCaches)
 	}
-	if got := appended.Output.Selection.Include; !reflect.DeepEqual(got, []string{"a"}) {
-		t.Errorf("appended includes %q; want [a], as declared", got)
+	if got := appended.Output.Selection.Include; !reflect.DeepEqual(got, []string{"a", "b"}) {
+		t.Errorf("appended includes %q; want [a b], as appended", got)
 	}
-	if got := g.Node(g.Roots[2]).Layer.Command; len(got) != 0 {
-		t.Errorf("aliased's command = %q; want none, as declared", got)
+	aliased := g.Node(g.Roots[2]).Layer
+	if !reflect.DeepEqual(aliased.Command, []string{"echo"}) || aliased.ToolCaches != nil {
+		t.Errorf("aliased's command = %q, mounts %+v; want [echo], as appended, and none, as declared",
+			aliased.Command, aliased.ToolCaches)
+	}
+	if got := g.Node(g.Roots[3]).Layer.ToolCaches; got != nil {
+		t.Errorf("positional mounts %+v; want none, as declared", got)
 	}
 	want := []graph.ToolCache{{Path: "/cache", Label: "//:tool"}}
 	if got := g.Node(g.Roots[1]).Task.ToolCaches; !reflect.DeepEqual(got, want) {

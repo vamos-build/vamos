@@ -444,17 +444,24 @@ func (f *buildFile) namesOf(kinds ...string) []string {
 	return names
 }
 
-// missing reports that f has no target name, suggesting the one meant.
-func (f *buildFile) missing(name string) error {
-	hint := "; its targets are " + fileset.QuoteNames(f.names)
+// missing reports that f has no target name, or no tool cache if cache is set, as mount() names one, suggesting the
+// one meant from those alone: a tool cache is no target, and only a tool cache can be mounted.
+func (f *buildFile) missing(name string, cache bool) error {
+	what, plural := "target", "targets"
+	isCache := func(n string) bool { return f.decls[n].kind == "tool_cache" }
+	names := slices.DeleteFunc(slices.Clone(f.names), isCache)
+	if cache {
+		what, plural, names = "tool cache", "tool caches", f.namesOf("tool_cache")
+	}
+	hint := fmt.Sprintf("; its %s are %s", plural, fileset.QuoteNames(names))
 	if strings.Contains(name, ":") {
 		hint = labelHint(name)
-	} else if len(f.names) == 0 {
+	} else if len(names) == 0 {
 		hint = "; it declares none"
-	} else if closest := closestName(name, f.names); closest != "" {
+	} else if closest := closestName(name, names); closest != "" {
 		hint = fmt.Sprintf("; did you mean %q?", closest)
 	}
-	return fmt.Errorf("%s has no target %q%s", f.path, name, hint)
+	return fmt.Errorf("%s has no %s %q%s", f.path, what, name, hint)
 }
 
 // exec executes the BUILD file f, whose source is src, declaring its targets in f.
@@ -638,9 +645,9 @@ func (w *workspace) declarer(kind string, params []string, makeTemplate makeFunc
 		var name string
 		// A tool cache's arguments are checked as the BUILD file runs, so a function among them is refused there.
 		if kind != "tool_cache" && hasFunction(args, kwargs) {
-			// The target is made later from its arguments as they are now, which a BUILD file appending to a list it
-			// passed can't change, just as it can't change a target made from them at once.
-			args, kwargs = copyLists(args, kwargs)
+			// The tool caches are checked now, below, so the target is made later from the list as it is now, which a
+			// BUILD file appending to it can't change. Its other lists are read when it is made, as they always were.
+			args, kwargs = copyToolCaches(params, args, kwargs)
 			// Check what can be checked now: the parameters given, and the name.
 			values := make([]starlark.Value, len(params))
 			pairs := make([]any, 0, 2*len(params))
@@ -733,22 +740,28 @@ func takeParams(fnName string, kwargs []starlark.Tuple) ([]starlark.Tuple, []*pa
 	return slices.Delete(slices.Clone(kwargs), i, i+1), params, err
 }
 
-// copyLists returns a call's arguments with each list among them, each time it is given, replaced by a copy of its
-// own, leaving the call's own untouched.
-func copyLists(args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Tuple, []starlark.Tuple) {
+// copyToolCaches returns a call's arguments with its tool_caches, if params has it and the call gives a list, replaced
+// by a copy of its own, leaving the call's own untouched.
+func copyToolCaches(params []string, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Tuple, []starlark.Tuple) {
+	i := slices.Index(params, "tool_caches?")
+	if i < 0 {
+		return args, kwargs
+	}
 	copied := func(v starlark.Value) starlark.Value {
 		if list, ok := v.(*starlark.List); ok {
 			return starlark.NewList(slices.Collect(list.Elements()))
 		}
 		return v
 	}
-	args = slices.Clone(args)
-	for i, v := range args {
-		args[i] = copied(v)
+	if i < len(args) {
+		args = slices.Clone(args)
+		args[i] = copied(args[i])
 	}
 	kwargs = slices.Clone(kwargs)
-	for i, kv := range kwargs {
-		kwargs[i] = starlark.Tuple{kv[0], copied(kv[1])}
+	for k, kv := range kwargs {
+		if kv[0] == starlark.String("tool_caches") {
+			kwargs[k] = starlark.Tuple{kv[0], copied(kv[1])}
+		}
 	}
 	return args, kwargs
 }
@@ -885,7 +898,7 @@ func (w *workspace) resolveAs(c *evalContext, who, param string, ref *targetRef,
 		return nil, fmt.Errorf("%s: %s %q is not %san earlier %s%s",
 			who, param, ref.ref, scratchHint, want, describeNames(listed, from.namesOf(kinds...)))
 	case !ok:
-		return nil, fmt.Errorf("%s: %s %q: %w", who, param, ref.ref, from.missing(name))
+		return nil, fmt.Errorf("%s: %s %q: %w", who, param, ref.ref, from.missing(name, use == useCache))
 	case d.kind == "tool_cache" && use != useCache:
 		return nil, fmt.Errorf("%s: %s: %w", who, param, noTarget(ref.ref))
 	case d.kind == "publication" && use != useCache:
@@ -1282,7 +1295,7 @@ func (w *workspace) target(ref string) (string, string, error) {
 	}
 	d, ok := f.decls[name]
 	if !ok {
-		return "", "", f.missing(name)
+		return "", "", f.missing(name, false)
 	}
 	if d.kind == "tool_cache" {
 		return "", "", noTarget(ref)

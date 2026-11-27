@@ -68,6 +68,7 @@ What a step writes beneath a cache's path stays in the cache, never in a layer's
 which holds an empty directory there.
 A tool cache is no target: a command that builds or sends it, and a `base`, `dep()`, `add()` or publication check
 that names it, fails.
+A misspelled name suggests tool caches to `mount()` alone, and targets alone elsewhere.
 
 ## Caches never change what is built
 
@@ -136,6 +137,7 @@ a secret's file at, within or above a cache,
 an `add()` destination or `workdir()` within a cache, and a task's `source` within one.
 The paths a variable or a symbolic link decides are checked as the target runs:
 a path the image already holds files at, a step that moves a cache's path or puts something at it,
+a cache's path that a step couldn't follow, such as through a link to `/absent/../real` when `/absent` is missing,
 and a working directory, `add()` destination, secret or `source` that resolves into a cache
 each fail the target.
 

@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/vamos-build/vamos/internal/cache"
 	"github.com/vamos-build/vamos/internal/fileset"
@@ -297,6 +298,15 @@ func TestGraphValidate(t *testing.T) {
 			want:   "tool cache //:go-mod at /cache/go-build/mod is within //tools:go-build at /cache/go-build",
 		},
 		{
+			name: "nested tool caches with another between them",
+			change: func(g *Graph) {
+				caches := &g.Nodes[2].Task.ToolCaches
+				*caches = append((*caches)[:1], ToolCache{Path: "/cache/go-build-x", Label: "//:x"},
+					ToolCache{Path: "/cache/go-build/mod", Label: "//:mod"})
+			},
+			want: "tool cache //:mod at /cache/go-build/mod is within //tools:go-build at /cache/go-build",
+		},
+		{
 			name:   "a tool cache without a label",
 			change: func(g *Graph) { g.Nodes[2].Task.ToolCaches[0].Label = "" },
 			want:   `tool cache "" at /cache/go-build isn't a canonical label`,
@@ -370,6 +380,43 @@ func TestGraphValidate(t *testing.T) {
 				t.Fatalf("validate() = nil, want error containing %q", tt.want)
 			case tt.want != "" && !strings.Contains(err.Error(), tt.want):
 				t.Fatalf("validate() = %q, want it to contain %q", err, tt.want)
+			}
+		})
+	}
+}
+
+// TestGraphValidateManyToolCaches checks that tool caches, as a client could send a coordinator within its limit on a
+// graph's size, validate in time that grows with their size, not with its square: many caches, or one deep path.
+func TestGraphValidateManyToolCaches(t *testing.T) {
+	const n = 100_000
+	many := make([]ToolCache, n)
+	for i := range many {
+		many[i] = ToolCache{Path: fmt.Sprintf("/cache/%06d/c", i), Label: fmt.Sprintf("//:c%06d", i)}
+	}
+	for _, tc := range []struct {
+		name   string
+		caches []ToolCache
+	}{
+		{name: "many caches", caches: many},
+		{name: "one deep path", caches: []ToolCache{{Path: strings.Repeat("/a", 1_000_000), Label: "//:deep"}}},
+		{
+			name: "deep caches side by side",
+			caches: []ToolCache{
+				{Path: strings.Repeat("/a", 500_000), Label: "//:one"},
+				{Path: strings.Repeat("/a", 500_000) + "b", Label: "//:two"},
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			g := testGraph(t)
+			g.Nodes[2].Task.ToolCaches = tc.caches
+			start := time.Now()
+			if err := g.Validate(); err != nil {
+				t.Fatal(err)
+			}
+			// Quadratic checks take many seconds, or hours; these take well under one, even under -race.
+			if took := time.Since(start); took > 10*time.Second {
+				t.Errorf("validating took %v", took)
 			}
 		})
 	}

@@ -28,34 +28,85 @@ import (
 )
 
 // TestResolveIn checks that a path is resolved in a root filesystem as the container would follow it, never leaving
-// it, and that what it passes through on the way is recorded.
+// it, that what it passes through on the way is recorded, and that a path the kernel couldn't follow is marked so:
+// one that goes back up from a missing component or a file, or beneath a file, or through more links than Linux's 40.
 func TestResolveIn(t *testing.T) {
 	root := t.TempDir()
 	for _, dir := range []string{"real/sub", "first/entry", "second"} {
 		testenv.Must(t, os.MkdirAll(filepath.Join(root, dir), 0o755))
 	}
-	for link, target := range map[string]string{
-		"alias":    "/real",
-		"relative": "real/sub",
-		"nested":   "alias/sub",
-		"up":       "../../../real",
-		"joined":   "first/entry/../../second",
-		"loop":     "loop",
-	} {
+	testenv.Must(t, os.WriteFile(filepath.Join(root, "file"), nil, 0o644))
+	links := map[string]string{
+		"alias":      "/real",
+		"relative":   "real/sub",
+		"nested":     "alias/sub",
+		"up":         "../../../real",
+		"joined":     "first/entry/../../second",
+		"loop":       "loop",
+		"via-absent": "/absent/../real",
+		"to-file":    "/file",
+		"chain1":     "/real",
+		"too-long1":  "/real",
+	}
+	// chain40 takes 40 links to reach /real, and too-long41 41.
+	for i := 2; i <= 41; i++ {
+		if i <= 40 {
+			links[fmt.Sprintf("chain%d", i)] = fmt.Sprintf("chain%d", i-1)
+		}
+		links[fmt.Sprintf("too-long%d", i)] = fmt.Sprintf("too-long%d", i-1)
+	}
+	for link, target := range links {
 		testenv.Must(t, os.Symlink(target, filepath.Join(root, link)))
 	}
 	for _, tc := range []struct {
-		path     string
-		location string
-		through  []string
-		err      string
+		path         string
+		location     string
+		through      []string
+		unfollowable string
+		err          string
 	}{
 		{path: "/alias/cache", location: "/real/cache", through: []string{"/real"}},
 		{path: "/relative", location: "/real/sub", through: []string{"/real"}},
 		{path: "/nested/x", location: "/real/sub/x", through: []string{"/real", "/real/sub"}},
 		{path: "/up", location: "/real"},
 		{path: "/joined", location: "/second", through: []string{"/first", "/first/entry", "/first"}},
-		{path: "/missing/../x", location: "/x", through: []string{"/missing"}},
+		{path: "/missing/x/y", location: "/missing/x/y", through: []string{"/missing", "/missing/x"}},
+		{
+			path:         "/missing/../x",
+			location:     "/x",
+			through:      []string{"/missing"},
+			unfollowable: "it goes back up from /missing, which doesn't exist",
+		},
+		{
+			path:         "/via-absent",
+			location:     "/real",
+			through:      []string{"/absent"},
+			unfollowable: "it goes back up from /absent, which doesn't exist",
+		},
+		{
+			path:         "/file/..",
+			location:     "/",
+			through:      []string{"/file"},
+			unfollowable: "it goes back up from /file, which isn't a directory",
+		},
+		{
+			path:         "/to-file/cache",
+			location:     "/file/cache",
+			through:      []string{"/file"},
+			unfollowable: "it goes beneath /file, which isn't a directory",
+		},
+		{
+			path:         "/to-file/.",
+			location:     "/file",
+			unfollowable: "it goes beneath /file, which isn't a directory",
+		},
+		{
+			path:         "/file/",
+			location:     "/file",
+			unfollowable: "it goes beneath /file, which isn't a directory",
+		},
+		{path: "/chain40", location: "/real"},
+		{path: "/too-long41", err: "too many levels of symbolic links"},
 		{path: "/loop", err: "too many levels of symbolic links"},
 	} {
 		t.Run(tc.path, func(t *testing.T) {
@@ -67,9 +118,10 @@ func TestResolveIn(t *testing.T) {
 				return
 			}
 			testenv.Must(t, err)
-			if res.location != tc.location || !slices.Equal(res.through, tc.through) {
-				t.Errorf("resolveIn = %s through %q; want %s through %q", res.location, res.through, tc.location,
-					tc.through)
+			if res.location != tc.location || !slices.Equal(res.through, tc.through) ||
+				res.unfollowable != tc.unfollowable {
+				t.Errorf("resolveIn = %s through %q, unfollowable %q; want %s through %q, unfollowable %q",
+					res.location, res.through, res.unfollowable, tc.location, tc.through, tc.unfollowable)
 			}
 		})
 	}
@@ -223,6 +275,15 @@ func cacheTarget(t *testing.T, paths ...string) *targetState {
 // each a path to its target, replacing a link already there.
 func inRoot(t *testing.T, root string, dirs, files []string, links map[string]string) {
 	t.Helper()
+	inRootRemoving(t, root, nil, dirs, files, links)
+}
+
+// inRootRemoving is inRoot, removing each of removed, and all it holds, first.
+func inRootRemoving(t *testing.T, root string, removed, dirs, files []string, links map[string]string) {
+	t.Helper()
+	for _, r := range removed {
+		testenv.Must(t, os.RemoveAll(filepath.Join(root, r)))
+	}
 	for _, d := range dirs {
 		testenv.Must(t, os.MkdirAll(filepath.Join(root, d), 0o755))
 	}
@@ -242,8 +303,8 @@ func inRoot(t *testing.T, root string, dirs, files []string, links map[string]st
 // before the steps, just before the first run() step, before a later one, or after the steps.
 func TestToolCacheChecks(t *testing.T) {
 	type change struct {
-		dirs, files []string
-		links       map[string]string
+		removed, dirs, files []string
+		links                map[string]string
 	}
 	for _, tc := range []struct {
 		name    string
@@ -353,6 +414,14 @@ func TestToolCacheChecks(t *testing.T) {
 			want:    `secret "token"'s file /alias/token resolves through /cache`,
 		},
 		{
+			name:   "a last run() step that makes a cache's parent a link",
+			caches: []string{"/app/cache"},
+			image:  change{dirs: []string{"app", "other"}},
+			first:  change{removed: []string{"app"}, links: map[string]string{"app": "/other"}},
+			stage:  "after",
+			want:   "tool cache path /app/cache now resolves to /other/cache",
+		},
+		{
 			name:   "a last run() step that moves a cache path",
 			caches: []string{"/alias/cache"},
 			image:  change{dirs: []string{"real", "other"}, links: map[string]string{"alias": "/real"}},
@@ -364,8 +433,9 @@ func TestToolCacheChecks(t *testing.T) {
 			name:   "a mount point beneath a regular file",
 			caches: []string{"/file/cache"},
 			image:  change{files: []string{"file"}},
-			stage:  "first run",
-			want:   "making tool cache path /file/cache",
+			stage:  "before",
+			want: "tool cache path /file/cache leads to /file/cache only as Vamos resolves it, not as a run() step " +
+				"would follow it: it goes beneath /file, which isn't a directory",
 		},
 		{
 			name:   "a dangling symbolic link on a cache path",
@@ -396,6 +466,14 @@ func TestToolCacheChecks(t *testing.T) {
 			early:  change{dirs: []string{"cache"}},
 			stage:  "first run",
 			want:   "a step put something at tool cache path /cache",
+		},
+		{
+			name:   "a cache path linked through a missing directory and back",
+			caches: []string{"/cache"},
+			image:  change{dirs: []string{"real"}, links: map[string]string{"cache": "/absent/../real"}},
+			stage:  "before",
+			want: "tool cache path /cache leads to /real only as Vamos resolves it, not as a run() step would " +
+				"follow it: it goes back up from /absent, which doesn't exist",
 		},
 		{
 			name:   "a cache path linked through its own cache",
@@ -443,7 +521,7 @@ func TestToolCacheChecks(t *testing.T) {
 				if _, err := st.beforeRun(tc.secrets); err != nil {
 					return "first run", err
 				}
-				inRoot(t, root, tc.first.dirs, tc.first.files, tc.first.links)
+				inRootRemoving(t, root, tc.first.removed, tc.first.dirs, tc.first.files, tc.first.links)
 				if tc.workdir != "" {
 					st.builder.SetWorkDir(tc.workdir)
 				}

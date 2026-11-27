@@ -102,6 +102,14 @@ func ParseID(param, s string) (uint32, error) {
 // range; and, if any is mounted, a run() step to lend them to.
 // Loading refuses all of these first, saying where, so an error here means a graph that Vamos didn't make.
 func checkToolCaches(caches []ToolCache, steps []Step) error {
+	// Checked in time that grows with the caches' size, however many or deep they are, as a client can send a
+	// coordinator either: never in pairs, and never walking a path's ancestors, which is quadratic in its depth.
+	// open holds the earlier paths that are prefixes, as strings, of the last one, shortest first. The paths being
+	// sorted, any earlier path that is a prefix of c is a prefix of the path before c too, so once those that aren't
+	// prefixes of c are dropped, open holds every earlier path that c could be within. Each is checked by the byte
+	// after it in c: a "/" makes c within it. Being distinct prefixes of c, they are fewer than c's bytes.
+	labels := make(map[string]string, len(caches))
+	var open []ToolCache
 	for i, c := range caches {
 		if err := CheckCachePath("tool cache path", c.Path); err != nil {
 			return err
@@ -113,17 +121,23 @@ func checkToolCaches(caches []ToolCache, steps []Step) error {
 			return fmt.Errorf("tool cache %s's owner and group, %d and %d, must be from 0 to %d",
 				c.Label, c.Owner, c.Group, MaxID)
 		}
-		for _, other := range caches[:i] {
-			switch {
-			case other.Label == c.Label:
-				return fmt.Errorf("tool cache %s is mounted twice, at %s and %s", c.Label, other.Path, c.Path)
-			case other.Path >= c.Path:
-				return fmt.Errorf("tool caches at %s and %s aren't sorted by path, or are at one path",
-					other.Path, c.Path)
-			case Within(c.Path, other.Path):
+		if other, ok := labels[c.Label]; ok {
+			return fmt.Errorf("tool cache %s is mounted twice, at %s and %s", c.Label, other, c.Path)
+		}
+		if i > 0 && caches[i-1].Path >= c.Path {
+			return fmt.Errorf("tool caches at %s and %s aren't sorted by path, or are at one path",
+				caches[i-1].Path, c.Path)
+		}
+		for len(open) > 0 && !strings.HasPrefix(c.Path, open[len(open)-1].Path) {
+			open = open[:len(open)-1]
+		}
+		for _, other := range open {
+			if c.Path[len(other.Path)] == '/' {
 				return fmt.Errorf("tool cache %s at %s is within %s at %s", c.Label, c.Path, other.Label, other.Path)
 			}
 		}
+		labels[c.Label] = c.Path
+		open = append(open, c)
 	}
 	if len(caches) > 0 && !slices.ContainsFunc(steps, func(in Step) bool { return in.Op == OpRun }) {
 		return errors.New("it mounts tool caches but has no run() step to lend them to")

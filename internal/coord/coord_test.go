@@ -284,6 +284,14 @@ func testGraph(t *testing.T, f *fixture, nonce string) api.GraphRequest {
 // testGraphFor returns testGraph's graph for platform.
 func testGraphFor(t *testing.T, f *fixture, nonce string, platform imgspecv1.Platform) api.GraphRequest {
 	t.Helper()
+	return changedTestGraph(t, f, nonce, platform, func(*graph.Graph) {})
+}
+
+// changedTestGraph returns testGraph's graph for platform, as change changes it.
+func changedTestGraph(
+	t *testing.T, f *fixture, nonce string, platform imgspecv1.Platform, change func(*graph.Graph),
+) api.GraphRequest {
+	t.Helper()
 	name := platforms.Format(platform)
 	sel := fileset.DefaultSelection()
 	sel.Include = []string{"."}
@@ -301,6 +309,7 @@ func testGraphFor(t *testing.T, f *fixture, nonce string, platform imgspecv1.Pla
 			{Op: graph.OpAdd, Display: `add("two", "/two")`, From: from(2), Dest: "/two"},
 		}}},
 	}}
+	change(g)
 	if err := g.Validate(); err != nil {
 		t.Fatal(err)
 	}
@@ -1456,7 +1465,7 @@ func checkTries(t *testing.T, f *fixture, outcome api.Outcome, want []string) {
 
 // TestAssignmentsGiveToolCachesEmpty checks that every task and layer a coordinator assigns to a worker asks for empty
 // tool caches, as a worker gives them whatever it is asked, and carries the client's workspace name, which keys
-// history; a pull's resolve mounts no cache, and carries neither.
+// history; a pull's resolve, if a worker is given one, mounts no cache, and carries neither.
 func TestAssignmentsGiveToolCachesEmpty(t *testing.T) {
 	f := newFixture(t, Config{})
 	var mu sync.Mutex
@@ -1467,23 +1476,38 @@ func TestAssignmentsGiveToolCachesEmpty(t *testing.T) {
 		requests = append(requests, *a.Request)
 		return nil
 	}))
-	req := testGraph(t, f, "named")
+	// A task and the layer mount a cache, the layer with a run() step to lend it to.
+	req := changedTestGraph(t, f, "named", amd64, func(g *graph.Graph) {
+		cache := []graph.ToolCache{{Path: "/cache", Label: "//:tool"}}
+		g.Nodes[1].Task.ToolCaches = cache
+		g.Nodes[3].Layer.ToolCaches = cache
+		g.Nodes[3].Layer.Steps = append(g.Nodes[3].Layer.Steps,
+			graph.Step{Op: graph.OpRun, Display: `run(["app"])`, Argv: []string{"app"}})
+	})
 	req.Workspace = "com.acme.shop"
 	if outcome, _ := runJob(t, f.c, req); outcome.Failure != nil {
 		t.Fatalf("outcome = %+v", outcome.Failure)
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if len(requests) == 0 {
-		t.Fatal("no action was assigned")
-	}
+	kinds := map[string]bool{}
 	for _, r := range requests {
+		kinds[r.Action.Kind] = true
 		if r.Action.Kind == sched.KindResolve {
+			if r.NoToolCaches || r.Workspace != "" {
+				t.Errorf("a resolve asks for no tool caches %v in workspace %q; want neither", r.NoToolCaches,
+					r.Workspace)
+			}
 			continue
 		}
 		if !r.NoToolCaches || r.Workspace != "com.acme.shop" {
 			t.Errorf("an assigned %s action asks for no tool caches %v in workspace %q; want true in com.acme.shop",
 				r.Action.Kind, r.NoToolCaches, r.Workspace)
+		}
+	}
+	for _, kind := range []string{sched.KindTask, sched.KindLayer} {
+		if !kinds[kind] {
+			t.Errorf("no %s action was assigned, of %d", kind, len(requests))
 		}
 	}
 }

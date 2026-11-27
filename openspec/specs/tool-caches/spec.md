@@ -73,7 +73,8 @@ variable naming a mounted cache.
 
 A `tool_cache` rule SHALL be no target: every command that takes a target SHALL refuse its label, and a `base`,
 `dep()`, `add()` or publication check that names it SHALL fail, each saying that a tool cache is mounted with
-`mount()`.
+`mount()`. A name that a BUILD file doesn't declare SHALL fail suggesting only tool caches to `mount()`, and only
+targets elsewhere.
 
 #### Scenario: Building a tool cache
 
@@ -96,6 +97,19 @@ A `tool_cache` rule SHALL be no target: every command that takes a target SHALL 
   `vamos.lock` pins a pull the BUILD files still use and one they no longer do
 - **WHEN** I run `vamos update`
 - **THEN** it succeeds, keeping the first pin, or bringing it up to date, and removing the second
+
+#### Scenario: A misspelled target suggests targets alone
+
+- **GIVEN** a BUILD file that declares `tool_cache(name = "gocache", path = "/cache")` and a layer `app`
+- **WHEN** I build `gocahce`
+- **THEN** it fails before anything runs, listing `app` as the BUILD file's targets, and not `gocache`
+
+#### Scenario: A misspelled cache suggests tool caches alone
+
+- **GIVEN** a BUILD file that declares `tool_cache(name = "gocache", path = "/cache")`, a layer `gobuild`, and a task
+  `app` whose `tool_caches` is a function of `ctx` giving `[mount("gobuld")]`
+- **WHEN** I build `app`
+- **THEN** it fails before anything runs, listing `gocache` as the BUILD file's tool caches, and not `gobuild`
 
 #### Scenario: Depending on a tool cache
 
@@ -230,7 +244,9 @@ The executor SHALL resolve each cache path in the container's root filesystem be
 it, make an empty directory there before the first `run()` step if none is, and mount the cache there for every `run()`
 step. Before each `run()` step and after the last step, it SHALL fail the attempt, naming the path, if the path resolves
 elsewhere or through `/dev`, `/proc` or `/sys`, or its location is no longer an empty directory with the cache's owner
-and group.
+and group. It SHALL fail the attempt the same way if a step couldn't follow the path to its location as the kernel
+does: a `..` after a component that is missing or isn't a directory, a component beneath a file, or more than 40
+symbolic links.
 
 #### Scenario: A cache path through a symbolic link
 
