@@ -3,13 +3,15 @@
 Run from the repository root in the [development environment](development.md):
 
 ```sh
-scripts/check              # build, lint, govulncheck, then go test -short ./..., which skips image builds
+scripts/check              # build, lint, markdownlint, govulncheck, then go test -short ./..., which skips image builds
 scripts/check full         # then go test ./..., with real buildah; needs root and network
 ```
 
 Lint is golangci-lint, which runs `go vet`, `gofmt` and the linters [.golangci.yml](../../.golangci.yml) enables.
 Fix what it reports rather than suppressing it;
 a `//nolint:<linter>` needs a comment saying why the finding is wrong there.
+markdownlint-cli2 checks every Markdown file against [.markdownlint-cli2.jsonc](../../.markdownlint-cli2.jsonc);
+see [documentation.md](documentation.md) for the conventions it enforces.
 govulncheck fails only for a known vulnerability that Vamos's code can reach;
 fix one by updating the module, under the update-dependencies skill's policy.
 

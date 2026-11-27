@@ -39,7 +39,7 @@ So the user invokes this skill the same way both times, and a session that was c
 | --- | --- |
 | Go toolchain | Fedora `golang` in the devcontainer ≥ the `go` line of [go.mod](../../../go.mod); [Dockerfile](../../../Dockerfile)'s `golang:1.NN-bookworm` and the root [BUILD](../../../BUILD)'s `golang` pull have go.mod's minor |
 | Go in the example | the devcontainer's Go minor; [examples/golang-cli/go.mod](../../../examples/golang-cli/go.mod)'s `go` line, its [BUILD](../../../examples/golang-cli/BUILD) tag `1.NN-alpine`, [vamos.lock](../../../examples/golang-cli/vamos.lock), its README's "`1.NN.x-alpine`", and the comment on line 62 of [smoke-checks.md](../../../.agents/kb/smoke-checks.md) |
-| Node.js major | Fedora `nodejs26`/`nodejs26-npm`; `node:26-alpine` in the BUILD files of typescript-mcp, typescript-ui and strawberry-react/ui; [docs/user/fundamentals.md](../../../docs/user/fundamentals.md) (its BUILD walkthrough and mermaid diagrams); the example READMEs' mermaid diagrams; `engines` and `@types/node` in typescript-mcp's package.json; `engines` in docs/site's package.json |
+| Node.js major | Fedora `nodejs26`/`nodejs26-npm`, in the devcontainer and the root BUILD's `markdown-tools`; `node:26-alpine` in the BUILD files of typescript-mcp, typescript-ui and strawberry-react/ui; [docs/user/fundamentals.md](../../../docs/user/fundamentals.md) (its BUILD walkthrough and mermaid diagrams); the example READMEs' mermaid diagrams; `engines` and `@types/node` in typescript-mcp's package.json; `engines` in docs/site's package.json |
 | pnpm | Fedora `pnpm`; `packageManager` in [docs/site/package.json](../../../docs/site/package.json) and [examples/typescript-ui/package.json](../../../examples/typescript-ui/package.json); `pnpm@X` in [examples/typescript-ui/BUILD](../../../examples/typescript-ui/BUILD), [examples/strawberry-react/ui/BUILD](../../../examples/strawberry-react/ui/BUILD) and fundamentals.md |
 | Python minor | Fedora `python3`; `python:3.NN` / `3.NN-slim` in the fastmcp and strawberry-react/backend BUILD files and vamos.lock files; `--python-version 3.NN` in each lockfile header and README command; `target-version`/`pythonVersion` in [examples/fastmcp/pyproject.toml](../../../examples/fastmcp/pyproject.toml); `uv venv --python 3.NN` in the strawberry-react README |
 | kubectl | Fedora `kubernetes1.NN-client` matches the Kubernetes minor of the default node image of the `kind` that Fedora ships |
@@ -86,6 +86,7 @@ The only file is [.devcontainer/Dockerfile](../../../.devcontainer/Dockerfile).
   The browser is Fedora's `chromium-headless`, unpinned like the other packages; if a Fedora release moves
   `headless_shell` out of `/usr/lib64/chromium-browser/`, update the path in the Dockerfile's Puppeteer config.
 - **markdownlint-cli2**: its version in the same `npm install -g` line, newest from `npm view markdownlint-cli2 time --json`.
+  The root BUILD's `markdown-tools` installs the same version.
 - **Coding agents** (Claude, Codex, herdr, Antigravity) are installed from their `install.sh` scripts unpinned,
   and they update themselves. Nothing to edit; the rebuild refreshes them.
   Check only that each installer URL still answers: `curl -fsSI <url>`.

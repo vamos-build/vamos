@@ -2,8 +2,8 @@
 # Run the repository's checks, stopping at the first that fails.
 # See .agents/kb/testing.md for when to run which tier.
 #
-#   scripts/check         build, golangci-lint (go vet, gofmt and the linters .golangci.yml enables), govulncheck,
-#                         short tests
+#   scripts/check         build, golangci-lint (go vet, gofmt and the linters .golangci.yml enables),
+#                         markdownlint-cli2, govulncheck, short tests
 #   scripts/check full    all of that, then the full test suite, which builds images: needs root and network
 set -eu
 
@@ -17,7 +17,7 @@ esac
 
 cd -- "$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 
-for tool in go golangci-lint govulncheck; do
+for tool in go golangci-lint markdownlint-cli2 govulncheck; do
     command -v "$tool" >/dev/null || {
         echo "scripts/check: $tool isn't installed; the devcontainer has it, so rebuild it" >&2
         exit 1
@@ -33,6 +33,10 @@ go build -o vamos .
 
 step 'lint'
 golangci-lint run
+
+# Every Markdown file, but those that .markdownlint-cli2.jsonc skips.
+step 'markdown'
+markdownlint-cli2
 
 # Fails only for a vulnerability that Vamos's code reaches; it needs the network, for vuln.go.dev.
 step 'vulnerabilities'

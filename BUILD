@@ -5,7 +5,7 @@
 # Each example beneath has a WORKSPACE of its own, so it stays a workspace apart from this one.
 #
 #   vamos build release    every check, then the release image
-#   vamos build lint       one check, or vulnerabilities or test
+#   vamos build lint       one check, or markdown, vulnerabilities or test
 #
 # The Go commands mount a tool cache, so they need chroot isolation, as the devcontainer's BUILDAH_ISOLATION sets.
 
@@ -226,6 +226,56 @@ task(
     ],
 )
 
+# markdownlint-cli2 runs apart from the Go checks, so that Node.js doesn't change the environment that names their cache.
+# Keep its version with the devcontainer's.
+layer(
+    name = "markdown-tools",
+    base = "fedora",
+    steps = [
+        run([
+            "dnf",
+            "-y",
+            "install",
+            "nodejs26-npm",
+        ]),
+        run(["dnf", "clean", "all"]),
+        run([
+            "npm",
+            "install",
+            "-g",
+            "--min-release-age=14",
+            "--no-fund",
+            "--no-audit",
+            "markdownlint-cli2@0.24.1",
+        ]),
+        run(["npm", "cache", "clean", "--force"]),
+    ],
+)
+
+# Every Markdown file, with the .gitignore files that the config's "gitignore" reads.
+glob(
+    name = "markdown-files",
+    include = [
+        ".markdownlint-cli2.jsonc",
+        "**/.gitignore",
+        "**/*.md",
+    ],
+    exclude = [
+        "**/node_modules",
+        "**/.venv",
+    ],
+)
+
+task(
+    name = "markdown",
+    base = "markdown-tools",
+    steps = [
+        workdir("/workspace"),
+        add("markdown-files", "/workspace"),
+        run(["markdownlint-cli2"]),
+    ],
+)
+
 # Fails only for a vulnerability that Vamos's code reaches; it needs the network, for vuln.go.dev,
 # and finds a new vulnerability only once its inputs change or it runs with --rebuild.
 task(
@@ -260,6 +310,7 @@ publication(
     },
     checks = [
         "lint",
+        "markdown",
         "vulnerabilities",
         "test",
     ],
