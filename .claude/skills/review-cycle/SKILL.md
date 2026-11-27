@@ -317,8 +317,8 @@ End it with one co-author trailer per agent, on separate lines,
 naming the Codex model version that actually ran (shown in its tab's footer):
 
 ```text
-Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
-Co-Authored-By: Codex GPT-6.2 Sol <noreply@openai.com>
+Co-Authored-By: Claude <CLAUDE_MODEL_FROM_TAB> <noreply@anthropic.com>
+Co-Authored-By: Codex <CODEX_MODEL_FROM_TAB> <noreply@openai.com>
 ```
 
 Then commit it:
