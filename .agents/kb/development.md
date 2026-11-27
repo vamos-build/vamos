@@ -13,6 +13,10 @@ such as with `docker run --privileged --rm tonistiigi/binfmt --install all`,
 which lasts until the host reboots.
 See [testing.md](testing.md) for required validation.
 
+When working in herdr, the devcontainer has the Claude, Codex and Antigravity integrations installed.
+herdr skips first-run onboarding and starts panes in Bash.
+Git operations over HTTPS to `github.com`, including `git push`, use GitHub CLI credentials.
+
 Use gofmt and keep lines within 120 columns, counting a tab as four; `scripts/check` enforces both.
 For prose, use the semantic line breaks in [documentation.md](documentation.md), and its exceptions to wrapping.
 Match the existing comment density: document functions and add short explanations for non-obvious choices.
