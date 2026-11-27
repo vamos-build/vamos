@@ -11,11 +11,11 @@ Docker is a destination for built images, not the build engine.
 
 Every command runs across three distinct phases, which [cli](../../internal/cli/doc.go) coordinates:
 
-| Phase  | Placement          | Owner                                  | Boundary                                                            |
-| ------ | ------------------ | -------------------------------------- | ------------------------------------------------------------------- |
-| Load   | Client             | [load](../../internal/load/doc.go)     | Project files and Starlark evaluate into a graph and cached sources |
-| Run    | Executor           | [run](../../internal/run/doc.go)       | Cached graph and sources execute into images or task files          |
-| Finish | Client or executor | [finish](../../internal/finish/doc.go) | Completed artifacts reach requested destinations                    |
+| Phase | Placement | Owner | Boundary |
+| --- | --- | --- | --- |
+| Load | Client | [load](../../internal/load/doc.go) | Project files and Starlark evaluate into a graph and cached sources |
+| Run | Executor | [run](../../internal/run/doc.go) | Cached graph and sources execute into images or task files |
+| Finish | Client or executor | [finish](../../internal/finish/doc.go) | Completed artifacts reach requested destinations |
 
 The following diagram shows how a build progresses through the three phases and what data crosses between them.
 

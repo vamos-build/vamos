@@ -8,6 +8,8 @@
     "MD033": {
       "allowed_elements": ["h1", "img", "p", "picture", "source", "table", "tbody", "td", "th", "thead", "tr"]
     },
+    // Tables are written `| cell |` without padding, so one changed cell doesn't realign the whole table in diffs.
+    "MD060": { "style": "compact" },
     // CLAUDE.md opens with an @-import, and skills open with front matter that has no title.
     "MD041": false
   },
