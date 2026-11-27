@@ -102,7 +102,7 @@
 
 ## 3. Mounting on the local executor
 
-- [ ] 3.1 Resolve each mount, in `run`, to `<CacheDir>/tool-caches/<sha256 of workspace>/<sha256 of
+- [x] 3.1 Resolve each mount, in `run`, to `<CacheDir>/tool-caches/<sha256 of workspace>/<sha256 of
   label>/<owner>-<group>-<mapping>/data`, creating on first use the label's directory and then the owner's, each under a
   `.tmp-` name renamed into place, and treating `ENOTEMPTY` and `EEXIST` from that rename as a lost race and any other
   error as a failure, with `<owner>-<group>` the rule's numeric IDs and `<mapping>` a digest of the builder's UID and
@@ -215,7 +215,7 @@
   gone is finished by the next one, and document it in [remote-execution.md](../../../docs/design/remote-execution.md)
   and the user remote reference.
 
-- [ ] 4.2 Document in [remote-execution.md](../../../docs/design/remote-execution.md) that a crashed attempt whose
+- [x] 4.2 Document in [remote-execution.md](../../../docs/design/remote-execution.md) that a crashed attempt whose
   temporary caches take longer than its lease to delete is lost, the attempt counted as a lost one, retried while its
   retry budget allows and otherwise failed as lost. Verify with a `worker` test that the runner deletes an attempt's
   temporary caches before its subprocess ends, while the lease is renewed.

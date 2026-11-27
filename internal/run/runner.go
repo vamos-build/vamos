@@ -82,6 +82,9 @@ func builderOptions(from string, capabilities []string, sys *types.SystemContext
 	}
 }
 
+// newBuilder makes a target's builder; tests give builders ID mappings of their own through it.
+var newBuilder = buildah.NewBuilder
+
 // attemptPrefix starts the name of an attempt's container, so that a worker finds what a killed attempt left.
 const attemptPrefix = "vamos-attempt-"
 
@@ -379,7 +382,7 @@ func (r *localRunner) start(
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	builder, err := buildah.NewBuilder(context.WithoutCancel(ctx), r.store, options)
+	builder, err := newBuilder(context.WithoutCancel(ctx), r.store, options)
 	if err != nil {
 		return nil, err
 	}

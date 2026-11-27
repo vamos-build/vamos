@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"testing"
+	"time"
 
 	"github.com/vamos-build/vamos/internal/graph"
 	"github.com/vamos-build/vamos/internal/sched"
@@ -301,12 +303,37 @@ func (tc *toolCaches) tempToolCache(store storage.Store, container string, i int
 	return dir, makeCacheDir(dir, m)
 }
 
+// removeTempCaches removes the directory of an attempt's temporary tool caches with removeAll, unless
+// SlowToolCacheRemoval slowed it down for a test.
+var removeTempCaches = func(dir string) error { return removeAll(dir) }
+
+// SlowToolCacheRemoval makes each removal of an attempt's temporary tool caches, in this process, wait d before it
+// removes them and call removed, unless it is nil, with their directory and how long the removal took, its wait
+// included, once they are gone. It is for tests of what a worker's lease covers, set in the attempt's own process
+// before it runs, and is never undone; outside a test binary it panics.
+func SlowToolCacheRemoval(d time.Duration, removed func(dir string, took time.Duration)) {
+	if !testing.Testing() {
+		panic("SlowToolCacheRemoval is for tests")
+	}
+	removeTempCaches = func(dir string) error {
+		start := time.Now()
+		time.Sleep(d)
+		if err := removeAll(dir); err != nil {
+			return err
+		}
+		if removed != nil {
+			removed(dir, time.Since(start))
+		}
+		return nil
+	}
+}
+
 // remove deletes the attempt's own empty caches, if it made any.
 func (tc *toolCaches) remove() error {
 	if tc == nil || tc.temp == "" {
 		return nil
 	}
-	if err := removeAll(tc.temp); err != nil {
+	if err := removeTempCaches(tc.temp); err != nil {
 		return fmt.Errorf("removing its temporary tool caches: %w", err)
 	}
 	tc.temp = ""
