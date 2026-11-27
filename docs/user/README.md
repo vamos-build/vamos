@@ -54,7 +54,7 @@ Use these pages when setting up and writing your own project:
 | --- | --- |
 | [Fundamentals](fundamentals.md) | Images, filesets, layers and tasks, then a walkthrough building a website from source into a running container |
 | [Install](install/README.md) | Installing Vamos in an Ubuntu or Fedora container image or on an Ubuntu or Fedora host |
-| [BUILD language](reference/build/README.md) | Target declarations (`pull`, `glob`, `task`, `layer`, `index`, `publication`), build steps, secrets, file selection, and tool caches (`tool_cache`) |
+| [BUILD language](reference/build/README.md) | Declarations (`pull`, `glob`, `task`, `layer`, `index`, `publication`, `tool_cache`), build steps, secrets, and file selection |
 | [CLI](reference/cli/README.md) | Commands for building, publishing, loading into Docker, saving archives, and exporting files |
 | [Configuration](reference/configuration.md) | Multi-package workspaces, target parameters, cross-platform builds, and shared `.star` files |
 | [Build cache and traces](reference/cache.md) | Cache keys, rebuilding, dependency pinning, storage pruning, and performance traces |
