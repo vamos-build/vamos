@@ -7,9 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime/debug"
 	"slices"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/vamos-build/vamos/internal/api"
@@ -22,6 +25,7 @@ import (
 	"github.com/containerd/platforms"
 	"github.com/opencontainers/go-digest"
 	imgspecv1 "github.com/opencontainers/image-spec/specs-go/v1"
+	"go.podman.io/buildah/define"
 	"go.podman.io/buildah/pkg/parse"
 	containersconfig "go.podman.io/common/pkg/config"
 	imagecopy "go.podman.io/image/v5/copy"
@@ -53,6 +57,12 @@ type Local struct {
 	sharing   *sched.Sharing     // runs actions through the runner, once for every job that needs the same one
 	// traceLimit bounds each attempt's stored trace, if positive; see LimitAttemptTraces.
 	traceLimit int
+	// coordinator says that it serves vamos coordinator --local, whose clients each have a workspace of their own:
+	// it gives every attempt empty tool caches, never a workspace's, and so checks no request's workspace name.
+	coordinator bool
+	// isolation, if set, is how run() steps run, rather than as buildah's environment says; see UseIsolation.
+	// It is apart from mu, which open holds while the store opens, so that Capabilities never waits for that.
+	isolation atomic.Pointer[define.Isolation]
 }
 
 // NewLocal returns a local executor on the container store that options describe, such as DefaultStoreOptions
@@ -96,6 +106,44 @@ func Version() string {
 // It is for tests, before any job is submitted.
 func (l *Local) RetainEvents(n int) {
 	l.jobs.RetainEvents(n)
+}
+
+// ServeAsCoordinator makes the executor serve vamos coordinator --local, rather than one client's standalone builds:
+// it gives every attempt empty tool caches of its own, as a coordinator's workers do, whatever workspace name a
+// request carries, which it therefore neither checks nor refuses, and which still keys target history.
+// It is for before any job is submitted.
+func (l *Local) ServeAsCoordinator() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.coordinator = true
+}
+
+// ServesAsCoordinator reports whether ServeAsCoordinator made the executor serve vamos coordinator --local.
+func (l *Local) ServesAsCoordinator() bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.coordinator
+}
+
+// stepIsolation returns how run() steps run: as UseIsolation set, or else as buildah's environment says.
+func (l *Local) stepIsolation() (define.Isolation, error) {
+	return resolveIsolation(l.isolation.Load())
+}
+
+// resolveIsolation returns how run() steps run: as given, if set, or else as buildah's environment says, as it does
+// for define.IsolationDefault, which buildah takes as asking it.
+func resolveIsolation(given *define.Isolation) (define.Isolation, error) {
+	if given != nil && *given != define.IsolationDefault {
+		return *given, nil
+	}
+	return parse.IsolationOption("")
+}
+
+// UseIsolation makes run() steps run with isolation, rather than as buildah's environment says, as BUILDAH_ISOLATION
+// would, so that a test can choose it without setting the process's environment.
+// It is for before any job is submitted.
+func (l *Local) UseIsolation(isolation define.Isolation) {
+	l.isolation.Store(&isolation)
 }
 
 // LimitAttemptTraces makes each attempt's stored trace fit in limit bytes, rather than tracing.MaxTraceSize,
@@ -151,7 +199,7 @@ func (l *Local) open() error {
 	if err != nil {
 		return err
 	}
-	isolation, err := parse.IsolationOption("")
+	isolation, err := l.stepIsolation()
 	if err != nil {
 		return err
 	}
@@ -165,6 +213,11 @@ func (l *Local) open() error {
 		systemContext: l.systemContext,
 		capabilities:  capabilities,
 		isolation:     isolation,
+	}
+	// A standalone executor keeps the workspaces' tool caches in the build cache, under its lock; a local coordinator
+	// keeps none.
+	if !l.coordinator {
+		l.runner.toolCacheRoot = filepath.Join(cacheDir(l.storeOptions), toolCachesDir)
 	}
 	l.sharing = sched.NewSharing(l.runner, l.directory, l.directory)
 	l.sharing.LimitTraces(l.traceLimit)
@@ -222,7 +275,7 @@ var graphVersions = []int{graph.Version}
 // Capabilities reports the host's platform, the one execution platform it offers, the graph versions this version
 // of Vamos runs, how commands are isolated, and the time.
 func (l *Local) Capabilities(context.Context) (api.Capabilities, error) {
-	isolation, err := parse.IsolationOption("")
+	isolation, err := l.stepIsolation()
 	if err != nil {
 		return api.Capabilities{}, err
 	}
@@ -366,10 +419,35 @@ func (l *Local) Prune(context.Context) (api.JobID, error) {
 	return l.jobs.Start(true, func(ctx context.Context, ev sched.Events) api.Outcome {
 		pruned, err := l.prune(ctx)
 		if err != nil {
+			// What it removed before it failed, and its warnings, are said with the failure.
+			if removed := describePruned(pruned); removed != "" {
+				err = fmt.Errorf("%w; %s", err, removed)
+			}
 			return sched.Failed(err)
 		}
 		return api.Outcome{Pruned: &pruned}
 	})
+}
+
+// describePruned says what a prune that failed had done that is certain, and its warnings, or "" if neither: the images
+// and target histories it removed and the tool caches it removed from use, each it did any of, but not the results and
+// files, which it counts before deleting them.
+func describePruned(p api.Pruned) string {
+	var parts []string
+	for _, done := range []struct {
+		n    int
+		what string
+	}{
+		{p.Images, "it had removed %d images"},
+		{p.Histories, "it had removed %d target histories"},
+		{p.ToolCaches, "it had removed %d tool caches from use"},
+	} {
+		if done.n > 0 {
+			parts = append(parts, fmt.Sprintf(done.what, done.n))
+		}
+	}
+	parts = append(parts, p.Warnings...)
+	return strings.Join(parts, "; ")
 }
 
 // run runs the graph req names with buildah: its pulls first, then its layers, tasks and indexes in order.
@@ -398,6 +476,12 @@ func (l *Local) run(ctx context.Context, req api.GraphRequest, ev sched.Events) 
 	if err := checkExecPlatform(g.ExecPlatform); err != nil {
 		return nil, err
 	}
+	coordinator := l.ServesAsCoordinator()
+	if !coordinator {
+		if err := checkWorkspaceFor(g, req.Workspace, req.NoToolCaches); err != nil {
+			return nil, err
+		}
+	}
 	if err := l.open(); err != nil {
 		return nil, err
 	}
@@ -407,9 +491,30 @@ func (l *Local) run(ctx context.Context, req api.GraphRequest, ev sched.Events) 
 	b := sched.Backend{Content: l.content, Records: l.records, Checker: l.runner, Runner: l.sharing}
 	opts := sched.Options{
 		Rebuild: req.Rebuild, Timestamp: req.Timestamp, Emulate: req.Emulate, Bound: 1, Secrets: req.Secrets,
-		Workspace: req.Workspace,
+		Workspace: req.Workspace, NoToolCaches: req.NoToolCaches || coordinator,
 	}
 	return sched.New(g, b, ev, opts).Run(ctx)
+}
+
+// checkWorkspaceFor refuses a standalone build of g, a graph that mounts tool caches, whose request names workspace,
+// if the name breaks the rules a workspace's name follows, or is empty and noToolCaches is not set, so that only a
+// name that load would have accepted chooses a workspace's persistent caches. The request comes from a client, not
+// from load: an API client, or an older one, can send any name, or none.
+func checkWorkspaceFor(g *graph.Graph, workspace string, noToolCaches bool) error {
+	if !slices.ContainsFunc(g.Nodes, func(n graph.Node) bool { return len(n.ToolCaches()) > 0 }) {
+		return nil
+	}
+	if workspace == "" {
+		if noToolCaches {
+			return nil
+		}
+		return errors.New("the build mounts tool caches, so the workspace needs a name in WORKSPACE, " +
+			`such as workspace(name = "com.example.app"), which chooses its caches`)
+	}
+	if err := graph.CheckWorkspaceName(workspace); err != nil {
+		return fmt.Errorf("the build mounts tool caches, and the request's workspace %w", err)
+	}
+	return nil
 }
 
 // checkResult refuses a result to push or export whose image IDs aren't image IDs, as Result.Image gives them,

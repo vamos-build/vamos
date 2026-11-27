@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -28,6 +29,7 @@ import (
 	is "go.podman.io/image/v5/storage"
 	"go.podman.io/image/v5/types"
 	"go.podman.io/storage"
+	"go.podman.io/storage/pkg/system"
 )
 
 // AttemptInput is what a worker gives the subprocess that runs an attempt, on its standard input:
@@ -172,34 +174,54 @@ func RemoveAttempt(ctx context.Context, options storage.StoreOptions, id string)
 	return removeAttempt(store, id)
 }
 
+// removeAll removes a directory and what it holds as the store's own removal does, unmounting what is mounted there and
+// retrying while it is busy. Vamos runs container storage as root, in a user namespace if it must, as buildah needs,
+// so read-only directories, as a Go module cache leaves, go too. A test replaces it to make it fail, and so must not
+// run in parallel.
+var removeAll = system.EnsureRemoveAll
+
 // removeAttempt removes the attempt id's container from store: through buildah, which unmounts it, or, for a
 // container buildah never finished recording, as a kill between its creation and its state's write leaves it,
-// directly.
+// directly. It first deletes the attempt's temporary tool caches in the container's directory, outside the store's
+// locks, which removing the container would otherwise hold while it deleted them; a failure to is returned, wrapped
+// to say so, with any other, once the container is removed, which deletes what is left.
+// A layer already gone is taken as unmounted, so that a removal that failed after deleting it can be finished.
 func removeAttempt(store storage.Store, id string) error {
 	name := attemptPrefix + id
+	var cachesErr error
+	if dir, err := store.ContainerDirectory(name); err == nil {
+		if err := removeAll(filepath.Join(dir, toolCachesDir)); err != nil {
+			cachesErr = fmt.Errorf("removing the attempt's temporary tool caches: %w", err)
+		}
+	} else if !errors.Is(err, storage.ErrContainerUnknown) {
+		cachesErr = fmt.Errorf("finding the attempt's temporary tool caches: %w", err)
+	}
+	unmounted := func(err error) bool {
+		return err == nil || errors.Is(err, storage.ErrLayerNotMounted) || errors.Is(err, storage.ErrLayerUnknown)
+	}
 	builder, err := buildah.OpenBuilder(store, name)
 	switch {
 	case errors.Is(err, storage.ErrContainerUnknown):
-		return nil
+		return cachesErr
 	case errors.Is(err, os.ErrNotExist):
 		container, err := store.Container(name)
 		if errors.Is(err, storage.ErrContainerUnknown) {
-			return nil
+			return cachesErr
 		} else if err != nil {
-			return fmt.Errorf("finding the attempt's container: %w", err)
+			return errors.Join(cachesErr, fmt.Errorf("finding the attempt's container: %w", err))
 		}
-		if _, err := store.Unmount(container.ID, true); err != nil && !errors.Is(err, storage.ErrLayerNotMounted) {
-			return fmt.Errorf("unmounting the attempt's container: %w", err)
+		if _, err := store.Unmount(container.ID, true); !unmounted(err) {
+			return errors.Join(cachesErr, fmt.Errorf("unmounting the attempt's container: %w", err))
 		}
 		if err := store.DeleteContainer(container.ID); err != nil {
-			return fmt.Errorf("removing the attempt's container: %w", err)
+			return errors.Join(cachesErr, fmt.Errorf("removing the attempt's container: %w", err))
 		}
-		return nil
+		return cachesErr
 	case err != nil:
-		return fmt.Errorf("opening the attempt's container: %w", err)
+		return errors.Join(cachesErr, fmt.Errorf("opening the attempt's container: %w", err))
 	}
-	var errs []error
-	if err := builder.Unmount(); err != nil && !errors.Is(err, storage.ErrLayerNotMounted) {
+	errs := []error{cachesErr}
+	if err := builder.Unmount(); !unmounted(err) {
 		errs = append(errs, fmt.Errorf("unmounting the attempt's container: %w", err))
 	}
 	if err := builder.Delete(); err != nil {

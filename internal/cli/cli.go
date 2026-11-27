@@ -36,6 +36,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/afero"
 	"github.com/spf13/cobra"
+	"go.podman.io/buildah/define"
 	"go.podman.io/image/v5/docker/reference"
 	"go.podman.io/image/v5/pkg/sysregistriesv2"
 	"go.podman.io/image/v5/types"
@@ -60,17 +61,22 @@ type Config struct {
 	// Getenv, if set, is where a coordinator reads its telemetry's OTEL_* settings; otherwise the process's
 	// environment. Scenarios set it, so that coordinators exporting to collectors of their own run at once.
 	Getenv func(string) string
+	// Isolation, if set, is how the executors in this process, the local one and vamos coordinator --local's, run run()
+	// steps, rather than as buildah's environment says, as BUILDAH_ISOLATION would; a worker's attempts still read the
+	// environment. Scenarios set it, so that one that needs another isolation runs beside the others.
+	Isolation *define.Isolation
 }
 
 // app is the Vamos command line: what every invocation shares.
 // Each command is a method of invocation, which holds the state of one run, so that a handler can be tested
 // without constructing the root command.
 type app struct {
-	fs       afero.Fs
-	store    *storage.StoreOptions
-	registry Registry            // Config's, or nil for the upstream registry
-	cgroups  string              // Config's CgroupRoot
-	getenv   func(string) string // Config's Getenv, or nil for os.Getenv
+	fs        afero.Fs
+	store     *storage.StoreOptions
+	registry  Registry            // Config's, or nil for the upstream registry
+	cgroups   string              // Config's CgroupRoot
+	getenv    func(string) string // Config's Getenv, or nil for os.Getenv
+	isolation *define.Isolation   // Config's
 }
 
 // options are the flags of one invocation; each command reads the ones it takes.
@@ -90,6 +96,7 @@ type options struct {
 	emulate       bool          // --emulate
 	coordinator   string        // --coordinator, or $VAMOS_COORDINATOR
 	rebuild       bool          // build --rebuild
+	noToolCaches  bool          // build --no-tool-caches
 	replace       bool          // export --replace
 	tag           string        // save --tag
 	tags          []string      // publish --tag
@@ -203,7 +210,8 @@ func (inv *invocation) release(ex api.Executor) {
 
 // NewRootCommand returns the Vamos command line, with its subcommands, as cfg says.
 func NewRootCommand(cfg Config) *cobra.Command {
-	a := &app{fs: cfg.Fs, store: cfg.Store, registry: cfg.Registry, cgroups: cfg.CgroupRoot, getenv: cfg.Getenv}
+	a := &app{fs: cfg.Fs, store: cfg.Store, registry: cfg.Registry, cgroups: cfg.CgroupRoot, getenv: cfg.Getenv,
+		isolation: cfg.Isolation}
 	defaults := defaultOptions()
 	opts := &defaults
 
@@ -365,12 +373,17 @@ func NewRootCommand(cfg Config) *cobra.Command {
 			"push, load, save and export find them. Targets already cached are reused, unless --rebuild is given:\n" +
 			"then the named targets run again, though the targets they use are still reused. A pull() named\n" +
 			"with --rebuild resolves nothing again, keeping its pin, if it has one; vamos update refreshes it.",
-		Example: "  vamos build packages //backend:test\n  vamos build compile --rebuild",
-		Args:    atLeastOne("target name", "vamos build packages"),
-		RunE:    handle(func(inv *invocation, args []string) error { return inv.build(args) }),
+		Example: "  vamos build packages //backend:test\n  vamos build compile --rebuild\n" +
+			"  vamos build compile --no-tool-caches --rebuild",
+		Args: atLeastOne("target name", "vamos build packages"),
+		RunE: handle(func(inv *invocation, args []string) error { return inv.build(args) }),
 	}
 	buildCmd.Flags().BoolVar(&opts.rebuild, "rebuild", false,
 		"run the named targets again rather than reuse cached results")
+	buildCmd.Flags().BoolVar(&opts.noToolCaches, "no-tool-caches", false,
+		"give each attempt the build starts empty tool caches of its own, for a clean build;\n"+
+			"results, and other builds' attempts, made with warm caches are still reused,\n"+
+			"unless --rebuild runs the named targets again")
 
 	updateCmd := &cobra.Command{
 		Use:   "update [pull...]",
@@ -658,6 +671,9 @@ func (inv *invocation) executor() (executor, *types.SystemContext, error) {
 	if err != nil {
 		return nil, nil, err
 	}
+	if inv.app.isolation != nil {
+		ex.UseIsolation(*inv.app.isolation)
+	}
 	return ex, sys, nil
 }
 
@@ -706,6 +722,21 @@ func (inv *invocation) closeExecutor(ex executor) {
 	}
 }
 
+// newLocalCoordinator returns the local executor that vamos coordinator --local serves, on the container store that
+// options describe: in coordinator mode, which gives every attempt empty tool caches, since its clients' workspaces
+// are their own, running run() steps with isolation, if set, as Config.Isolation says.
+func newLocalCoordinator(options storage.StoreOptions, isolation *define.Isolation) (*run.Local, error) {
+	local, err := run.NewLocal(options)
+	if err != nil {
+		return nil, err
+	}
+	local.ServeAsCoordinator()
+	if isolation != nil {
+		local.UseIsolation(*isolation)
+	}
+	return local, nil
+}
+
 // coordinator coordinates builds for clients on the network, at --listen, until the command is interrupted:
 // across the workers that register, or, with --local, in this process with the local executor.
 func (inv *invocation) coordinator() error {
@@ -716,7 +747,7 @@ func (inv *invocation) coordinator() error {
 		if err != nil {
 			return err
 		}
-		local, err := run.NewLocal(options)
+		local, err := newLocalCoordinator(options, inv.app.isolation)
 		if err != nil {
 			return err
 		}
@@ -1238,15 +1269,17 @@ func (inv *invocation) runLoaded(
 		return nil, nil, err
 	}
 	runReq := api.GraphRequest{
-		Graph:      stored,
-		Version:    g.Version,
-		Platform:   execPlatform,
-		Rebuild:    rebuild,
-		Timestamp:  time.Time(inv.opts.timestamp),
-		Emulate:    inv.opts.emulate,
-		Workspace:  inv.workspace,
-		Generation: inv.generation, // read before the sources were captured: a prune since refuses the build
-		Secrets:    secrets,
+		Graph:    stored,
+		Version:  g.Version,
+		Platform: execPlatform,
+		Rebuild:  rebuild,
+		// Only vamos build has the flag, so a command that sends its build's results keeps the caches.
+		NoToolCaches: inv.opts.noToolCaches,
+		Timestamp:    time.Time(inv.opts.timestamp),
+		Emulate:      inv.opts.emulate,
+		Workspace:    inv.workspace,
+		Generation:   inv.generation, // read before the sources were captured: a prune since refuses the build
+		Secrets:      secrets,
 	}
 	runReq.Parent, runReq.State = inv.outerTrace()
 	events.graph = g
@@ -1676,11 +1709,11 @@ func (inv *invocation) prune() error {
 		inv.warn(errors.New(w))
 	}
 	if inv.opts.coordinator != "" {
-		return inv.printf("Removed %d results, %d files and %d target histories from the build cache, and %d image "+
-			"tags from the cache repository\n", p.Results, p.Blobs, p.Histories, p.Tags)
+		return inv.printf("Removed %d results, %d files, %d tool caches and %d target histories from the build cache, "+
+			"and %d image tags from the cache repository\n", p.Results, p.Blobs, p.ToolCaches, p.Histories, p.Tags)
 	}
-	return inv.printf("Removed %d images from the container store, and %d results, %d files and %d target "+
-		"histories from the build cache\n", p.Images, p.Results, p.Blobs, p.Histories)
+	return inv.printf("Removed %d images from the container store, and %d results, %d files, %d tool caches and %d "+
+		"target histories from the build cache\n", p.Images, p.Results, p.Blobs, p.ToolCaches, p.Histories)
 }
 
 // graph prints the graph of the targets named, as JSON, without building or storing anything.

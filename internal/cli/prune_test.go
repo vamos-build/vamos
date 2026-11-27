@@ -48,8 +48,8 @@ func TestPruneReportsHistories(t *testing.T) {
 	}
 	inv.opts.coordinator = server.URL
 	must(t, inv.prune())
-	if want := "Removed 2 results, 3 files and 1 target histories from the build cache, and 0 image tags from the " +
-		"cache repository\n"; stdout.String() != want {
+	if want := "Removed 2 results, 3 files, 0 tool caches and 1 target histories from the build cache, and 0 image " +
+		"tags from the cache repository\n"; stdout.String() != want {
 		t.Errorf("prune printed %q; want %q", stdout.String(), want)
 	}
 	if want := "vamos: warning: pruning target histories: removing a target history: device busy\n"; !strings.Contains(

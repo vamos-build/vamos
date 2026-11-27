@@ -112,7 +112,8 @@ All skip where the capability is missing, by probing it, unless `VAMOS_REQUIRE_I
 which makes them fail instead, for a host that must run the whole suite; a new probe reports through
 `testenv.Unavailable`.
 The buildah probe needs root and makes and mounts a container from scratch in the suite's store;
-the ownership probe needs root, as exports do, and a filesystem that takes `chown`.
+the ownership probe needs root, as exports do, and a filesystem that takes `chown`;
+the remapped-builder test needs ID maps whose extents each hold one of its builders' ranges, up to 465535.
 Test stores drop the default store's additional image and layer stores,
 and are removed only once nothing under them is mounted.
 `-short` still skips image builds.

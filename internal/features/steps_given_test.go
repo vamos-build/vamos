@@ -38,6 +38,7 @@ import (
 	"github.com/opencontainers/go-digest"
 	"github.com/vamos-build/vamos/internal/cli"
 	"github.com/vamos-build/vamos/internal/testenv"
+	"go.podman.io/buildah/define"
 	"go.podman.io/image/v5/docker/reference"
 )
 
@@ -745,6 +746,33 @@ func (w *world) GivenTheRegistrysImageRunsAs(image, user string) {
 	}
 }
 
+// GivenTheRegistrysImageDeclaresTheVolume replaces the image at the image name image, in which <registry> stands for
+// the scenario's registry, with one that declares the volume path too, as a Dockerfile's VOLUME does.
+// If the name names an index, the new image is this machine's image from it, and the name names it alone.
+func (w *world) GivenTheRegistrysImageDeclaresTheVolume(image, path string) {
+	w.t.Helper()
+	ref := w.registryRef(image)
+	img, err := remote.Image(ref, append(w.readingTheRegistry(),
+		remote.WithPlatform(*w.parsedPlatform(thisPlatform())))...)
+	if err != nil {
+		w.t.Fatal(err)
+	}
+	config, err := img.ConfigFile()
+	if err != nil {
+		w.t.Fatal(err)
+	}
+	if config.Config.Volumes == nil {
+		config.Config.Volumes = map[string]struct{}{}
+	}
+	config.Config.Volumes[path] = struct{}{}
+	if img, err = mutate.ConfigFile(img, config); err != nil {
+		w.t.Fatal(err)
+	}
+	if err := remote.Write(ref, img, w.readingTheRegistry()...); err != nil {
+		w.t.Fatal(err)
+	}
+}
+
 // fakeRegistryHost is the host of the fake registry that GivenTheRegistryListsTags starts, which <registry> stands for
 // then, so that a scenario that pins pulls needs no registry of its own.
 const fakeRegistryHost = "registry.example"
@@ -1030,4 +1058,13 @@ func (w *world) answerTagLists(path string, status int, body string) {
 type tagListAnswer struct {
 	status int
 	body   string
+}
+
+// GivenTheLocalExecutorRunsStepsWithOCIIsolation makes the local executor of the scenario's commands run run() steps
+// with buildah's OCI isolation, rather than the chroot isolation that Vamos's image sets, as BUILDAH_ISOLATION=oci
+// would, without changing the process's environment.
+func (w *world) GivenTheLocalExecutorRunsStepsWithOCIIsolation() {
+	w.t.Helper()
+	isolation := define.IsolationOCI
+	w.isolation = &isolation
 }

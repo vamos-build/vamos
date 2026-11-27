@@ -13,6 +13,21 @@ import (
 // a prune while the directory is in use, or a use while a prune runs.
 var ErrLocked = errors.New("the build cache is locked")
 
+// ErrRelock means that a prune left the directory without its shared lock, which it couldn't take back, after a
+// refused upgrade or after pruning, so that the handle may no longer be used: its owner ends the process, and the next
+// opens the directory again. It wraps the lock's own error without %w, so that it never matches ErrLocked, which says
+// a prune was refused and removed nothing.
+var ErrRelock = errors.New("the build cache lost its lock")
+
+// lockFlock takes a lock as flock does; a test replaces it to make taking the shared lock back fail.
+var lockFlock = flock
+
+// relockError returns err, a failure to take the lock back shared, as ErrRelock.
+func relockError(when string, err error) error {
+	//nolint:errorlint // the lock's own error may be ErrLocked, which a lost lock must never match
+	return fmt.Errorf("%w %s: %v; the build cache can't be used until this process ends", ErrRelock, when, err)
+}
+
 // lockName is the file in a Directory that its advisory lock is held on.
 const lockName = "lock"
 
@@ -53,18 +68,23 @@ func flock(f *os.File, how int) error {
 // If a prune elsewhere took the lock in between, so that not even the shared lock can be taken back,
 // the handle is left holding nothing, and the error says so; its owner, a prune command, exits on it.
 func (l *dirLock) exclusive(dir string) (func() error, error) {
-	if err := flock(l.f, unix.LOCK_EX); err != nil {
+	if err := lockFlock(l.f, unix.LOCK_EX); err != nil {
+		// The conversion gave the shared lock up first, whatever made it fail, so it is taken back.
+		if again := lockFlock(l.f, unix.LOCK_SH); again != nil {
+			return nil, relockError(fmt.Sprintf("after a failed prune (%v)", err), again)
+		}
 		if errors.Is(err, ErrLocked) {
-			if again := flock(l.f, unix.LOCK_SH); again != nil {
-				return nil, fmt.Errorf("taking the build cache's lock back after a failed prune: %w; "+
-					"the build cache can't be used until this process ends", again)
-			}
 			return nil, fmt.Errorf("%w: another vamos is using the build cache at %s; prune when it finishes",
 				ErrLocked, dir)
 		}
 		return nil, err
 	}
-	return func() error { return flock(l.f, unix.LOCK_SH) }, nil
+	return func() error {
+		if err := lockFlock(l.f, unix.LOCK_SH); err != nil {
+			return relockError("after pruning", err)
+		}
+		return nil
+	}, nil
 }
 
 // release gives the lock up and closes its file.
@@ -75,6 +95,19 @@ func (l *dirLock) release() error {
 	err := l.f.Close() // closing releases the lock
 	l.f = nil
 	return err
+}
+
+// FailRelock makes every Directory's prune fail to take its lock back shared, as when a prune elsewhere took it in
+// between, until the returned function is called. It is for tests of what a prune that loses its lock does, and so
+// must not run in parallel with any that prunes.
+func FailRelock() func() {
+	lockFlock = func(f *os.File, how int) error {
+		if how == unix.LOCK_SH {
+			return ErrLocked
+		}
+		return flock(f, how)
+	}
+	return func() { lockFlock = flock }
 }
 
 // HoldExclusive holds the directory's lock exclusive, as a prune does, while hold runs, and takes it back shared.

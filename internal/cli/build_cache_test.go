@@ -283,7 +283,7 @@ runroot = "%[1]s/default/run"
 	if err != nil {
 		t.Fatalf("pruning the default store failed: %v; output:\n%s", err, out)
 	}
-	if want := "and 0 results, 1 files and 0 target histories"; !strings.Contains(string(out), want) {
+	if want := "and 0 results, 1 files, 0 tool caches and 0 target histories"; !strings.Contains(string(out), want) {
 		t.Errorf("output lacks %q, for the file in the default store's build cache:\n%s", want, out)
 	}
 	for _, path := range []string{filepath.Join(dir, "default", "storage"), filepath.Join(dir, "default", "run")} {

@@ -86,7 +86,7 @@ func (w *workspace) everyPull(req Request) (labels []string, unsure string, err 
 		}
 	}
 	cr := &configurer{w: w, pulls: map[confLabel]*pullSpec{}, targets: map[confLabel]*targetSpec{},
-		globs: map[confLabel]*fileSet{}, indexes: map[confLabel][]confLabel{}}
+		globs: map[confLabel]*fileSet{}, indexes: map[confLabel][]confLabel{}, pinning: true}
 	configured := map[string]bool{}
 	for grew := true; grew; {
 		grew = false
@@ -122,10 +122,10 @@ func (w *workspace) everyPull(req Request) (labels []string, unsure string, err 
 }
 
 // configureTarget configures the target l as the command line req would, as building it would, loading the packages
-// that it uses; a pull or glob uses none.
+// that it uses; a pull or glob uses none, and a tool cache is mounted, never configured.
 func (w *workspace) configureTarget(cr *configurer, l string, req Request) error {
 	kind := w.declaration(l).kind
-	if kind == "pull" || kind == "glob" {
+	if kind == "pull" || kind == "glob" || kind == "tool_cache" {
 		return nil
 	}
 	if kind == "index" {

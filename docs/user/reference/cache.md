@@ -93,10 +93,20 @@ To remove cached build outputs:
 vamos prune
 ```
 
-`prune` deletes all cached layer images and intermediate build outputs.
+`prune` deletes all cached layer images and intermediate build outputs,
+and every workspace's [tool caches](build/tool-cache.md).
 It preserves pulled base images, recorded tag resolutions, and lockfile pins.
-The command reports the count of removed images, target results, and files.
-Subsequent builds regenerate required targets.
+A prune is refused while another Vamos uses the build cache, so it never deletes a cache that a build has mounted.
+The command reports what it removed; it counts the tool caches it removed from use,
+whose deletion, if it fails, is a warning that the next standalone prune retries:
+
+```
+Removed 3 images from the container store, and 12 results, 40 files, 2 tool caches and 0 target histories from the build cache
+```
+
+Subsequent builds regenerate required targets, and start with empty tool caches.
+Pruning `vamos coordinator --local` leaves tool caches,
+which belong to standalone builds that may share its container store.
 
 When building through a [remote coordinator](remote.md),
 the build cache resides on the coordinator (`--cache-dir`)
@@ -195,7 +205,7 @@ Each layer or task that runs or joins another build's attempt, rather than being
 | `forced` | It runs because `--rebuild` named it, whatever else changed. |
 | `lost` | Its action is in history but the result is gone, as after a prune, or a cached result was found but couldn't be used. This includes a task run again because another target found its cached files unusable. |
 | `new` | It has no earlier build to compare with: a first build, a new configuration, or an unnamed workspace. |
-| `own-inputs` | A step, command, output, source file, or which target supplies its base or files changed; a source's added, removed and changed files are named. |
+| `own-inputs` | A step, command, output, source file, the [tool caches](build/tool-cache.md) it mounts, where, or with which owner and group, or which target supplies its base or files changed; a source's added, removed and changed files are named. |
 | `upstream` | Only the image that its base pull's tag names moved, as after `vamos update`; both manifests are named. |
 | `dependency` | Only what a target it depends on supplies changed, as a base layer's image or an added task's files; each is named. |
 

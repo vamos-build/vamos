@@ -65,8 +65,8 @@ func TestPrune_RemovesCachedResults(t *testing.T) {
 		w.ThenItSucceeds()
 		w.WhenIPrune()
 		w.ThenItSucceeds()
-		w.ThenTheOutputIs("Removed 0 images from the container store, and 0 results, 0 files and 0 target histories " +
-			"from the build cache\n")
+		w.ThenTheOutputIs("Removed 0 images from the container store, and 0 results, 0 files, 0 tool caches and 0 " +
+			"target histories from the build cache\n")
 	})
 
 	t.Run("Targets run again after a prune, on the image pulled before, without the registry", func(t *testing.T) {

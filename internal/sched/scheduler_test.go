@@ -1823,3 +1823,48 @@ func (d *delayedWrites) Import(ctx context.Context, blob cache.Blob, r io.Reader
 	time.Sleep(d.delay)
 	return d.Memory.Import(ctx, blob, r)
 }
+
+// TestSchedulerToolCacheRequests checks that jobs of differently named workspaces, one of them clean, give a target
+// that mounts a tool cache one key, and that each request carries its job's workspace name and whether it is clean,
+// as metadata outside the key.
+func TestSchedulerToolCacheRequests(t *testing.T) {
+	g := &graph.Graph{Version: graph.Version, ExecPlatform: "linux/amd64", Roots: []graph.Ref{0}, Nodes: []graph.Node{
+		{Label: "build", Desc: `task "build"`, Task: &graph.Task{
+			Base:       graph.Scratch,
+			Steps:      []graph.Step{{Op: graph.OpRun, Display: `run(["go", "build"])`, Argv: []string{"go", "build"}}},
+			ToolCaches: []graph.ToolCache{{Path: "/cache", Label: "//:go-build"}},
+		}},
+	}}
+	testenv.Must(t, g.Validate())
+	var requests []Request
+	for _, opts := range []Options{
+		{Bound: 1, Workspace: "com.acme.first"},
+		{Bound: 1, Workspace: "com.acme.second", NoToolCaches: true},
+	} {
+		m, f := fakeFixture(t)
+		b := Backend{Content: m, Records: m, Checker: f, Runner: NewSharing(f, m, m)}
+		if _, err := New(g, b, &recordedEvents{}, opts).Run(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		if len(f.requests) != 1 {
+			t.Fatalf("the Runner ran %d actions, want 1", len(f.requests))
+		}
+		requests = append(requests, f.requests[0])
+	}
+	if requests[0].Key != requests[1].Key {
+		t.Errorf("the target's keys differ between workspaces: %s and %s", requests[0].Key, requests[1].Key)
+	}
+	for i, want := range []Request{
+		{Workspace: "com.acme.first"},
+		{Workspace: "com.acme.second", NoToolCaches: true},
+	} {
+		if got := requests[i]; got.Workspace != want.Workspace || got.NoToolCaches != want.NoToolCaches {
+			t.Errorf("request %d carries workspace %q and no tool caches %v; want %q and %v",
+				i, got.Workspace, got.NoToolCaches, want.Workspace, want.NoToolCaches)
+		}
+	}
+	if want := []graph.ToolCache{{Path: "/cache", Label: "//:go-build"}}; !slices.Equal(requests[0].Action.ToolCaches,
+		want) {
+		t.Errorf("the action mounts %+v; want %+v", requests[0].Action.ToolCaches, want)
+	}
+}

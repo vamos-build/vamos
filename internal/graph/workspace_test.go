@@ -1,12 +1,12 @@
-package load
+package graph
 
 import "testing"
 
 // TestCheckWorkspaceName checks the rules of a workspace's name, and that a name breaking one names the rule.
 func TestCheckWorkspaceName(t *testing.T) {
 	for _, valid := range []string{"storefront", "com.acme.storefront", "my-app_2", "a", "a1", "x.y-z_0"} {
-		if err := checkWorkspaceName(valid); err != nil {
-			t.Errorf("checkWorkspaceName(%q) = %v, want nil", valid, err)
+		if err := CheckWorkspaceName(valid); err != nil {
+			t.Errorf("CheckWorkspaceName(%q) = %v, want nil", valid, err)
 		}
 	}
 	for _, example := range []struct {
@@ -67,9 +67,9 @@ func TestCheckWorkspaceName(t *testing.T) {
 			error: `name "app_" must end with a lowercase letter or digit`,
 		},
 	} {
-		err := checkWorkspaceName(example.name)
+		err := CheckWorkspaceName(example.name)
 		if err == nil || err.Error() != example.error {
-			t.Errorf("checkWorkspaceName(%q) = %v, want %s", example.name, err, example.error)
+			t.Errorf("CheckWorkspaceName(%q) = %v, want %s", example.name, err, example.error)
 		}
 	}
 }

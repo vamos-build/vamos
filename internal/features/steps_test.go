@@ -24,6 +24,7 @@ import (
 	"github.com/vamos-build/vamos/internal/graph"
 	"github.com/vamos-build/vamos/internal/run"
 	"github.com/vamos-build/vamos/internal/testenv"
+	"go.podman.io/buildah/define"
 	"go.podman.io/storage"
 )
 
@@ -177,6 +178,7 @@ type world struct {
 	cachedBefore   cached            // what its own stores held as the last command began, alone
 	cachedAfter    cached            // and as it ended
 	emulating      string            // the platform whose programs the scenario runs under emulation, if any
+	isolation      *define.Isolation // how the local executor runs run() steps, if not as buildah's environment says
 	askedDuring    int64             // the requests that the scenario's registry served as the last command ran
 	jobsDuring     int64             // the jobs that the scenario's coordinator was given as the last command ran
 	toldDuring     []toldJob         // what those jobs told it, in order
@@ -363,7 +365,7 @@ func (w *world) execute(fsys afero.Fs, args []string) {
 // commandConfig returns the configuration of a command that the scenario runs in the project fsys, on its stores,
 // asking its fake registry about tags if a step started one.
 func (w *world) commandConfig(fsys afero.Fs) cli.Config {
-	cfg := cli.Config{Fs: fsys, Store: &w.stores.Options, Getenv: w.telemetryGetenv}
+	cfg := cli.Config{Fs: fsys, Store: &w.stores.Options, Getenv: w.telemetryGetenv, Isolation: w.isolation}
 	if w.fakeRegistry != nil { // rather than a nil *fakeRegistry, which isn't a nil cli.Registry
 		cfg.Registry = w.fakeRegistry
 	}

@@ -642,3 +642,31 @@ func (w *world) GivenTheHistoryOfWasLastUsed(workspace, target string, ago time.
 		w.t.Fatalf("the history of %s in %s = %v, %v; want one last used at %v", target, workspace, h, err, used)
 	}
 }
+
+// toolCacheUses are the tool caches that results' provenance records, by label: whether each was given empty.
+type toolCacheUses map[string]bool
+
+// ThenTheCachedResultsRecordTheToolCaches checks that the results in the scenario's own build cache record, between
+// them, exactly the tool caches that want names, each as given empty or not, as their provenance says.
+func (w *world) ThenTheCachedResultsRecordTheToolCaches(want toolCacheUses) {
+	w.t.Helper()
+	w.requireOwnStores()
+	got := toolCacheUses{}
+	for _, fields := range w.recordsNaming("provenance") {
+		var provenance struct {
+			ToolCaches []struct {
+				Label string `json:"label"`
+				Empty bool   `json:"empty"`
+			} `json:"tool_caches"`
+		}
+		if err := json.Unmarshal(fields["provenance"], &provenance); err != nil {
+			w.t.Fatal(err)
+		}
+		for _, c := range provenance.ToolCaches {
+			got[c.Label] = c.Empty
+		}
+	}
+	if !maps.Equal(got, want) {
+		w.t.Errorf("the cached results record the tool caches %v, want %v", got, want)
+	}
+}

@@ -40,6 +40,18 @@ type Provenance struct {
 	// without waiting for a worker or failed tries; a result made before Vamos kept them has neither.
 	Started time.Time     `json:"started,omitzero"`
 	Took    time.Duration `json:"took,omitempty"`
+	// ToolCaches are the tool caches the run mounted, for diagnostics: a result made with a warm cache is the same as
+	// one made with an empty one, as the user asserts of every cache.
+	ToolCaches []ToolCacheUse `json:"tool_caches,omitempty"`
+}
+
+// ToolCacheUse is a tool cache that the run that made a result mounted.
+type ToolCacheUse struct {
+	Label string `json:"label"` // the cache's canonical label, as "//tools:go-build"
+	// Empty says that the run mounted an empty directory of its own rather than the workspace's cache, as under
+	// --no-tool-caches, on a worker or under vamos coordinator --local; a workspace's cache made for the run, empty as
+	// it was, is not, since what a reader needs to know is whether a warm cache could have been there.
+	Empty bool `json:"empty,omitempty"`
 }
 
 // Location is a place an image's bytes can be fetched from.

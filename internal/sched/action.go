@@ -13,7 +13,9 @@ import (
 
 // ActionVersion changes whenever what a key covers, or how a target is built, changes,
 // so that results built the old way aren't reused.
-const ActionVersion = 11 // 11: a pinned resolve, and no Again, which workers of 10 would mistake
+// 12: a layer's or task's tool caches, which a worker of 11 would leave unmounted, so that a layer's image would keep
+// what its steps wrote to them under the same key.
+const ActionVersion = 12
 
 // The kinds of Action.
 const (
@@ -49,6 +51,11 @@ type Action struct {
 	Entrypoint *[]string          `json:"entrypoint,omitempty"`
 	Source     string             `json:"source,omitempty"` // a task's directory of output
 	Output     *fileset.Selection `json:"output,omitempty"` // a task's output, within source
+	// ToolCaches are the tool caches a layer or task mounts for its run() steps, as its node gives them: where each is
+	// mounted, which it is, and its owner and group, which shape the container, but never what a cache holds, whether
+	// it holds anything, where the executor keeps it or the workspace's name, which choose only which directory is
+	// mounted, and so are a Request's.
+	ToolCaches []graph.ToolCache `json:"tool_caches,omitempty"`
 }
 
 // Step is one step of an Action.

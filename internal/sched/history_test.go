@@ -68,6 +68,14 @@ func withSteps(a *Action, cmds ...string) *Action {
 	return a
 }
 
+// mounting returns a with the tool caches caches, each a path and a label, owned by root.
+func mounting(a *Action, caches ...string) *Action {
+	for i := 0; i < len(caches); i += 2 {
+		a.ToolCaches = append(a.ToolCaches, graph.ToolCache{Path: caches[i], Label: caches[i+1]})
+	}
+	return a
+}
+
 // files returns a source's files, each regular with mode 0644 and content named by itself, but as changes says.
 func files(paths ...string) []cache.HistoryFile {
 	var out []cache.HistoryFile
@@ -276,6 +284,58 @@ func TestAttribute(t *testing.T) {
 			},
 			want: attribution{cause: CauseUpstream, pull: `pull "base"`, before: digest.FromString("m1"),
 				after: digest.FromString("m2")},
+		},
+		{
+			name: "a moved cache mount is own-inputs, naming no file",
+			facts: missFacts{named: true,
+				entry: entryOf(t, "x", mounting(layer("img", nil, nil, 0, "make"), "/other", "//:tool"), nil, nil)},
+			history: []cache.HistoryEntry{
+				entryOf(t, "y", mounting(layer("img", nil, nil, 0, "make"), "/cache", "//:tool"), nil, nil),
+			},
+			want: attribution{cause: CauseOwnInputs},
+		},
+		{
+			name: "another cache mounted is own-inputs",
+			facts: missFacts{named: true,
+				entry: entryOf(t, "x", mounting(layer("img", nil, nil, 0, "make"), "/cache", "//:npm"), nil, nil)},
+			history: []cache.HistoryEntry{
+				entryOf(t, "y", mounting(layer("img", nil, nil, 0, "make"), "/cache", "//:go"), nil, nil),
+			},
+			want: attribution{cause: CauseOwnInputs},
+		},
+		{
+			name: "a cache's other owner and group is own-inputs",
+			facts: missFacts{named: true, entry: entryOf(t, "x", func() *Action {
+				a := mounting(layer("img", nil, nil, 0, "make"), "/cache", "//:tool")
+				a.ToolCaches[0].Owner, a.ToolCaches[0].Group = 1000, 1000
+				return a
+			}(), nil, nil)},
+			history: []cache.HistoryEntry{
+				entryOf(t, "y", mounting(layer("img", nil, nil, 0, "make"), "/cache", "//:tool"), nil, nil),
+			},
+			want: attribution{cause: CauseOwnInputs},
+		},
+		{
+			// Two mounts moved are one difference, nearer than two files changed in the more recent entry, which two
+			// differences of mounts would tie with, and so be compared.
+			name: "the caches a target mounts count as one difference",
+			facts: missFacts{named: true, entry: entryOf(t, "x",
+				mounting(layer("img", srcOne, nil, 0, "make"), "/a", "//:a", "/b", "//:b"), nil,
+				[]cache.Supplier{src(tree("one"))})},
+			history: []cache.HistoryEntry{ // most recent first
+				entryOf(t, "edited", mounting(layer("img", srcTwo, nil, 0, "make"), "/a", "//:a", "/b", "//:b"), nil,
+					[]cache.Supplier{src(tree("ab"))}),
+				entryOf(t, "moved", mounting(layer("img", srcOne, nil, 0, "make"), "/a2", "//:a", "/b2", "//:b"), nil,
+					[]cache.Supplier{src(tree("one"))}),
+			},
+			trees: map[digest.Digest][]cache.HistoryFile{
+				tree("one"): files("a.txt", "b.txt"),
+				tree("ab"): {
+					{Path: "a.txt", Type: "file", Mode: 0o644, Digest: digest.FromString("a.txt, edited")},
+					{Path: "b.txt", Type: "file", Mode: 0o644, Digest: digest.FromString("b.txt, edited")},
+				},
+			},
+			want: attribution{cause: CauseOwnInputs},
 		},
 		{
 			name: "a base switched to another pull is own-inputs",

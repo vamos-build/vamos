@@ -2,6 +2,7 @@ package run
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -63,6 +64,9 @@ type localRunner struct {
 	// pullThrough maps each upstream registry to the pull-through cache that mirrors it, by host; empty pulls
 	// from upstream directly, as the local executor does.
 	pullThrough map[string]string
+	// toolCacheRoot is where the workspaces' tool caches are kept, in the build cache, under its lock; "" keeps none,
+	// giving every attempt empty caches of its own, as a worker's runner and a local coordinator's do.
+	toolCacheRoot string
 }
 
 // builderOptions returns the options of a target's builder, from the image from.
@@ -77,6 +81,9 @@ func builderOptions(from string, capabilities []string, sys *types.SystemContext
 		DefaultMountsFilePath: os.DevNull,
 	}
 }
+
+// newBuilder makes a target's builder; tests give builders ID mappings of their own through it.
+var newBuilder = buildah.NewBuilder
 
 // attemptPrefix starts the name of an attempt's container, so that a worker finds what a killed attempt left.
 const attemptPrefix = "vamos-attempt-"
@@ -152,6 +159,9 @@ func (r *localRunner) run(ctx context.Context, req sched.Request, ev sched.Outpu
 			if a.Output == nil {
 				return nil
 			}
+			if err := st.checkInto("source", a.Source); err != nil {
+				return err
+			}
 			_, span := tracing.Start(ctx, "collect output", "source", a.Source,
 				"include", a.Output.Include, "exclude", a.Output.Exclude)
 			output, stats, err := collectOutput(ctx, st.mountPoint, a.Source, a.Output,
@@ -217,6 +227,12 @@ func (r *localRunner) runTarget(
 	}
 
 	result := &cache.ActionResult{Epoch: req.Epoch.Unix(), Provenance: r.provenance(st.emulated)}
+	if st.caches.active() {
+		for _, m := range st.caches.mounts {
+			result.Provenance.ToolCaches = append(result.Provenance.ToolCaches,
+				cache.ToolCacheUse{Label: m.Label, Empty: m.empty})
+		}
+	}
 	// Save the log first, so that a failure saving it can't leave an image no result names.
 	if result.Log, err = log.Save(ctx, r.content); err != nil {
 		return nil, fmt.Errorf("saving to the build cache: %w", err)
@@ -366,7 +382,7 @@ func (r *localRunner) start(
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	builder, err := buildah.NewBuilder(context.WithoutCancel(ctx), r.store, options)
+	builder, err := newBuilder(context.WithoutCancel(ctx), r.store, options)
 	if err != nil {
 		return nil, err
 	}
@@ -387,6 +403,17 @@ func (r *localRunner) start(
 		return st, err
 	}
 	startSpan.Set("container", builder.ContainerID)
+	// Its tool caches, and where their paths lead in the image, before any step.
+	if err := r.openToolCaches(st, req); err != nil {
+		return st, err
+	}
+	var secrets []graph.Secret
+	for _, in := range a.Steps {
+		secrets = append(secrets, in.Secrets...)
+	}
+	if err := st.beforeSteps(secrets); err != nil {
+		return st, err
+	}
 	startSpan.End()
 
 	for i, in := range a.Steps {
@@ -398,8 +425,14 @@ func (r *localRunner) start(
 		if i < len(req.Displays) {
 			display = req.Displays[i]
 		}
-		if in.Op == graph.OpRun && emulated(builder) {
-			st.emulated = true
+		if in.Op == graph.OpRun {
+			if emulated(builder) {
+				st.emulated = true
+			}
+			// A failure names the step as each job's BUILD file wrote it, since jobs may share the attempt.
+			if st.mounts, err = st.beforeRun(in.Secrets); err != nil {
+				return st, &sched.StepError{Step: i, Err: fmt.Errorf("before it ran: %w", err)}
+			}
 		}
 		if err := st.tracedApply(ctx, in, display); err != nil {
 			return st, &sched.StepError{Step: i, Err: err, Hint: emulatorHint(in, builder)}
@@ -407,6 +440,9 @@ func (r *localRunner) start(
 	}
 	if err := ctx.Err(); err != nil {
 		return st, err
+	}
+	if err := st.afterSteps(); err != nil {
+		return st, fmt.Errorf("after its steps: %w", err)
 	}
 
 	if a.Kind == sched.KindLayer {
@@ -481,6 +517,10 @@ func (st *targetState) delete() error {
 		return nil
 	}
 	var errs []error
+	// Before the container, whose removal would delete them under the store's locks, holding up other attempts.
+	if err := st.caches.remove(); err != nil {
+		errs = append(errs, err)
+	}
 	if st.mountPoint != "" {
 		if err := st.builder.Unmount(); err != nil {
 			errs = append(errs, fmt.Errorf("unmounting: %w", err))
@@ -506,16 +546,138 @@ func (l *Local) prune(ctx context.Context) (api.Pruned, error) {
 	// the images are removed under it too, so that a prune refused for a use elsewhere removes nothing.
 	var pruned api.Pruned
 	var err error
-	pruned.Results, pruned.Blobs, err = l.directory.Prune(ctx, func() (err error) {
-		pruned.Images, err = l.removeCachedImages()
+	// A local coordinator leaves the tool caches, which are standalone builds' that may share its store.
+	standalone := !l.ServesAsCoordinator()
+	dir := cacheDir(l.storeOptions)
+	pruned.Results, pruned.Blobs, err = l.directory.Prune(ctx, func() error {
+		images, err := l.removeCachedImages()
+		pruned.Images = images
+		if standalone {
+			count, warning, terr := setToolCachesAside(dir)
+			pruned.ToolCaches = count
+			if warning != nil {
+				pruned.Warnings = append(pruned.Warnings, warning.Error())
+			}
+			err = errors.Join(err, terr)
+		}
 		return err
 	})
-	// Histories are pruned whatever else failed, so that one failure that recurs, removing an image, doesn't keep
-	// every history forever; their own failure is a warning. A prune refused for the lock removes nothing.
-	if !errors.Is(err, cache.ErrLocked) {
-		sched.PruneHistory(ctx, l.directory, &pruned)
+	// A handle that lost its lock may no longer be used, by this job or any other the process runs, and none can be
+	// given a new one: the process ends, and its next start opens the directory again.
+	if errors.Is(err, cache.ErrRelock) {
+		if done := describePruned(pruned); done != "" {
+			err = fmt.Errorf("%w; %s", err, done)
+		}
+		lostLock(err)
+		return api.Pruned{}, err
 	}
+	// A prune refused for the lock removes nothing.
+	if errors.Is(err, cache.ErrLocked) {
+		return pruned, err
+	}
+	if standalone {
+		deleteToolCacheTrash(dir, &pruned)
+	}
+	// Histories are pruned whatever else failed, so that one failure that recurs, removing an image, doesn't keep
+	// every history forever; their own failure is a warning.
+	sched.PruneHistory(ctx, l.directory, &pruned)
 	return pruned, err
+}
+
+// lostLock ends the process once a prune left the build cache without its lock, as exitOnLostLock does; a test
+// replaces it.
+var lostLock = exitOnLostLock
+
+// exitOnLostLock ends the process, saying that the build cache lost its lock, as err does: its runner, the scheduler's
+// sharing and a local coordinator's server all hold the directory, and none can be given a new one or stopped from
+// using it safely, so a CLI build fails and vamos coordinator --local stops, and the next start opens it again.
+func exitOnLostLock(err error) {
+	fmt.Fprintf(os.Stderr, "vamos: %v\n", err)
+	os.Exit(1)
+}
+
+// renameDir and readDir rename and read a directory, as os.Rename and os.ReadDir do; tests replace them to make them
+// fail, and so must not run in parallel.
+var (
+	renameDir = os.Rename
+	readDir   = os.ReadDir
+)
+
+// toolCachesTrash starts the name of a tool-caches/ directory that a prune renamed aside, beside it in the build
+// cache, to delete once it holds the lock shared again.
+const toolCachesTrash = toolCachesDir + ".trash-"
+
+// setToolCachesAside renames the build cache dir's tool-caches/ aside, under the prune's exclusive lock, so that no
+// build sees a cache vanish, and returns how many caches it held: owner directories, one for each workspace, label,
+// owner, group and ID mapping, never a .tmp- leftover or a label's directory. A failure to count is a warning, and the
+// count what was read; a missing tool-caches/ counts none; a failed rename fails the prune, counting none.
+func setToolCachesAside(dir string) (int, error, error) {
+	trash := filepath.Join(dir, toolCachesTrash+rand.Text())
+	err := renameDir(filepath.Join(dir, toolCachesDir), trash)
+	if errors.Is(err, os.ErrNotExist) {
+		return 0, nil, nil
+	} else if err != nil {
+		return 0, nil, fmt.Errorf("setting the tool caches aside: %w", err)
+	}
+	count, err := countToolCaches(trash)
+	if err != nil {
+		return count, fmt.Errorf("counting the tool caches pruned: %w", err), nil
+	}
+	return count, nil, nil
+}
+
+// countToolCaches counts the owner directories of the caches in root, a tool-caches/ directory.
+func countToolCaches(root string) (int, error) {
+	count := 0
+	visible := func(e os.DirEntry) bool { return e.IsDir() && !strings.HasPrefix(e.Name(), ".tmp-") }
+	// A read that fails partway returns what it read, which is counted.
+	var errs []error
+	workspaces, err := readDir(root)
+	if err != nil {
+		errs = append(errs, err)
+	}
+	for _, workspace := range workspaces {
+		if !visible(workspace) {
+			continue
+		}
+		labels, err := readDir(filepath.Join(root, workspace.Name()))
+		if err != nil {
+			errs = append(errs, err)
+		}
+		for _, label := range labels {
+			if !visible(label) {
+				continue
+			}
+			owners, err := readDir(filepath.Join(root, workspace.Name(), label.Name()))
+			if err != nil {
+				errs = append(errs, err)
+			}
+			for _, owner := range owners {
+				if visible(owner) {
+					count++
+				}
+			}
+		}
+	}
+	return count, errors.Join(errs...)
+}
+
+// deleteToolCacheTrash deletes what this prune set aside of the build cache dir's tool caches, and what an earlier
+// one, killed partway, left, reporting a failure as a warning: the next standalone prune tries again.
+func deleteToolCacheTrash(dir string, pruned *api.Pruned) {
+	// Read by name, not as a pattern, which the build cache's own path could hold.
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		pruned.Warnings = append(pruned.Warnings, fmt.Sprintf("finding the tool caches pruned: %v", err))
+	}
+	for _, e := range entries {
+		if !strings.HasPrefix(e.Name(), toolCachesTrash) {
+			continue
+		}
+		if err := removeAll(filepath.Join(dir, e.Name())); err != nil {
+			pruned.Warnings = append(pruned.Warnings, fmt.Sprintf("deleting the tool caches pruned: %v", err))
+		}
+	}
 }
 
 // removeCachedImages removes the images of cached layers from the container store, and the cache-repository names

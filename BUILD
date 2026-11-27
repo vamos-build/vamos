@@ -6,6 +6,62 @@
 #
 #   vamos build release    every check, then the release image
 #   vamos build lint       one check, or vulnerabilities or test
+#
+# The Go commands mount a tool cache, so they need chroot isolation, as the devcontainer's BUILDAH_ISOLATION sets.
+
+# Go's build cache, which the Go commands below keep between builds, so that a source change compiles only what it
+# touches. Nothing in any image is at its path.
+tool_cache(
+    name = "go-build",
+    path = "/cache/go-build",
+)
+
+# go runs a Go command, argv, through sh, with GOCACHE, and golangci-lint's GOLANGCI_LINT_CACHE, beneath the go-build
+# cache in a directory named by a digest of the image's native build environment: its packages, by rpm, and by dpkg
+# with their state, and what /usr/local holds of tools, such as golangci-lint, and C headers, libraries and pkg-config
+# files, in bin, include, lib, lib64 and share/pkgconfig: every entry, through links, by its name and type, each link
+# by its target and each file by its contents.
+# Go's build cache misses a change to the C libraries and headers that cgo uses, so a base that installs other ones
+# compiles into an empty directory rather than reuse what was built against the old ones. Every step writes a file it
+# checks, so that a failure to name the environment, or a base that lists no packages, fails the step rather than
+# choose a cache by part of it.
+# argv reaches the command unchanged, as "$@", with sh as $0.
+def go(argv):
+    script = r"""
+        set -e
+        dir=$(mktemp -d)
+        : >"$dir/packages"
+        if command -v rpm >/dev/null; then
+            rpm -qa --qf '%{NAME}-%{EPOCHNUM}:%{VERSION}-%{RELEASE}.%{ARCH}\n' >>"$dir/packages"
+        fi
+        if command -v dpkg-query >/dev/null; then
+            dpkg-query -W -f '${db:Status-Abbrev} ${Package}:${Architecture} ${Version}\n' >>"$dir/packages"
+        fi
+        if [ ! -s "$dir/packages" ]; then
+            echo "go(): neither rpm nor dpkg-query lists the image's packages, which name Go's build cache" >&2
+            exit 1
+        fi
+        LC_ALL=C sort "$dir/packages" >"$dir/list"
+        roots=""
+        for root in /usr/local/bin /usr/local/include /usr/local/lib /usr/local/lib64 /usr/local/share/pkgconfig; do
+            if [ -e "$root" ] || [ -L "$root" ]; then roots="$roots $root"; fi
+        done
+        if [ -n "$roots" ]; then
+            find -L $roots -print0 >"$dir/entries"
+            LC_ALL=C sort -z "$dir/entries" >"$dir/sorted"
+            LC_ALL=C QUOTING_STYLE=shell-escape-always xargs -0 stat --printf '%F %N\0' <"$dir/sorted" >>"$dir/list"
+            find -L $roots -type f -print0 >"$dir/files"
+            LC_ALL=C sort -z "$dir/files" >"$dir/sorted"
+            if [ -s "$dir/sorted" ]; then xargs -0 sha256sum <"$dir/sorted" >>"$dir/list"; fi
+        fi
+        sha256sum <"$dir/list" >"$dir/sum"
+        key=$(cut -c1-32 "$dir/sum")
+        rm -rf "$dir"
+        if [ "${#key}" -ne 32 ]; then echo "go(): no digest of the environment, $key" >&2; exit 1; fi
+        export GOCACHE=/cache/go-build/$key/go GOLANGCI_LINT_CACHE=/cache/go-build/$key/golangci-lint
+        exec "$@"
+    """
+    return run(["sh", "-c", script, "sh"] + argv)
 
 # Debian 12's glibc is old enough for the binary to run on Ubuntu 24.04 and later: it needs glibc 2.34.
 pull(
@@ -61,9 +117,10 @@ task(
     name = "build",
     params = {"version": ""},
     base = "modules",
+    tool_caches = [mount("go-build")],
     steps = lambda ctx: [
         add("source-files", "/build"),
-        run([
+        go([
             "go",
             "build",
             "-tags",
@@ -163,8 +220,9 @@ layer(
 task(
     name = "lint",
     base = "check-source",
+    tool_caches = [mount("go-build")],
     steps = [
-        run(["golangci-lint", "run"]),
+        go(["golangci-lint", "run"]),
     ],
 )
 
@@ -173,16 +231,20 @@ task(
 task(
     name = "vulnerabilities",
     base = "check-source",
+    tool_caches = [mount("go-build")],
     steps = [
-        run(["govulncheck", "./..."]),
+        go(["govulncheck", "./..."]),
     ],
 )
 
+# -count=1, since go test reuses a cached result while the files a test reads keep their size and modification time,
+# and Vamos gives every file it adds the same time; the build cache is still used.
 task(
     name = "test",
     base = "check-source",
+    tool_caches = [mount("go-build")],
     steps = [
-        run(["go", "test", "-short", "./..."]),
+        go(["go", "test", "-short", "-count=1", "./..."]),
     ],
 )
 

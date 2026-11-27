@@ -19,6 +19,7 @@ layer(
 | `steps` | List of steps executed in order | `[]` |
 | `command` | Default container command as an argument list | Inherited from base |
 | `entrypoint` | Container entrypoint as an argument list | Inherited from base |
+| `tool_caches` | List of `mount()` values naming [tool caches](tool-cache.md) for its `run()` steps | `[]` |
 
 A layer retains its base image's files and configuration, then applies its own steps.
 `command` configures the image's default runtime command; it does not execute during the build.

@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/vamos-build/vamos/internal/testenv"
+
+	"golang.org/x/sys/unix"
 )
 
 // TestDirectoryLockInProcess checks that a prune is refused while another handle holds the directory open,
@@ -133,5 +135,66 @@ func holdInSubprocess(t *testing.T, dir string, prune bool) func() {
 		if err := cmd.Wait(); err != nil {
 			t.Errorf("the helper failed: %v\n%s", err, out)
 		}
+	}
+}
+
+// TestPruneLosesItsLock checks that a prune that can't take the directory's lock back shared, after a refused upgrade
+// or after pruning, fails with ErrRelock, which never matches ErrLocked, since its handle may no longer be used.
+func TestPruneLosesItsLock(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		refused bool // another handle holds the directory, so the upgrade is refused
+	}{
+		{name: "after a refused upgrade", refused: true},
+		{name: "after a prune"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			d, err := OpenDirectory(dir)
+			testenv.Must(t, err)
+			defer d.Close()
+			if tc.refused {
+				other, err := OpenDirectory(dir)
+				testenv.Must(t, err)
+				defer other.Close()
+			}
+			t.Cleanup(FailRelock()) // as when a prune elsewhere took the lock in between
+			_, _, err = d.Prune(t.Context(), nil)
+			if !errors.Is(err, ErrRelock) || errors.Is(err, ErrLocked) {
+				t.Errorf("Prune = %v; want %v, and not %v", err, ErrRelock, ErrLocked)
+			}
+		})
+	}
+}
+
+// TestPruneKeepsItsLockAfterAnotherFailure checks that an upgrade that fails other than for another holder, as with
+// EINTR, takes the shared lock back, which the conversion gave up first, so that the handle still excludes a prune
+// elsewhere and may be used.
+func TestPruneKeepsItsLockAfterAnotherFailure(t *testing.T) {
+	dir := t.TempDir()
+	d, err := OpenDirectory(dir)
+	testenv.Must(t, err)
+	defer d.Close()
+	interrupted := errors.New("interrupted")
+	lockFlock = func(f *os.File, how int) error {
+		if how == unix.LOCK_EX {
+			// As the conversion gives the shared lock up first.
+			if err := unix.Flock(int(f.Fd()), unix.LOCK_UN); err != nil {
+				t.Fatalf("giving the shared lock up: %v", err)
+			}
+			return interrupted
+		}
+		return flock(f, how)
+	}
+	t.Cleanup(func() { lockFlock = flock })
+	if _, _, err := d.Prune(t.Context(), nil); !errors.Is(err, interrupted) || errors.Is(err, ErrRelock) {
+		t.Errorf("Prune = %v; want %v, the lock taken back", err, interrupted)
+	}
+	lockFlock = flock
+	other, err := OpenDirectory(dir)
+	testenv.Must(t, err)
+	defer other.Close()
+	if _, _, err := other.Prune(t.Context(), nil); !errors.Is(err, ErrLocked) {
+		t.Errorf("a prune elsewhere = %v; want %v, the first handle still holding the directory", err, ErrLocked)
 	}
 }

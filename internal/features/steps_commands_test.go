@@ -2,6 +2,7 @@ package features
 
 import (
 	"cmp"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -13,7 +14,9 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/google/go-containerregistry/pkg/v1/tarball"
 	"github.com/spf13/afero"
+	"github.com/vamos-build/vamos/internal/api"
 	"github.com/vamos-build/vamos/internal/graph"
+	"github.com/vamos-build/vamos/internal/run"
 	"github.com/vamos-build/vamos/internal/testenv"
 	"go.podman.io/image/v5/docker/reference"
 )
@@ -212,6 +215,14 @@ func rebuilding() option {
 	}}
 }
 
+// withNoToolCaches gives each attempt the build starts empty tool caches of its own, with --no-tool-caches. Build takes
+// it.
+func withNoToolCaches() option {
+	return option{"withNoToolCaches", []string{"build"}, func(_ *world, c *commandLine) {
+		c.flags = append(c.flags, "--no-tool-caches")
+	}}
+}
+
 // alongWith names targets after the one the step names. Build takes it.
 func alongWith(targets ...string) option {
 	return option{"alongWith", []string{"build"}, func(_ *world, c *commandLine) {
@@ -246,19 +257,20 @@ func withFlags(flags ...string) option {
 //
 //nolint:unused // withFlags's check, kept with it
 var namedFlags = map[string]string{
-	"--tag":           "tagged or taggedAs",
-	"-t":              "tagged",
-	"--timestamp":     "stampedAt",
-	"--set":           "setting",
-	"--secret":        "withSecrets",
-	"--platform":      "forPlatform",
-	"--exec-platform": "onTheExecPlatform",
-	"--replace":       "replacing",
-	"--rebuild":       "rebuilding",
-	"--push-from":     "fromTheClient",
-	"--tls-verify":    "withTLSVerification or withoutTLSVerification",
-	"-C":              "GivenIWorkIn",
-	"--dir":           "GivenIWorkIn",
+	"--tag":            "tagged or taggedAs",
+	"-t":               "tagged",
+	"--timestamp":      "stampedAt",
+	"--set":            "setting",
+	"--secret":         "withSecrets",
+	"--platform":       "forPlatform",
+	"--exec-platform":  "onTheExecPlatform",
+	"--replace":        "replacing",
+	"--rebuild":        "rebuilding",
+	"--no-tool-caches": "withNoToolCaches",
+	"--push-from":      "fromTheClient",
+	"--tls-verify":     "withTLSVerification or withoutTLSVerification",
+	"-C":               "GivenIWorkIn",
+	"--dir":            "GivenIWorkIn",
 }
 
 // apply applies options to the command line of command, failing the scenario if command doesn't take one.
@@ -579,4 +591,59 @@ func (w *world) newDest() string {
 	w.dest, w.inProject = w.destination(), false
 	w.prepared = ""
 	return w.dest
+}
+
+// WhenAnAPIClientSendsTheGraphWithoutAWorkspaceName sends the graph that WhenIShowTheGraph showed to a local executor
+// on the scenario's stores, as an API client, or a client older than workspace names, would: in a graph request that
+// names no workspace and asks for no empty tool caches. The job's failure, if it fails, is the command's error, and
+// each status it reports of targets a line of its standard output, "<nodes>: <status>". It stops the scenario if no
+// graph was shown, or the job can't be watched to its end.
+func (w *world) WhenAnAPIClientSendsTheGraphWithoutAWorkspaceName() {
+	w.t.Helper()
+	if w.graph == nil {
+		w.t.Fatal(w.noGraph())
+	}
+	w.stdout, w.stderr, w.err = "", "", nil
+	local, err := run.NewLocal(w.stores.Options)
+	if err != nil {
+		w.t.Fatal(err)
+	}
+	defer local.Close()
+	content, err := local.ContentStore()
+	if err != nil {
+		w.t.Fatal(err)
+	}
+	ctx := w.t.Context()
+	blob, err := content.PutBytes(ctx, graph.Encode(w.graph))
+	if err != nil {
+		w.t.Fatal(err)
+	}
+	platform, err := graph.ParsePlatform(w.graph.ExecPlatform)
+	if err != nil {
+		w.t.Fatal(err)
+	}
+	id, err := local.Submit(ctx, api.Request{Graph: &api.GraphRequest{
+		Graph: blob, Version: w.graph.Version, Platform: platform,
+	}})
+	if err != nil {
+		w.err = err
+		return
+	}
+	var statuses strings.Builder
+	if err := local.Watch(ctx, id, 0, func(e api.Event) error {
+		if e.Kind == api.EventStatus {
+			fmt.Fprintf(&statuses, "%v: %s\n", e.Nodes, e.Status)
+		}
+		return nil
+	}); err != nil {
+		w.t.Fatalf("watching the job: %v", err)
+	}
+	w.stdout = statuses.String()
+	outcome, err := local.Result(ctx, id)
+	if err != nil {
+		w.t.Fatalf("reading the job's outcome: %v", err)
+	}
+	if outcome.Failure != nil {
+		w.err = errors.New(outcome.Failure.Message)
+	}
 }

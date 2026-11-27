@@ -296,3 +296,25 @@ func workspaceOf(req Request) string {
 	}
 	return ""
 }
+
+// TestNoToolCachesCrosses checks that a graph request keeps whether it asks for empty tool caches, and its workspace's
+// name, through JSON and a clone, and that one that doesn't ask encodes nothing of it, as an older client's does.
+func TestNoToolCachesCrosses(t *testing.T) {
+	req := Request{Graph: &GraphRequest{Workspace: "com.acme.shop", NoToolCaches: true}}
+	data, err := json.Marshal(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded Request
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	for how, got := range map[string]Request{"decoded": decoded, "cloned": req.Clone()} {
+		if !got.Graph.NoToolCaches || got.Graph.Workspace != "com.acme.shop" {
+			t.Errorf("%s %s = %+v, want it clean and named", how, data, got.Graph)
+		}
+	}
+	if data, _ := json.Marshal(GraphRequest{}); strings.Contains(string(data), "tool_caches") {
+		t.Errorf("a request that keeps tool caches encodes as %s, which names them", data)
+	}
+}

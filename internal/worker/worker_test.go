@@ -18,6 +18,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -43,8 +44,35 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	testenv.Main(m, ChildFromEnv)
+	testenv.Main(m, func() bool {
+		if path := os.Getenv(slowRemovalEnv); path != "" && strings.HasPrefix(os.Getenv(ChildEnv), "{") {
+			slowRemovals(path) // in an attempt's own process alone, as ChildFromEnv runs one
+		}
+		return ChildFromEnv()
+	})
 }
+
+// slowRemovals makes the attempt that this process may run remove its temporary tool caches slowly, naming each
+// directory it removed in the file path, a line each, with how long the removal took, in nanoseconds, before it.
+func slowRemovals(path string) {
+	run.SlowToolCacheRemoval(slowRemoval, func(dir string, took time.Duration) {
+		f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+		if err == nil {
+			_, err = fmt.Fprintf(f, "%d %s\n", took, dir)
+			err = errors.Join(err, f.Close())
+		}
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "recording the removal of %s: %v\n", dir, err)
+		}
+	})
+}
+
+// slowRemovalEnv, in an attempt's environment, makes the attempt remove its temporary tool caches slowly, taking
+// slowRemoval, three of the fixture's leases, and name each directory it removed in the file it names.
+const slowRemovalEnv = "VAMOS_TEST_SLOW_TOOL_CACHE_REMOVAL"
+
+// slowRemoval is how long an attempt given slowRemovalEnv waits before it removes its temporary tool caches.
+const slowRemoval = 3 * testLease
 
 // fixture is a coordinator with stores in memory, served over HTTP, with a cache registry of its own.
 type fixture struct {
@@ -63,8 +91,9 @@ func newFixture(t *testing.T) *fixture {
 	return newFixtureWithLease(t, testLease)
 }
 
-// newFixtureWithLease returns a coordinator whose attempts' leases last lease, with heartbeats at a sixth of it.
-func newFixtureWithLease(t *testing.T, lease time.Duration) *fixture {
+// newFixtureWithLease returns a coordinator whose attempts' leases last lease, with heartbeats at a sixth of it,
+// configured further by configure.
+func newFixtureWithLease(t *testing.T, lease time.Duration, configure ...func(*coord.Config)) *fixture {
 	t.Helper()
 	testenv.RequireBuildah(t)
 	reg := httptest.NewServer(untagging(registry.New(registry.Logger(log.New(io.Discard, "", 0)))))
@@ -74,12 +103,16 @@ func newFixtureWithLease(t *testing.T, lease time.Duration) *fixture {
 	sys, err := transfer.SystemContext()
 	testenv.Must(t, err)
 	m := cache.NewMemory()
-	c, err := coord.New(m, m, coord.Config{
+	cfg := coord.Config{
 		Lease:           lease,
 		Heartbeat:       lease / 6,
 		CacheRepository: host + "/vamos-cache",
 		Images:          &coord.Registry{Sys: sys},
-	})
+	}
+	for _, c := range configure {
+		c(&cfg)
+	}
+	c, err := coord.New(m, m, cfg)
 	testenv.Must(t, err)
 	t.Cleanup(func() { c.Close() })
 	server := httptest.NewServer((&remote.Server{Executor: c, Content: m, Workers: c.Workers()}).Handler())
@@ -291,7 +324,7 @@ func TestWorkerKillsOnCancel(t *testing.T) {
 		{Label: "app", Desc: `layer "app"`, Layer: &graph.Layer{Base: 0, Platform: platform, Steps: []graph.Step{
 			{Op: graph.OpRun, Display: `run(["sh", "-c", "..."])`, Argv: []string{"sh", "-c",
 				"setsid sleep 300 & sleep 300"}},
-		}}},
+		}, ToolCaches: []graph.ToolCache{{Path: "/cache", Label: "//:tool"}}}}, // whose empty directory goes too
 	}}
 	testenv.Must(t, g.Validate())
 	stored, err := f.m.PutBytes(ctx, graph.Encode(g))
@@ -911,4 +944,101 @@ func TestWorkerReportsNothingOfAFencedChildWithoutAReport(t *testing.T) {
 func (c *containment) running(id string) bool {
 	procs, err := os.ReadFile(filepath.Join(c.path(id), "cgroup.procs"))
 	return err == nil && strings.TrimSpace(string(procs)) != ""
+}
+
+// TestWorkerRemovesACrashedAttemptsToolCaches checks that a worker that starts to find the container of an attempt
+// that a crashed run left removes it, and the temporary tool caches in its directory with it.
+func TestWorkerRemovesACrashedAttemptsToolCaches(t *testing.T) {
+	f := newFixture(t)
+	stores := testenv.PrivateStores(t)
+	var caches string
+	testenv.Must(t, stores.WithStore(func(store storage.Store) error {
+		container, err := store.CreateContainer("", []string{attemptPrefix + "crashed"}, "", "", "", nil)
+		if err != nil {
+			return err
+		}
+		dir, err := store.ContainerDirectory(container.ID)
+		if err != nil {
+			return err
+		}
+		caches = filepath.Join(dir, "tool-caches")
+		if err := os.MkdirAll(filepath.Join(caches, "0"), 0o755); err != nil {
+			return err
+		}
+		return os.WriteFile(filepath.Join(caches, "0", "written"), []byte("left"), 0o644)
+	}))
+	startWorker(t, f, func(cfg *Config) {
+		cfg.Store, cfg.Child = stores.Options, TestChild(stores.Options)
+	})
+	for start := time.Now(); ; time.Sleep(50 * time.Millisecond) {
+		leftover, err := run.LeftoverAttempts(stores.Options)
+		testenv.Must(t, err)
+		_, serr := os.Stat(caches)
+		if !slices.Contains(leftover, "crashed") && errors.Is(serr, os.ErrNotExist) {
+			break
+		}
+		if time.Since(start) > time.Minute {
+			t.Fatalf("a minute after the worker started, the crashed attempt's container %v and caches %v remain",
+				leftover, serr)
+		}
+	}
+}
+
+// TestWorkerRenewsTheLeaseWhileAnAttemptRemovesItsToolCaches checks that the runner deletes an attempt's temporary
+// tool caches before its subprocess ends, while the worker renews its lease: a deletion that takes three leases leaves
+// the attempt neither lost, which with no retries would fail the build, nor tried again, and its caches gone, once, by
+// the time the build ends.
+func TestWorkerRenewsTheLeaseWhileAnAttemptRemovesItsToolCaches(t *testing.T) {
+	f := newFixtureWithLease(t, testLease, func(cfg *coord.Config) { cfg.Retries = coord.NoRetries })
+	removed := filepath.Join(t.TempDir(), "removed")
+	_, stores := startWorker(t, f, func(cfg *Config) {
+		child := cfg.Child
+		cfg.Child = func(ctx context.Context) *exec.Cmd {
+			cmd := child(ctx)
+			cmd.Env = append(cmd.Env, slowRemovalEnv+"="+removed) // TestChild sets Env, to its environment and more
+			return cmd
+		}
+	})
+	platform := platforms.Format(run.HostPlatform)
+	g := &graph.Graph{Version: graph.Version, ExecPlatform: platform, Roots: []graph.Ref{1}, Nodes: []graph.Node{
+		{Label: "busybox", Desc: `pull "busybox"`, Pull: &graph.Pull{Image: "docker.io/library/busybox:1.36",
+			Platform: platform, Digest: testenv.BusyboxIndex}},
+		{Label: "app", Desc: `layer "app"`, Layer: &graph.Layer{Base: 0, Platform: platform, Steps: []graph.Step{
+			{Op: graph.OpRun, Display: `run(["sh", "-c", "..."])`, Argv: []string{"sh", "-c",
+				"echo " + testenv.NewNonce() + " > /cache/written"}},
+		}, ToolCaches: []graph.ToolCache{{Path: "/cache", Label: "//:tool"}}}},
+	}}
+	testenv.Must(t, g.Validate())
+	stored, err := f.m.PutBytes(t.Context(), graph.Encode(g))
+	testenv.Must(t, err)
+	outcome, _ := runJob(t, f.c, api.GraphRequest{Graph: stored, Version: graph.Version, Platform: run.HostPlatform})
+	if outcome.Failure != nil {
+		t.Fatalf("the build failed: %s", outcome.Failure.Message)
+	}
+	data, err := os.ReadFile(removed)
+	testenv.Must(t, err)
+	var dirs []string
+	for line := range strings.Lines(string(data)) {
+		took, dir, _ := strings.Cut(strings.TrimSuffix(line, "\n"), " ")
+		if ns, err := strconv.ParseInt(took, 10, 64); err != nil || time.Duration(ns) < slowRemoval {
+			t.Errorf("the removal of %s took %s ns; want at least %v, three leases", dir, took, slowRemoval)
+		}
+		dirs = append(dirs, dir)
+	}
+	if len(dirs) != 1 || filepath.Base(dirs[0]) != "tool-caches" {
+		t.Fatalf("the attempts removed the temporary caches %q; want one attempt's, once, not tried again", dirs)
+	}
+	if _, err := os.Stat(dirs[0]); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the attempt's caches at %s remain: %v", dirs[0], err)
+	}
+	for start := time.Now(); ; time.Sleep(50 * time.Millisecond) {
+		leftover, err := run.LeftoverAttempts(stores.Options)
+		testenv.Must(t, err)
+		if len(leftover) == 0 {
+			break
+		}
+		if time.Since(start) > time.Minute {
+			t.Fatalf("a minute after the build, the attempts' containers %v remain", leftover)
+		}
+	}
 }

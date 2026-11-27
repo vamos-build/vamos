@@ -47,5 +47,7 @@
 // See ContentStore and RecordStore for the contract, pendingFile for publication and cleanup,
 // PutFile for source changes and size limits, and Checkout for path isolation and restoring modes.
 // Inspect Directory.Prune, ClearContent and ClearResults together when changing pruning policy.
+// Prune returns ErrRelock, which never matches ErrLocked, whenever it leaves the directory without its shared lock,
+// after a failed upgrade or after pruning: the handle may no longer be used, and its owner ends the process.
 // size.go keeps Directory's running count of what it holds, which every write and removal through it goes through.
 package cache

@@ -297,8 +297,8 @@ func TestMisses_AttributionComparesWithTheNearestEntry(t *testing.T) {
 }
 
 // TestMisses_AChangeOfTheTargetsOwnInputsIsOwnInputs specifies, as the cache reference says, that a target misses for
-// "own-inputs" when "a step, command, output, source file, or which target supplies its base or files changed; a
-// source's added, removed and changed files are named".
+// "own-inputs" when "a step, command, output, source file, the tool caches it mounts, where, or with which owner and
+// group, or which target supplies its base or files changed; a source's added, removed and changed files are named".
 func TestMisses_AChangeOfTheTargetsOwnInputsIsOwnInputs(t *testing.T) {
 	parallelRule(t)
 	t.Run("A layer that became a task is own-inputs", func(t *testing.T) {
@@ -328,6 +328,24 @@ func TestMisses_AChangeOfTheTargetsOwnInputsIsOwnInputs(t *testing.T) {
 		w.ThenItSucceeds()
 		w.ThenTheTraceSpanSaysAtLeast("executor", `task "gen"`, traceArgs{"miss": "own-inputs"})
 		w.ThenTheTraceSpanSaysNothingOf("executor", `task "gen"`, "added", "removed", "changed")
+	})
+
+	t.Run("A moved cache mount is own-inputs", func(t *testing.T) {
+		w := newMissWorld(t)
+		w.GivenAProjectThatPullsBusybox()
+		w.GivenTheBuildFileDeclares(`
+			tool_cache(name="tool", path="/cache")
+			task(name="build", base="busybox", tool_caches=[mount("tool")], steps=[run(["echo", "` +
+			testenv.NewNonce() + `"])])
+		`)
+		w.WhenIBuild("build")
+		w.ThenItSucceeds()
+		w.GivenTheBuildFileChanges(`mount("tool")`, `mount("tool", path="/other")`)
+		w.WhenIBuild("build", traced())
+		w.ThenItSucceeds()
+		w.ThenTheTargetsWere(statuses{task("build"): ran})
+		w.ThenTheTraceSpanSaysAtLeast("executor", `task "build"`, traceArgs{"miss": "own-inputs"})
+		w.ThenTheTraceSpanSaysNothingOf("executor", `task "build"`, "added", "removed", "changed")
 	})
 
 	t.Run("A changed step is own-inputs", func(t *testing.T) {

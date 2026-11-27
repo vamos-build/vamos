@@ -30,6 +30,10 @@
 // Task containers are discarded; layer images outlive the job in storage.
 // Where emulation needs permission, a target whose commands would run emulated fails before running without it;
 // the local executor doesn't require it, pending the decision that sched.Options.OptIn records.
+// A standalone build of a graph that mounts tool caches checks its request's workspace name, which chooses its
+// caches, as it reads the graph, with graph.CheckWorkspaceName, and fails before anything runs if it breaks the rules
+// of a name, or is empty without api.GraphRequest.NoToolCaches; Local.ServeAsCoordinator, which vamos coordinator
+// --local sets, skips that check and gives every attempt empty caches, since its clients' workspaces are their own.
 // Delivery follows successful execution.
 //
 // # Changes
@@ -47,8 +51,18 @@
 // LeftoverAttempts clean up the containers named for attempts, vamos-attempt-<id>, after a kill or a crash.
 // pull.go resolves tags, completes tag instances, maps a registry to its pull-through cache in mirror, and supplies
 // platform contexts.
+// toolcache.go lends a target's tool caches to its run() steps: openToolCaches gives each the workspace's directory
+// in the build cache, which persistentToolCache makes on first use, or, for a worker's runner, a local coordinator's or
+// a request that asks, an empty one of the attempt's own in its container's directory, which delete removes before
+// the container. resolveIn follows a cache path in the container as the container would; beforeSteps, beforeRun and
+// afterSteps hold each cache to the empty directory it resolved to, refusing what buildah mounts or binds, the
+// working directory, secrets, volumes and add() destinations overlapping or passing through one, and beforeRun bind-
+// mounts each as a specs.Mount, never a RunMounts entry, which buildah would make an overlay it discards.
 // step.go applies action steps; a run() step's secrets become buildah secret mounts, their values written to files
 // that only this process reads and removed after the step, which buildah copies outside the image's root filesystem.
+// Local.prune, under the build cache's exclusive lock, also renames a standalone executor's tool-caches/ aside, counts
+// its caches and, once the lock is shared again, deletes it and any tool-caches.trash-* an earlier prune left; a local
+// coordinator's prune leaves both. A prune that loses the lock ends the process, through lostLock, saying what it did.
 // Local.traced runs each job but a prune under sched.ForJob and stores its manifest before the outcome is returned;
 // localRunner.Run reports the run that made a result as sched.Report.Ran.
 // Copies go through transfer.Image, which traces them; inspect export, sendResult and layoutIndexFrom

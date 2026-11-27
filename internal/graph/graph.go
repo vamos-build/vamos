@@ -22,7 +22,8 @@ import (
 // so that a client and an executor of different versions refuse each other's graphs rather than build something else.
 // A field that no key reads and that a graph builds the same without, such as Node.Target, means nothing new,
 // and leaves it as it is.
-const Version = 4 // 4: a pull's pinned digest
+// 5: the tool caches of layers and tasks, which an executor of 4 would decode and drop, building without them.
+const Version = 5
 
 // Graph is everything a build runs:
 // each target in each configuration it's needed in, in an order where each node comes after the nodes it uses.
@@ -97,6 +98,8 @@ type Layer struct {
 	// Entrypoint, if set, replaces the base's entrypoint, even with none, and its command if Command is empty,
 	// as a Dockerfile's ENTRYPOINT does; nil keeps both.
 	Entrypoint *[]string `json:"entrypoint,omitempty"`
+	// ToolCaches are mounted for each of its run() steps, sorted by path.
+	ToolCaches []ToolCache `json:"tool_caches,omitempty"`
 }
 
 // Task applies steps to a base, keeps the files that Output selects, if any, and discards its image.
@@ -104,6 +107,8 @@ type Task struct {
 	Base   Ref     `json:"base"` // a Pull, a Layer or Scratch
 	Steps  []Step  `json:"steps,omitempty"`
 	Output *Output `json:"output,omitempty"`
+	// ToolCaches are mounted for each of its run() steps, sorted by path.
+	ToolCaches []ToolCache `json:"tool_caches,omitempty"`
 }
 
 // Output is the files a task keeps.
@@ -216,6 +221,17 @@ func (n *Node) Steps() []Step {
 		return n.Layer.Steps
 	case n.Task != nil:
 		return n.Task.Steps
+	}
+	return nil
+}
+
+// ToolCaches returns the tool caches that the layer or task n mounts.
+func (n *Node) ToolCaches() []ToolCache {
+	switch {
+	case n.Layer != nil:
+		return n.Layer.ToolCaches
+	case n.Task != nil:
+		return n.Task.ToolCaches
 	}
 	return nil
 }
@@ -392,7 +408,10 @@ func (g *Graph) validateNode(ref Ref) error {
 				return err
 			}
 		}
-		return g.checkSteps(ref, l.Steps)
+		if err := g.checkSteps(ref, l.Steps); err != nil {
+			return err
+		}
+		return checkToolCaches(l.ToolCaches, l.Steps)
 
 	case n.Task != nil:
 		t := n.Task
@@ -414,7 +433,10 @@ func (g *Graph) validateNode(ref Ref) error {
 				return err
 			}
 		}
-		return g.checkSteps(ref, t.Steps)
+		if err := g.checkSteps(ref, t.Steps); err != nil {
+			return err
+		}
+		return checkToolCaches(t.ToolCaches, t.Steps)
 	}
 
 	if len(n.Index.Manifests) == 0 {
