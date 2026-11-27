@@ -20,6 +20,7 @@ while its command runs, and afterwards among the last jobs it finished.
 The command's printed digest reads the trace for longer.
 
 `vamos trace` fails, writing nothing, for:
+
 - a digest cut short, which isn't a valid digest;
 - a job ID without `--coordinator`;
 - a digest whose content isn't a trace, such as a log's;

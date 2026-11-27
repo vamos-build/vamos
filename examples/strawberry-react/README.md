@@ -67,7 +67,7 @@ flowchart TD
 
 Backend:
 
-```
+```sh
 cd backend
 uv venv --python 3.15 .venv
 uv pip sync --python .venv requirements_dev_lock.txt
@@ -78,7 +78,7 @@ fastapi dev server.py --port 8100
 
 UI, once the backend's virtual environment exists:
 
-```
+```sh
 cd ui
 pnpm install
 (cd ../backend && .venv/bin/strawberry export-schema schema -o ../ui/schema.graphql)
@@ -95,7 +95,7 @@ The UI's `graphql-codegen` task adds `//backend:schema`, the backend's exported 
 so no generated file is needed on disk.
 From the repository root:
 
-```
+```sh
 ./vamos load //backend:layer strawberry-backend -C examples/strawberry-react
 ./vamos load //ui:layer strawberry-ui -C examples/strawberry-react
 ./vamos build //backend:lint //backend:test //ui:lint -C examples/strawberry-react
@@ -103,7 +103,7 @@ From the repository root:
 
 Each package's `server` is an index of its `layer` for amd64 and arm64, which `push` sends whole:
 
-```
+```sh
 ./vamos push //ui:server ghcr.io/me/strawberry-ui:1.0 -C examples/strawberry-react
 ```
 
@@ -112,13 +112,13 @@ it publishes both packages' `server` indexes, together, under every `--tag`,
 only once the backend's tests and both packages' lint pass.
 Its `registry` parameter, which has no default, says where:
 
-```
+```sh
 ./vamos publish //:release --tag 1.0 --tag latest --set registry=ghcr.io/your-org -C examples/strawberry-react
 ```
 
 Building it builds the checks and both indexes without publishing them:
 
-```
+```sh
 ./vamos build //:release --set registry=ghcr.io/your-org -C examples/strawberry-react
 ```
 
@@ -132,7 +132,7 @@ The UI's `build` task takes two parameters, which its `layer` and `server` pass 
 and `languages` chooses which of `ui/public/locales` go into the bundle (the page doesn't read them yet).
 The backend takes none, so they don't reach it:
 
-```
+```sh
 ./vamos load //ui:layer strawberry-ui:debug --set mode=debug --set languages=en,es -C examples/strawberry-react
 ```
 
@@ -145,18 +145,18 @@ In production an HTTP load balancer or an ingress would route that path to the b
 `docker-compose.yaml` stands in for one with an nginx `ingress` service, which serves both on port 8080.
 Once both images are loaded:
 
-```
+```sh
 docker compose -f examples/strawberry-react/docker-compose.yaml up
 ```
 
-Then open http://localhost:8080.
+Then open <http://localhost:8080>.
 
 ## Dependencies
 
 `backend/requirements.txt` lists what the server needs and `requirements_dev.txt` adds the tools.
 After changing either, regenerate both locks, with `--exclude-newer` set to two weeks ago:
 
-```
+```sh
 uv pip compile --python-platform linux --python-version 3.15 --generate-hashes --exclude-newer YYYY-MM-DD \
   requirements.txt -o requirements_lock.txt
 uv pip compile --python-platform linux --python-version 3.15 --generate-hashes --exclude-newer YYYY-MM-DD \

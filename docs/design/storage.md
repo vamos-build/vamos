@@ -28,6 +28,7 @@ flowchart LR
 ```
 
 The three stores serve distinct roles:
+
 - The **content store** is a content-addressed object store holding immutable blobs keyed by sha256 digest:
   serialized graph blobs, source file trees, task output trees, build logs, and exported image layer blobs.
 - The **record store** is a key-value store mapping action keys to execution results,
@@ -36,6 +37,7 @@ The three stores serve distinct roles:
 - The **container store** is the executor's underlying buildah storage holding container layer filesystems and images.
 
 The content and record stores are defined as Go interfaces in [cache](../../internal/cache/doc.go):
+
 - `cache.Directory` provides on-disk storage for production builds.
 - `cache.Memory` provides an in-memory implementation for automated tests.
 - `remote.Client` provides an HTTP proxy client forwarding storage requests to a remote coordinator.
@@ -214,7 +216,7 @@ a coordinator's workers, `vamos coordinator --local` and `--no-tool-caches` all 
 
 **Layout.** Caches live in `tool-caches/` inside `cache.Directory`, beneath `run.CacheDir`:
 
-```
+```text
 tool-caches/
   <sha256 of the workspace name>/
     <sha256 of the canonical label>/
@@ -310,6 +312,7 @@ flowchart LR
 ```
 
 Secret management follows strict isolation rules:
+
 - An action key incorporates the secret identifier and its mount path or environment variable binding,
   never the secret's actual plaintext value or the host path where `--secret` read it.
 - This design ensures that rotating a secret value does not invalidate cached results when commands did not change.
@@ -351,6 +354,7 @@ flowchart LR
 ```
 
 Storage locations adapt to deployment topologies:
+
 - When running on a worker, the runner pushes built layers to the shared cache registry before reporting completion.
 - If a runner subsequently requires an image not present in its local storage,
   it pulls the image from one of the registry locations listed in the action result.
@@ -390,6 +394,7 @@ Each platform instance in `cache.TagInstance` records the image ID, platform, ti
 and storage locations.
 If a cached instance is complete and accepted by the backend `Checker`, `Scheduler.resolve` returns the result
 without invoking network operations:
+
 - The local executor's checker requires the image layer to exist in local container storage.
   If the layer was deleted, the pull re-executes.
 - The coordinator's checker verifies that an image ID and platform are recorded, without querying registries:
@@ -428,6 +433,7 @@ In local builds, pruning acquires an exclusive kernel file lock on `cache.Direct
 as described in [Scheduling and concurrency](scheduling.md#cache-directory-locking).
 Because a remote coordinator cannot hold file locks across distributed clients,
 it coordinates pruning through **generation fencing**:
+
 - `RecordStore.Generation` maintains a monotonically increasing integer counter incremented with each prune.
 - The coordinator advertises `Generation() + 1` in its capabilities.
   A value of 0 indicates that generation checks are skipped.
@@ -458,6 +464,7 @@ sequenceDiagram
 ```
 
 The coordinator executes pruning operations in strict order:
+
 1. **Blobs are cleared before records**:
    Clearing records advances the generation counter.
    A client submitting under the new generation uploads source blobs to a content store that is no longer being cleared.

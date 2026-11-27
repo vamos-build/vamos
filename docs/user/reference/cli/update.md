@@ -17,6 +17,7 @@ see [`pull()`](../build/pull.md).
 For each pull target, Vamos queries the remote registry for available repository tags.
 It resolves the target's tag to the latest stable release matching the tag's version prefix,
 preserving leading `v` prefixes and custom suffixes:
+
 - Tag `1.3` resolves to the latest `1.3.x`.
 - Tag `24-alpine` resolves to the latest `24.x.y-alpine`.
 - Non-version tags (such as `latest`), prereleases, and explicit patch versions resolve to their own current digest.

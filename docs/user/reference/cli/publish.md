@@ -19,6 +19,7 @@ Like [`vamos push`](push.md), the executor pushes by default;
 pass `--push-from=client` to push using the client's credentials and `--tls-verify` settings.
 
 Publishing proceeds in two distinct phases:
+
 1. **Upload by digest**: Every image is uploaded to each destination repository by manifest digest without tags.
    If an upload fails, existing repository tags remain untouched.
 2. **Tag assignment**: Once all uploads succeed, tags are written and verified by reading them back.

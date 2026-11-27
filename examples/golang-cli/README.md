@@ -36,7 +36,7 @@ flowchart TD
 
 ## Develop
 
-```
+```sh
 go vet ./... && gofmt -l .
 go run . -n hola
 ```
@@ -45,7 +45,7 @@ go run . -n hola
 
 From the repository root:
 
-```
+```sh
 ./vamos load echo vamos-echo -C examples/golang-cli
 docker run --rm vamos-echo                          # hola
 docker run --rm vamos-echo /echo -n hola            # hola, without a newline

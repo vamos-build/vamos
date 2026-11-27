@@ -21,6 +21,7 @@ add("compile", "/app", owner = "node", group = "staff")
 
 Later additions replace earlier files at matching paths.
 Files are owned by root unless `owner` or `group` overrides ownership:
+
 - `owner` and `group` must be strings, including numeric IDs (such as `owner = "1000"`).
 - They must not contain colons (do not write `owner = "user:group"`).
 - Specifying only `owner` sets the group to that user's primary group.
@@ -64,6 +65,7 @@ env(**{"NAME-WITH-DASHES": "value"})
 ```
 
 Both steps set string environment variables for subsequent steps within the target.
+
 - `env()` also records the variables in the container image configuration,
   making them available to downstream targets and the final runtime container.
 - `build_env()` applies only to remaining steps in the current target and does not persist in the image.

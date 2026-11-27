@@ -28,7 +28,7 @@ flowchart TD
 
 ## Develop
 
-```
+```sh
 uv venv .venv
 uv pip sync --python .venv requirements-dev_lock.txt
 . .venv/bin/activate
@@ -40,7 +40,7 @@ ruff check . && ruff format --check . && pyright && pytest
 `requirements.txt` lists what the server needs and `requirements-dev.txt` adds the tools.
 After changing either, regenerate both locks, with `--exclude-newer` set to two weeks ago:
 
-```
+```sh
 uv pip compile --python-platform linux --python-version 3.15 --generate-hashes --exclude-newer YYYY-MM-DD \
   requirements.txt -o requirements_lock.txt
 uv pip compile --python-platform linux --python-version 3.15 --generate-hashes --exclude-newer YYYY-MM-DD \
@@ -52,7 +52,7 @@ uv pip compile --python-platform linux --python-version 3.15 --generate-hashes -
 The image installs only `requirements_lock.txt`.
 From the repository root:
 
-```
+```sh
 ./vamos load server vamos-fastmcp -C examples/fastmcp
 (cat examples/typescript-mcp/echo-request.jsonl; sleep 2) | docker run -i --rm vamos-fastmcp
 ```

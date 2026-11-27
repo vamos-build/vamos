@@ -40,7 +40,7 @@ flowchart TD
 
 Needs Node.js 26 or later, the major it is built and typed against.
 
-```
+```sh
 npm ci
 npm run check        # eslint, tsc, and node --test
 ```
@@ -55,7 +55,7 @@ To get a security fix sooner, add `--min-release-age=0` to `npm install`.
 The image installs only the runtime dependencies.
 From the repository root:
 
-```
+```sh
 ./vamos load server vamos-example -C examples/typescript-mcp
 docker run -i --rm vamos-example < examples/typescript-mcp/echo-request.jsonl
 ```

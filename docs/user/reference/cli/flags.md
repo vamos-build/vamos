@@ -70,6 +70,7 @@ See [traces](../cache.md#traces).
 ## TLS verification
 
 The `--tls-verify` flag controls TLS verification when the client contacts container registries:
+
 - Pushing images from the client via `--push-from=client`.
 - Reading images from a coordinator's cache repository or pull-through cache.
 - Querying upstream registries during `vamos update` or pin recording.

@@ -39,6 +39,7 @@ flowchart LR
 ```
 
 The release pipeline enforces specific delivery guarantees:
+
 - **Untagged digests until verified**: Each runner job pushes its platform image to the registry strictly by digest
   before executing validation checks.
   Only runners whose tests succeed upload their image digests to the merge job.
@@ -108,6 +109,7 @@ flowchart TD
 ```
 
 The installer script incorporates specific reliability safeguards:
+
 - **No package manager modification**: The script does not invoke `apt-get` or `dnf` automatically,
   allowing Dockerfiles to control package manager layers explicitly.
   If required runtime dependencies (`ca-certificates`, `containers-common`, or `netavark`) are missing,

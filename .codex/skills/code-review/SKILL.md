@@ -5,6 +5,7 @@ description: Review a commit range, a single commit, or a described set of commi
 Perform a comprehensive engineering review of the change named in the request, using parallel subagents.
 
 ### The change under review
+
 The request names the change as a commit range such as `abc123..def456` (the commits after `abc123`, up to and including `def456`), a single commit, or a description such as "the last three commits" or "this branch since main". If it names nothing, review the most recent commit, `HEAD^..HEAD`.
 
 Resolve the request to a concrete range of full SHAs with git before spawning anyone. `<from>` must be an ancestor of `<to>`: a description relative to another branch, such as "this branch since main", starts at `git merge-base <branch> <to>`, so commits that branch gained since the fork are not mistaken for reversions. If the description is ambiguous, if a given `<from>` is not an ancestor of `<to>`, or if the range holds no commits, say so and ask rather than guessing.
@@ -26,6 +27,7 @@ Spawn **five independent review agents**, each with a distinct focus:
 5. **Testing reviewer:** Evaluate existing tests, identify missing behavioral coverage, weak assertions, untested failure paths, and specific tests likely to uncover defects.
 
 ### Instructions for all agents
+
 - Independently examine the complete diff of the resolved range and relevant surrounding code as of `<to>`. Give each agent the range's SHAs and any context from the request.
 - Inspect callers, callees, and existing tests as necessary.
 - Do not limit the review to changed lines.
@@ -36,11 +38,13 @@ Spawn **five independent review agents**, each with a distinct focus:
 - Do not manufacture findings to satisfy a quota.
 
 ### Orchestration
+
 Run all five agents in parallel, up to the number of subagents this environment allows at once. If fewer than five slots are free, run the rest in a later wave as slots free up. Keep all five perspectives; do not merge or drop one to fit.
 
 Wait for every agent to finish before synthesizing results.
 
 As the coordinating agent:
+
 1. Collect all findings.
 2. Deduplicate overlapping findings without losing important details.
 3. Independently verify the most significant findings against the code.
@@ -50,6 +54,7 @@ As the coordinating agent:
 7. Report areas where review coverage was incomplete.
 
 Produce one consolidated review headed `Reviewed <from>..<to>` with the resolved SHAs, followed by:
+
 - Critical and high-priority defects
 - Other correctness concerns
 - Design and architectural improvements
