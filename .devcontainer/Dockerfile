@@ -40,6 +40,8 @@ RUN dnf -y install \
     zip \
  && dnf clean all
 
+RUN git config --system credential.https://github.com.helper '!gh auth git-credential'
+
 # Perfetto's trace processor, to query the traces that `vamos --trace` writes, by SQL.
 RUN case "$(uname -m)" in \
       x86_64) arch=amd64 sum=7deb8c2572c6ae7ec80cd719d388041079827b0c44a1659694d5d88faa4f501e ;; \
