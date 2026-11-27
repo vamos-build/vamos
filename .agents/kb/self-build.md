@@ -11,13 +11,36 @@ A change to one of them needs the same change in `BUILD` until `BUILD` replaces 
 | --- | --- | --- |
 | `build` | The release binary: cgo, built on its target platform, with the release's tags; `--set version=v0.1.0` stamps it | The Dockerfile's `build` stage |
 | `image` | The release image, on Fedora with `containers-common` and `netavark` | The Dockerfile's final stage |
-| `lint`, `vulnerabilities`, `test` | Check tasks: golangci-lint, govulncheck and `go test -short ./...` | `scripts/check`, except its full tier |
+| `lint`, `vulnerabilities`, `test` | Check tasks: golangci-lint, govulncheck and `go test -short -count=1 ./...` | `scripts/check`, except its full tier; `-count=1` because Vamos gives every added file the same time |
 | `release` | A publication of the checks and the image, to `localhost:5000/vamos` unless `--set repository=` names another; `vamos build release` runs all of them without publishing | Nothing yet |
 
 The checks run in `check-tools`, an image of the devcontainer's environment:
 Fedora's Go with the gpgme and btrfs headers that the default build tags need,
 `containers-common` for the image policy that the push and publish tests read,
 and golangci-lint and govulncheck at the [devcontainer](../../.devcontainer/Dockerfile)'s versions.
+
+The workspace is named `build.vamos` in [WORKSPACE](../../WORKSPACE),
+so that `build`, `lint`, `vulnerabilities` and `test` can mount
+the [tool cache](../../docs/user/reference/build/tool-cache.md) `go-build` at `/cache/go-build`
+and keep Go's build cache, and golangci-lint's, between builds:
+a check after a one-file change takes seconds, where it used to compile everything.
+The Go commands run through `go()` in `BUILD`, which sets `GOCACHE` and `GOLANGCI_LINT_CACHE` beneath the mount,
+in a directory named by a digest of the image's installed packages, by rpm and dpkg,
+and of what `/usr/local` holds of tools, such as golangci-lint, and C headers, libraries and pkg-config files,
+in `bin`, `include`, `lib`, `lib64` and `share/pkgconfig`,
+since Go's build cache misses a change to the C libraries and headers that cgo uses;
+a base that lists no packages, or whose environment can't be read, fails the step rather than choose a cache.
+The digest misses a package's file changed in place without a new package version,
+a file elsewhere than those directories, a change in where a link outside them leads,
+and compiler settings such as `CPATH` and `PKG_CONFIG_PATH`:
+after a base makes such a change, a standalone `vamos prune` clears the cache it would otherwise reuse.
+`test` passes `-count=1`, since `go test` would reuse a cached result for files whose size and time didn't change,
+and Vamos gives every file it adds the same time.
+`vamos build lint --no-tool-caches --rebuild` checks from an empty cache.
+A cache of an environment that changed, as a rebuilt `check-tools` may, is left beside the new one
+until a standalone `vamos prune` clears them all; a local coordinator's prune leaves them.
+
+These commands run in the devcontainer, whose `BUILDAH_ISOLATION=chroot` tool caches need:
 
 ```sh
 TMP=$(mktemp -d)
@@ -33,10 +56,6 @@ A new example needs a `WORKSPACE` file as well.
 
 ## Before Vamos can take itself on
 
-- **No Go build cache.**
-  Every check task compiles all its packages from scratch, since nothing persists `GOCACHE` between runs:
-  a check after a source change takes about a minute rather than the devcontainer's seconds.
-  Only the module download is reused, as the `modules` and `check-modules` layers.
 - **No full test suite.**
   `go test ./...` builds images with buildah, which needs container storage and privileges that a `run` step lacks.
 - **One platform per build.**

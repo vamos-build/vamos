@@ -247,7 +247,7 @@
 
 ## 6. vamos builds itself with a Go build cache
 
-- [ ] 6.1 Name the root workspace in `WORKSPACE` if it isn't named, declare `tool_cache(name = "go-build", path =
+- [x] 6.1 Name the root workspace in `WORKSPACE` if it isn't named, declare `tool_cache(name = "go-build", path =
   "/cache/go-build")` in the root `BUILD`, a path no image holds anything at, and mount it with `mount("go-build")` in
   the `lint`, `vulnerabilities`, `test` and `build` tasks. Run each of their Go commands through `sh -c`, passing its
   arguments, such as `build`'s `-ldflags`, through `"$@"` unchanged, with `sh` given as `$0` (`sh -c '...' sh <args>`),
@@ -261,7 +261,7 @@
   added file the same time. Verify that `./vamos build lint` after a one-file source change is much faster than the
   first run and still reports failures, and, in a scratch workspace, that adding a package to the base's install step,
   or a header to `/usr/local/include`, gives the Go commands a new directory.
-- [ ] 6.2 Remove "No Go build cache" from [self-build.md](../../../.agents/kb/self-build.md), describe the cache there,
+- [x] 6.2 Remove "No Go build cache" from [self-build.md](../../../.agents/kb/self-build.md), describe the cache there,
   give its table's `test` row `go test -short -count=1 ./...`, and say that its commands run in the
   devcontainer, whose `BUILDAH_ISOLATION=chroot` tool caches need; verify the doc's commands still run as written.
 
