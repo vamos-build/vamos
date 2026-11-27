@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime/debug"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -418,10 +419,35 @@ func (l *Local) Prune(context.Context) (api.JobID, error) {
 	return l.jobs.Start(true, func(ctx context.Context, ev sched.Events) api.Outcome {
 		pruned, err := l.prune(ctx)
 		if err != nil {
+			// What it removed before it failed, and its warnings, are said with the failure.
+			if removed := describePruned(pruned); removed != "" {
+				err = fmt.Errorf("%w; %s", err, removed)
+			}
 			return sched.Failed(err)
 		}
 		return api.Outcome{Pruned: &pruned}
 	})
+}
+
+// describePruned says what a prune that failed had done that is certain, and its warnings, or "" if neither: the images
+// and target histories it removed and the tool caches it removed from use, each it did any of, but not the results and
+// files, which it counts before deleting them.
+func describePruned(p api.Pruned) string {
+	var parts []string
+	for _, done := range []struct {
+		n    int
+		what string
+	}{
+		{p.Images, "it had removed %d images"},
+		{p.Histories, "it had removed %d target histories"},
+		{p.ToolCaches, "it had removed %d tool caches from use"},
+	} {
+		if done.n > 0 {
+			parts = append(parts, fmt.Sprintf(done.what, done.n))
+		}
+	}
+	parts = append(parts, p.Warnings...)
+	return strings.Join(parts, "; ")
 }
 
 // run runs the graph req names with buildah: its pulls first, then its layers, tasks and indexes in order.

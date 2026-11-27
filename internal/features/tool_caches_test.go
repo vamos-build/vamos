@@ -1232,3 +1232,54 @@ func TestToolCaches_AnExecutorRefusesASecretAddOrSourceThatResolvesIntoACache(t 
 		w.ThenTheOutputDoesNotInclude("step ran")
 	})
 }
+
+// TestToolCaches_PruningDeletesCaches specifies that vamos prune on a standalone local executor deletes every
+// workspace's caches with the rest of its cache and reports how many it removed, and never one that a build mounts.
+func TestToolCaches_PruningDeletesCaches(t *testing.T) {
+	parallelRule(t)
+	t.Run("A build after a prune starts with empty caches", func(t *testing.T) {
+		w := newToolCacheWorld(t)
+		w.GivenTheBuildFileDeclares(theProbe(`mount("tool")`))
+		w.WhenIBuild("probe", setting("file=one"))
+		w.ThenItSucceeds()
+		w.WhenIPrune()
+		w.ThenItSucceeds()
+		w.ThenTheOutputIncludes(", 1 tool caches and")
+		w.WhenIBuild("probe", setting("file=two"))
+		w.ThenItSucceeds()
+		w.ThenTheStepsObserved(observations{"listing": ""})
+	})
+
+	t.Run("A prune while another vamos uses the cache leaves it", func(t *testing.T) {
+		w := newToolCacheWorld(t)
+		w.GivenTheBuildFileDeclares(theProbe(`mount("tool")`))
+		w.WhenIBuild("probe", setting("file=one"))
+		w.ThenItSucceeds()
+		w.GivenAnotherVamosIsUsingTheBuildCache()
+		w.WhenIPrune()
+		w.ThenItFailsWith("another vamos is using the build cache")
+		w.GivenTheOtherVamosIsDone()
+		w.WhenIBuild("probe", setting("file=two"))
+		w.ThenItSucceeds()
+		w.ThenTheStepsObserved(observations{"listing": "one"})
+	})
+}
+
+// TestToolCaches_ALocalCoordinatorsPruneLeavesToolCaches specifies that vamos prune on vamos coordinator --local
+// neither deletes, moves nor counts the caches of standalone builds that share its store.
+func TestToolCaches_ALocalCoordinatorsPruneLeavesToolCaches(t *testing.T) {
+	parallelRule(t)
+	t.Run("Pruning a local coordinator keeps a standalone build's cache", func(t *testing.T) {
+		w := newToolCacheWorld(t)
+		w.GivenTheBuildFileDeclares(theProbe(`mount("tool")`))
+		w.WhenIBuild("probe", setting("file=one"))
+		w.ThenItSucceeds()
+		w.GivenALocalCoordinator()
+		w.WhenIPrune(onTheCoordinator("<coordinator>"))
+		w.ThenItSucceeds()
+		w.ThenTheOutputIncludes(", 0 tool caches and")
+		w.WhenIBuild("probe", setting("file=two"))
+		w.ThenItSucceeds()
+		w.ThenTheStepsObserved(observations{"listing": "one"})
+	})
+}

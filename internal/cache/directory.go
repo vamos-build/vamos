@@ -95,7 +95,8 @@ func (d *Directory) Close() error {
 // under the same exclusion, such as the images the results name; its failure is reported with the prune's,
 // which goes ahead.
 // It fails with ErrLocked, removing nothing and without calling first, if another handle holds the directory,
-// in this process or another.
+// in this process or another; and with ErrRelock, which never matches ErrLocked, whenever it leaves the directory
+// without its shared lock, after a refused upgrade or after pruning, which its caller checks for first.
 func (d *Directory) Prune(ctx context.Context, first func() error) (results, blobs int, err error) {
 	shared, err := d.lock.exclusive(d.dir)
 	if err != nil {
@@ -103,7 +104,7 @@ func (d *Directory) Prune(ctx context.Context, first func() error) (results, blo
 	}
 	defer func() {
 		if serr := shared(); serr != nil {
-			err = errors.Join(err, fmt.Errorf("taking the build cache's lock back after pruning: %w", serr))
+			err = errors.Join(err, serr)
 		}
 	}()
 	var errs []error

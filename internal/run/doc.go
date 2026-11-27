@@ -60,6 +60,9 @@
 // mounts each as a specs.Mount, never a RunMounts entry, which buildah would make an overlay it discards.
 // step.go applies action steps; a run() step's secrets become buildah secret mounts, their values written to files
 // that only this process reads and removed after the step, which buildah copies outside the image's root filesystem.
+// Local.prune, under the build cache's exclusive lock, also renames a standalone executor's tool-caches/ aside, counts
+// its caches and, once the lock is shared again, deletes it and any tool-caches.trash-* an earlier prune left; a local
+// coordinator's prune leaves both. A prune that loses the lock ends the process, through lostLock, saying what it did.
 // Local.traced runs each job but a prune under sched.ForJob and stores its manifest before the outcome is returned;
 // localRunner.Run reports the run that made a result as sched.Report.Ran.
 // Copies go through transfer.Image, which traces them; inspect export, sendResult and layoutIndexFrom

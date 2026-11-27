@@ -93,10 +93,20 @@ To remove cached build outputs:
 vamos prune
 ```
 
-`prune` deletes all cached layer images and intermediate build outputs.
+`prune` deletes all cached layer images and intermediate build outputs,
+and every workspace's [tool caches](build/tool-cache.md).
 It preserves pulled base images, recorded tag resolutions, and lockfile pins.
-The command reports the count of removed images, target results, and files.
-Subsequent builds regenerate required targets.
+A prune is refused while another Vamos uses the build cache, so it never deletes a cache that a build has mounted.
+The command reports what it removed; it counts the tool caches it removed from use,
+whose deletion, if it fails, is a warning that the next standalone prune retries:
+
+```
+Removed 3 images from the container store, and 12 results, 40 files, 2 tool caches and 0 target histories from the build cache
+```
+
+Subsequent builds regenerate required targets, and start with empty tool caches.
+Pruning `vamos coordinator --local` leaves tool caches,
+which belong to standalone builds that may share its container store.
 
 When building through a [remote coordinator](remote.md),
 the build cache resides on the coordinator (`--cache-dir`)

@@ -424,6 +424,9 @@ type Pruned struct {
 	Tags    int `json:"tags,omitempty"` // image tags removed from a coordinator's cache repository
 	// Histories counts the target histories removed, unused for cache.HistoryRetention.
 	Histories int `json:"histories,omitempty"`
+	// ToolCaches counts the tool caches a standalone local executor's prune removed from use, one for each workspace,
+	// label, owner, group and ID mapping, whether or not deleting them then succeeded.
+	ToolCaches int `json:"tool_caches,omitempty"`
 	// Warnings say what the prune failed to do that didn't fail it, such as removing a history,
 	// each for the client to print as a warning.
 	Warnings []string `json:"warnings,omitempty"`

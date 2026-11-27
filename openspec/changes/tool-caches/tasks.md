@@ -222,7 +222,7 @@
 
 ## 5. Pruning
 
-- [ ] 5.1 In `Local.prune`, in the `first` callback that `cache.Directory.Prune` runs under the exclusive lock, beside
+- [x] 5.1 In `Local.prune`, in the `first` callback that `cache.Directory.Prune` runs under the exclusive lock, beside
   `removeCachedImages`, rename `tool-caches/` aside to `tool-caches.trash-<random>`, then count the owner directories of
   what it renamed, a failure to count being a warning, a missing `tool-caches/` counting as none and a failed rename of
   one failing the prune; once `Prune` has taken its lock back shared, and not if it couldn't, delete it with any
@@ -241,7 +241,7 @@
   matching `cache.ErrLocked`, when it can't take its lock back after a refused upgrade and after a prune, and the
   existing test that a prune is refused while a build holds the directory, extended so that a cache's marker is still
   there for a fresh action after the refusal.
-- [ ] 5.2 Update the pruning section of [docs/user/reference/cache.md](../../../docs/user/reference/cache.md) to say
+- [x] 5.2 Update the pruning section of [docs/user/reference/cache.md](../../../docs/user/reference/cache.md) to say
   that a standalone prune deletes tool caches and a local coordinator's leaves them, and verify the documented command
   output matches what prune prints.
 
