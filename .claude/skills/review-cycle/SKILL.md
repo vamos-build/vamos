@@ -9,7 +9,7 @@ You are the coder. Two reviewers sit in sibling herdr tabs: `claude-reviewer` an
 
 The cycle nests two loops:
 
-- **Outer loop, the pass (up to 3).** Each pass starts by `/clear`ing both reviewers, then reviews the whole range from `<BASE>` to the current tip. The cycle ends when a pass's first round brings nothing significant that you accept.
+- **Outer loop, the pass (up to 5).** Each pass starts by `/clear`ing both reviewers, then reviews the whole range from `<BASE>` to the current tip. The cycle ends when a pass's first round brings nothing significant that you accept.
 - **Inner loop, the round (up to 3 per pass).** The reviewers keep their session across rounds. Each later round reviews only the fix commits made since the previous round. The pass ends when a round brings nothing significant that you accept.
 
 Load the herdr skill first (`herdr --skill`) if it is not already in context. It is the authority on `herdr agent` and `herdr pane` syntax. This skill only records the workflow and the traps found while doing it.
@@ -86,7 +86,7 @@ Check the log against the user's request. It is off track if a command fails, th
 
 Create the ledger at `$SCRATCH/ledger.md`. Each round appends its pass and round number, the range it reviewed, and one line per finding: which reviewer(s) raised it, a short title, your verdict (accepted, insignificant, rejected, or already addressed) with a phrase of reasoning, and the fix commit for accepted ones. The ledger lets you recognize repeats across passes, and it survives compaction.
 
-## A pass (up to 3)
+## A pass (up to 5)
 
 ### Clear both reviewers
 
@@ -196,7 +196,7 @@ git merge-base --is-ancestor <REVIEWED> HEAD   # must succeed: the reviewed comm
 ### After a pass
 
 - If the pass ended in **round 1**, the fresh review found nothing significant and the cycle has converged. Go to "Finish".
-- Otherwise start the next pass. After pass 3, go to "Finish" and say plainly that the pass limit stopped the cycle before a fresh review came back clean.
+- Otherwise start the next pass. After pass 5, go to "Finish" and say plainly that the pass limit stopped the cycle before a fresh review came back clean.
 
 ## Finish
 
