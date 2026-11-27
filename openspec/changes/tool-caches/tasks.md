@@ -2,7 +2,7 @@
 
 ## 1. BUILD language and graph
 
-- [ ] 1.1 Add the `tool_cache` builtin to `load` with a required `path` and optional `owner` and `group`; refuse any
+- [x] 1.1 Add the `tool_cache` builtin to `load` with a required `path` and optional `owner` and `group`; refuse any
   other argument, a missing `path`, a path that is not absolute or not as `path.Clean` leaves it, is `/`, contains `$`,
   is at or beneath `/dev`, `/proc` or `/sys`, or equals, lies beneath or contains `/etc/hosts`, `/etc/hostname`,
   `/etc/resolv.conf`, `/run/.containerenv`, `/run/secrets` or `/etc/crypto-policies`, a non-numeric `owner` or `group`,
@@ -16,7 +16,7 @@
   never see each other's, and with `load` unit tests refusing a rule's path at or beneath `/dev`, `/proc` or `/sys`, and
   `/etc`, `/run`, `/etc/hosts` and `/run/.containerenv/cache`, and accepting `/device/cache` and `/run/cache`, with the
   scenario "A cache path that holds a file every step is given".
-- [ ] 1.2 Add the `mount(label, path = ...)` builtin, and `tool_caches`, a list of `mount()` values, to `task` and
+- [x] 1.2 Add the `mount(label, path = ...)` builtin, and `tool_caches`, a list of `mount()` values, to `task` and
   `layer`: resolve each label to a `tool_cache` rule and each mount to its effective path, store the mounts in
   `graph.Layer` and `graph.Task` sorted by path with canonical labels, and refuse a label that names any other kind of
   target and a value in `tool_caches` that is not a `mount()`; refuse a `tool_cache` label given to any command that
@@ -26,11 +26,11 @@
   its `write` alias, `export`, `push`, `load`, `graph` and `publish`, which takes a publication, refuses one with that
   message, and `load` unit tests of label canonicalization across packages and of effective paths with and without an
   override.
-- [ ] 1.2b Make `vamos update` skip `tool_cache` declarations when it scans a workspace for pulls, and refuse a
+- [x] 1.2b Make `vamos update` skip `tool_cache` declarations when it scans a workspace for pulls, and refuse a
   `tool_cache` label named to it saying that a tool cache is mounted with `mount()`. Verify with "Updating a tool cache"
   and "A workspace-wide update passes over tool caches", which keeps a pin in use and removes one no longer used, so
   that the uncertain-discovery path, which keeps every pin, can't pass it.
-- [ ] 1.3 Refuse conflicting mounts when loading: a mount path that is not absolute or not as `path.Clean` leaves it, is
+- [x] 1.3 Refuse conflicting mounts when loading: a mount path that is not absolute or not as `path.Clean` leaves it, is
   `/`, contains `$`, is at or beneath `/dev`, `/proc` or `/sys`, or equals, lies beneath or contains `/etc/hosts`,
   `/etc/hostname`, `/etc/resolv.conf`, `/run/.containerenv`, `/run/secrets` or `/etc/crypto-policies`; two mounts at one
   effective path; one cache mounted twice; a mounted path nested in another, or equal to, containing or beneath a
@@ -43,10 +43,10 @@
   leaves it, accepted above one, `add()` and `workdir()` refused when a `..` component puts them beneath once cleaned
   and left to the runner when they hold a variable, and a `source` with a `..` component left to the runner, so that
   `/work/../build` with a cache at `/build` loads.
-- [ ] 1.4 Refuse a target with `tool_caches` in an unnamed workspace, at its declaration. Verify with
-  "Mounting a cache in an unnamed workspace", "An unmounted cache in an unnamed workspace" and `workspace-identity`'s
+- [x] 1.4 Refuse a target with `tool_caches` in an unnamed workspace as it is configured, naming its declaration.
+  Verify with "Mounting a cache in an unnamed workspace", "An unmounted cache in an unnamed workspace" and `workspace-identity`'s
   "Only a named workspace builds a target that mounts a cache".
-- [ ] 1.5 Document the `tool_cache` rule in a new `docs/user/reference/build/tool-cache.md` (including the user's
+- [x] 1.5 Document the `tool_cache` rule in a new `docs/user/reference/build/tool-cache.md` (including the user's
   assertion, "may be given empty", the unnamed-workspace refusal, the path rules and that a target with caches needs a
   `run()` step; that a cache's parents exist from the first `run()` step and that a tool that deletes and remakes a
   directory holding a cache, as `npm ci` does `node_modules`, fails; that a tool whose cache misses what it doesn't

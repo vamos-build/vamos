@@ -25,6 +25,7 @@ task(
 | `source` | Absolute container directory to collect output from | Omitted: no output fileset |
 | `include` | Output patterns relative to `source` | Required when `source` is set |
 | File selection options | Exclusions, permissions, and file limits | See [file selection](glob.md#file-selection) |
+| `tool_caches` | List of `mount()` values naming [tool caches](tool-cache.md) for its `run()` steps | `[]` |
 
 Declare `source` and `include` together to produce an output fileset.
 Omit both to define a task that runs checks without keeping files.

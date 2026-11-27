@@ -34,16 +34,19 @@ Dependency cycles produce an error during graph construction.
 | [`layer()`](layer.md) | Image | Yes | No |
 | [`index()`](image-index.md) | Image index | No | No |
 | [`publication()`](publication.md) | Release published by `vamos publish` | No | No |
+| [`tool_cache()`](tool-cache.md) | A tool's cache, kept between builds and mounted with `mount()` | No | No |
 
 No target can depend on a `publication()`, which can only be requested from the command line.
-All target types except `pull()` accept a `params` dictionary for target parameters.
-Attributes other than `name` and `params` can be defined as functions of `ctx`.
+A `tool_cache()` is not built at all: tasks and layers mount it for their `run()` steps.
+All target types except `pull()` and `tool_cache()` accept a `params` dictionary for target parameters.
+A target's attributes other than `name` and `params` can be defined as functions of `ctx`, but not a `tool_cache()`'s.
 See [configuration](../configuration.md) for details on `param()`, `dep()`, `arg()`, and platform configuration.
 
 ## Steps and shared options
 
 Tasks and layers build their contents with [steps](steps.md):
 `add()` copies filesets, `run()` executes commands, and `env()`, `build_env()`, and `workdir()` configure the container.
-Steps that need credentials receive them as [secrets](secrets.md).
+Steps that need credentials receive them as [secrets](secrets.md),
+and steps whose tools keep a cache can be lent one that persists between builds as a [tool cache](tool-cache.md).
 Globs and task outputs choose their files with the patterns and limits described in
 [file selection](glob.md#file-selection).

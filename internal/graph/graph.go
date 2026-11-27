@@ -97,6 +97,8 @@ type Layer struct {
 	// Entrypoint, if set, replaces the base's entrypoint, even with none, and its command if Command is empty,
 	// as a Dockerfile's ENTRYPOINT does; nil keeps both.
 	Entrypoint *[]string `json:"entrypoint,omitempty"`
+	// ToolCaches are mounted for each of its run() steps, sorted by path.
+	ToolCaches []ToolCache `json:"tool_caches,omitempty"`
 }
 
 // Task applies steps to a base, keeps the files that Output selects, if any, and discards its image.
@@ -104,6 +106,8 @@ type Task struct {
 	Base   Ref     `json:"base"` // a Pull, a Layer or Scratch
 	Steps  []Step  `json:"steps,omitempty"`
 	Output *Output `json:"output,omitempty"`
+	// ToolCaches are mounted for each of its run() steps, sorted by path.
+	ToolCaches []ToolCache `json:"tool_caches,omitempty"`
 }
 
 // Output is the files a task keeps.
@@ -216,6 +220,17 @@ func (n *Node) Steps() []Step {
 		return n.Layer.Steps
 	case n.Task != nil:
 		return n.Task.Steps
+	}
+	return nil
+}
+
+// ToolCaches returns the tool caches that the layer or task n mounts.
+func (n *Node) ToolCaches() []ToolCache {
+	switch {
+	case n.Layer != nil:
+		return n.Layer.ToolCaches
+	case n.Task != nil:
+		return n.Task.ToolCaches
 	}
 	return nil
 }

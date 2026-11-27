@@ -634,6 +634,9 @@ func (w *workspace) newDep(
 			return nil, fmt.Errorf("%s: %q: %w", fn.Name(), ref, err)
 		}
 		if d, ok := from.decls[name]; ok {
+			if d.kind == "tool_cache" {
+				return nil, fmt.Errorf("%s: %w", fn.Name(), noTarget(ref))
+			}
 			if err := d.checkArgs(&target); err != nil {
 				return nil, fmt.Errorf("%s: %w", fn.Name(), err)
 			}
@@ -793,6 +796,9 @@ type configurer struct {
 	globs   map[confLabel]*fileSet
 	indexes map[confLabel][]confLabel // each index's manifests, in order
 	path    []string                  // labels of the targets being configured, outermost first, to report a cycle
+	// pinning says that targets are configured only to find the pulls they use, for vamos update,
+	// so that a target that mounts caches in an unnamed workspace, which can't be built, still names its pulls.
+	pinning bool
 }
 
 // configure returns the graph that building roots needs: the targets,
@@ -891,7 +897,7 @@ func (l *lowering) image(cl confLabel) (graph.Ref, error) {
 		n.Target = l.w.targetIdentity(cl)
 		if s.task {
 			n.Desc = l.w.describe("task", cl)
-			n.Task = &graph.Task{Base: base, Steps: steps}
+			n.Task = &graph.Task{Base: base, Steps: steps, ToolCaches: s.mounts}
 			if s.output != nil {
 				n.Task.Output = &graph.Output{Source: s.source, Selection: s.output.sel}
 			}
@@ -907,6 +913,7 @@ func (l *lowering) image(cl confLabel) (graph.Ref, error) {
 			}
 			n.Layer = &graph.Layer{
 				Base: base, Platform: platform, Steps: steps, Command: s.command, Entrypoint: s.entrypoint,
+				ToolCaches: s.mounts,
 			}
 		}
 	}
@@ -1107,6 +1114,12 @@ func (cr *configurer) image(cl confLabel) error {
 		command:    t.command,
 		entrypoint: t.entrypoint,
 		source:     t.source,
+		mounts:     t.mounts,
+	}
+	if !cr.pinning {
+		if err := cr.w.checkNamedFor(d, cl, s); err != nil {
+			return err
+		}
 	}
 	base, err := cr.w.edge(t.baseRef, cl)
 	if err != nil {

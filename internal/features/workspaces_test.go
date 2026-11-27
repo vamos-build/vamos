@@ -790,8 +790,10 @@ func TestWorkspaces_TheNameTravelsWithEveryRequestToAnExecutor(t *testing.T) {
 // TestWorkspaces_TheNameNeverAffectsWhatIsBuiltOrCached specifies that Vamos never adds the name to an action's key,
 // the graph or a step, so identical targets in workspaces named differently, or unnamed, share cached results,
 // and renaming a workspace rebuilds nothing;
-// and that a glob that selects the WORKSPACE file builds on its contents as on any other file's, the name included,
-// so renaming the workspace rebuilds the targets that use that glob.
+// that a glob that selects the WORKSPACE file builds on its contents as on any other file's, the name included,
+// so renaming the workspace rebuilds the targets that use that glob;
+// and that whether a workspace is named affects what it can build only for targets that mount a tool cache,
+// which an unnamed workspace can't build.
 func TestWorkspaces_TheNameNeverAffectsWhatIsBuiltOrCached(t *testing.T) {
 	parallelRule(t)
 	t.Run("Renaming a workspace reuses its cache", func(t *testing.T) {
@@ -839,6 +841,18 @@ func TestWorkspaces_TheNameNeverAffectsWhatIsBuiltOrCached(t *testing.T) {
 		w.ThenItSucceeds()
 		w.ThenTheTargetsWere(statuses{task("probe"): ran})
 		w.ThenTheStepsObserved(observations{"variables naming it": "0"})
+	})
+
+	t.Run("Only a named workspace builds a target that mounts a cache", func(t *testing.T) {
+		w := newWorkspaceMistakeWorld(t)
+		w.GivenTheBuildFileDeclares(`
+			tool_cache(name = "tool", path = "/cache")
+			task(name = "build", base = "scratch", tool_caches = [mount("tool")], steps = [run(["true"])])
+		`)
+		w.WhenIBuild("build")
+		w.ThenItFailsWith(`/project/BUILD:2:5: task "build" mounts tool caches, so the workspace needs a name in ` +
+			`WORKSPACE, such as workspace(name = "com.example.app")`)
+		w.ThenNoTargetRan()
 	})
 
 	t.Run("A glob that selects WORKSPACE builds on its contents", func(t *testing.T) {

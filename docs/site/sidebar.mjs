@@ -28,6 +28,7 @@ export const sidebar = [
           "reference/build/publication",
           "reference/build/steps",
           "reference/build/secrets",
+          "reference/build/tool-cache",
         ],
       },
       {

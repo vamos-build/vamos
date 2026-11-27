@@ -40,9 +40,10 @@ workspace.
 ### Requirement: A task or layer mounts caches for its run steps
 
 `task` and `layer` SHALL take `tool_caches`, a list of `mount(label)` values, each naming a `tool_cache` rule and
-optionally giving `path` to mount it somewhere other than the cache's own path. Each cache SHALL be mounted for every
-`run()` step of the target and no `add()` step; loading refuses a target with caches and no `run()` step (see "Loading
-refuses a cache path that conflicts"). vamos SHALL set no variable naming a mounted cache.
+optionally giving `path` to mount it somewhere other than the cache's own path; `path = None` SHALL be taken as not
+giving it. Each cache SHALL be mounted for every `run()` step of the target and no `add()` step; loading refuses a
+target with caches and no `run()` step (see "Loading refuses a cache path that conflicts"). vamos SHALL set no
+variable naming a mounted cache.
 
 #### Scenario: A later build sees what an earlier one left
 
@@ -571,7 +572,7 @@ A cache's directory SHALL be created owned by the `tool_cache` rule's `owner` an
 by root when neither is given, whether the executor gives it empty or not; a later attempt given it warm SHALL find it
 as earlier steps left it, owner included. A rule
 SHALL give both or neither, each as decimal digits from 0 to 4294967294, and a name or any other value SHALL be refused,
-when loading.
+when loading; `None` for either SHALL be taken as not giving it.
 
 #### Scenario: A non-root step writes to its cache
 

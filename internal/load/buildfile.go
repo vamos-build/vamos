@@ -66,12 +66,13 @@ type buildFile struct {
 // The template is made, and checked, as the BUILD file runs, unless an attribute is given by a function of ctx.
 // Then the call's arguments are kept instead, and a template is made in each configuration the target is needed in.
 type declaration struct {
-	kind      string // "glob", "pull", "layer", "task", "index" or "publication"
+	kind      string // "glob", "pull", "layer", "task", "index", "publication" or "tool_cache"
 	pos       syntax.Position
 	file      *buildFile
 	params    []*param // that params declares, in order, which are known before any configuration
 	hasOutput bool     // a glob, or a task given source, whose files add() can name
-	// the template, if no attribute is a function: a *fileSet, *pullSpec, *targetSpec, *indexSpec or *publicationSpec
+	// the template, if no attribute is a function: a *fileSet, *pullSpec, *targetSpec, *indexSpec, *publicationSpec
+	// or *toolCacheSpec, whose attributes are never functions
 	static any
 
 	// Otherwise, the call's arguments, of which some are functions of ctx, and how to make the template.
@@ -158,8 +159,9 @@ type targetSpec struct {
 	command []string  // a layer's default command
 	// entrypoint is a layer's, if given, even empty, which graph.Layer.Entrypoint describes; nil if not given
 	entrypoint *[]string
-	source     string   // a task's directory of output
-	output     *fileSet // a task's output, found in source; nil for a layer, or a task without output
+	source     string            // a task's directory of output
+	output     *fileSet          // a task's output, found in source; nil for a layer, or a task without output
+	mounts     []graph.ToolCache // the tool caches it mounts for its run() steps, sorted by path
 }
 
 // indexSpec is an index of images for several platforms, declared by a call to index():
@@ -556,8 +558,10 @@ func (w *workspace) predeclared() starlark.StringDict {
 		return names
 	}
 	globParams := append([]string{"name"}, selectionNames(true)...)
-	layerParams := []string{"name", "base", "steps?", "command?", "entrypoint?"}
+	layerParams := []string{"name", "base", "steps?", "command?", "entrypoint?", "tool_caches?"}
+	// tool_caches comes last, after the selection's parameters, so that calls giving those by position keep working.
 	taskParams := append([]string{"name", "base", "steps?", "source?"}, selectionNames(false)...)
+	taskParams = append(taskParams, "tool_caches?")
 	w.builtins = starlark.StringDict{
 		"glob":          w.declarer("glob", globParams, w.makeGlob),
 		"pull":          w.declarer("pull", []string{"name", "image", "tag?"}, w.makePull),
@@ -565,6 +569,8 @@ func (w *workspace) predeclared() starlark.StringDict {
 		"task":          w.declarer("task", taskParams, w.makeTask),
 		"index":         w.declarer("index", []string{"name", "layer", "platforms?"}, w.makeIndex),
 		"publication":   w.declarer("publication", []string{"name", "images", "checks?"}, w.makePublication),
+		"tool_cache":    w.declarer("tool_cache", []string{"name", "path", "owner?", "group?"}, w.makeToolCache),
+		"mount":         starlark.NewBuiltin("mount", w.newMount),
 		"add":           track(starlark.NewBuiltin("add", w.newAdd)),
 		"dep":           starlark.NewBuiltin("dep", w.newDep),
 		"arg":           starlark.NewBuiltin("arg", newArg),
@@ -615,15 +621,26 @@ func (w *workspace) declarer(kind string, params []string, makeTemplate makeFunc
 		outer := c.file.declaring
 		c.file.declaring = nameArg(args, kwargs)
 		defer func() { c.file.declaring = outer }()
+		// A pull or tool cache refuses params as given, before its value is parsed, even an empty dict.
+		isParams := func(kv starlark.Tuple) bool { return kv[0] == starlark.String("params") }
+		givesParams := slices.ContainsFunc(kwargs, isParams)
+		switch {
+		case kind == "pull" && givesParams:
+			return nil, fmt.Errorf("%s: a pull takes no parameters; only its platform configures it", fn.Name())
+		case kind == "tool_cache" && givesParams:
+			return nil, fmt.Errorf("%s: a tool cache takes no parameters, since it is mounted, never configured",
+				fn.Name())
+		}
 		var err error
 		if kwargs, d.params, err = takeParams(fn.Name(), kwargs); err != nil {
 			return nil, err
 		}
-		if kind == "pull" && d.params != nil {
-			return nil, fmt.Errorf("%s: a pull takes no parameters; only its platform configures it", fn.Name())
-		}
 		var name string
-		if hasFunction(args, kwargs) {
+		// A tool cache's arguments are checked as the BUILD file runs, so a function among them is refused there.
+		if kind != "tool_cache" && hasFunction(args, kwargs) {
+			// The target is made later from its arguments as they are now, which a BUILD file appending to a list it
+			// passed can't change, just as it can't change a target made from them at once.
+			args, kwargs = copyLists(args, kwargs)
 			// Check what can be checked now: the parameters given, and the name.
 			values := make([]starlark.Value, len(params))
 			pairs := make([]any, 0, 2*len(params))
@@ -652,6 +669,14 @@ func (w *workspace) declarer(kind string, params []string, makeTemplate makeFunc
 			// makeTask refuses one without the other, and include can't be None.
 			if i := slices.Index(params, "source?"); i >= 0 {
 				d.hasOutput = values[i] != nil && values[slices.Index(params, "include?")] != nil
+			}
+			// Tool caches given as they are, not by a function, must name earlier tool caches, as when nothing is one.
+			if i := slices.Index(params, "tool_caches?"); i >= 0 {
+				if list, ok := values[i].(*starlark.List); ok {
+					if _, err := w.resolveMounts(c, fmt.Sprintf("%s %q", fn.Name(), name), list); err != nil {
+						return nil, err
+					}
+				}
 			}
 			// Steps listed by a function are known only once it runs; those in a list, now.
 			if i := slices.Index(params, "steps?"); i >= 0 {
@@ -706,6 +731,26 @@ func takeParams(fnName string, kwargs []starlark.Tuple) ([]starlark.Tuple, []*pa
 	}
 	params, err := parseParams(fnName, kwargs[i][1])
 	return slices.Delete(slices.Clone(kwargs), i, i+1), params, err
+}
+
+// copyLists returns a call's arguments with each list among them, each time it is given, replaced by a copy of its
+// own, leaving the call's own untouched.
+func copyLists(args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Tuple, []starlark.Tuple) {
+	copied := func(v starlark.Value) starlark.Value {
+		if list, ok := v.(*starlark.List); ok {
+			return starlark.NewList(slices.Collect(list.Elements()))
+		}
+		return v
+	}
+	args = slices.Clone(args)
+	for i, v := range args {
+		args[i] = copied(v)
+	}
+	kwargs = slices.Clone(kwargs)
+	for i, kv := range kwargs {
+		kwargs[i] = starlark.Tuple{kv[0], copied(kv[1])}
+	}
+	return args, kwargs
 }
 
 // kwargValues returns the values of a call's keyword arguments.
@@ -790,6 +835,7 @@ const (
 	useImage                   // a base, or an index's manifest: a pull or layer
 	useCheck                   // a publication's check: a task
 	usePublished               // an image a publication publishes: a pull, layer or index
+	useCache                   // a tool cache that mount() names: a tool_cache
 )
 
 // resolve finds the target that ref, the argument param of a call to fn, names, setting ref.label:
@@ -797,10 +843,15 @@ const (
 // It checks the arguments ref gives the target too.
 // As a BUILD file runs, targets of its own must be declared earlier,
 // so targets it names outside functions of ctx can't form a cycle.
-// No target can name a publication, which only the command line names.
+// No target can name a publication, which only the command line names, and only mount() names a tool cache.
 func (w *workspace) resolve(
 	c *evalContext, fn *starlark.Builtin, param string, ref *targetRef, use refUse,
 ) (*declaration, error) {
+	return w.resolveAs(c, fn.Name(), param, ref, use)
+}
+
+// resolveAs is resolve, with errors saying they are of who, such as a builtin's name, rather than fn.
+func (w *workspace) resolveAs(c *evalContext, who, param string, ref *targetRef, use refUse) (*declaration, error) {
 	image := use == useImage
 	var kinds []string
 	var listed, scratchHint, want, rule string
@@ -814,37 +865,42 @@ func (w *workspace) resolve(
 	case usePublished:
 		kinds, listed = []string{"pull", "layer", "index"}, "pulls, layers and indexes"
 		want, rule = "pull(), layer() or index()", "; a published target must be a pull, layer or index"
+	case useCache:
+		kinds, listed, want = []string{"tool_cache"}, "tool caches", "tool_cache()"
+		rule = "; mount() names a tool cache"
 	}
 	from, name, err := w.lookup(c.file, ref.ref, ref.pkg)
 	if err != nil {
-		return nil, fmt.Errorf("%s: %s %q: %w", fn.Name(), param, ref.ref, err)
+		return nil, fmt.Errorf("%s: %s %q: %w", who, param, ref.ref, err)
 	}
 	d, ok := from.decls[name]
 	declaring := from == c.file && c.mode == declaring
 	switch {
 	case !ok && from.thread != nil && from != c.file:
-		return nil, fmt.Errorf("%s: %s %q: %w", fn.Name(), param, ref.ref, w.notDeclaredYet(from, name))
+		return nil, fmt.Errorf("%s: %s %q: %w", who, param, ref.ref, w.notDeclaredYet(from, name))
 	case !ok && declaring && !image && strings.Contains(name, ":"):
 		return nil, fmt.Errorf("%s: %s %q is not an earlier %s%s",
-			fn.Name(), param, ref.ref, want, labelHint(name))
+			who, param, ref.ref, want, labelHint(name))
 	case !ok && declaring:
 		return nil, fmt.Errorf("%s: %s %q is not %san earlier %s%s",
-			fn.Name(), param, ref.ref, scratchHint, want, describeNames(listed, from.namesOf(kinds...)))
+			who, param, ref.ref, scratchHint, want, describeNames(listed, from.namesOf(kinds...)))
 	case !ok:
-		return nil, fmt.Errorf("%s: %s %q: %w", fn.Name(), param, ref.ref, from.missing(name))
-	case d.kind == "publication":
+		return nil, fmt.Errorf("%s: %s %q: %w", who, param, ref.ref, from.missing(name))
+	case d.kind == "tool_cache" && use != useCache:
+		return nil, fmt.Errorf("%s: %s: %w", who, param, noTarget(ref.ref))
+	case d.kind == "publication" && use != useCache:
 		return nil, fmt.Errorf("%s: %s %q is a publication(), which can't be depended on; "+
 			"%q publishes it, and %q builds what it publishes",
-			fn.Name(), param, ref.ref, "vamos publish", "vamos build")
+			who, param, ref.ref, "vamos publish", "vamos build")
 	case !slices.Contains(kinds, d.kind):
 		return nil, fmt.Errorf("%s: %s %q is %s %s(), not %s %s%s",
-			fn.Name(), param, ref.ref, article(d.kind), d.kind, article(kinds[0]), want, rule)
+			who, param, ref.ref, article(d.kind), d.kind, article(kinds[0]), want, rule)
 	case use == useFiles && !d.hasOutput:
 		return nil, fmt.Errorf("%s: %s %q is a task() without output; give it source and include",
-			fn.Name(), param, ref.ref)
+			who, param, ref.ref)
 	}
 	if err := d.checkArgs(ref); err != nil {
-		return nil, fmt.Errorf("%s: %s: %w", fn.Name(), param, err)
+		return nil, fmt.Errorf("%s: %s: %w", who, param, err)
 	}
 	ref.label = label(from.pkg, name)
 	return d, nil
@@ -951,13 +1007,14 @@ func (w *workspace) makeLayer(
 ) (string, any, error) {
 	var name string
 	var base starlark.Value
-	var steps, command, entrypoint *starlark.List
+	var steps, command, entrypoint, toolCaches *starlark.List
 	if err := starlark.UnpackArgs(fn.Name(), args, kwargs,
 		"name", &name,
 		"base", &base,
 		"steps?", &steps,
 		"command?", &command,
 		"entrypoint?", &entrypoint,
+		"tool_caches?", &toolCaches,
 	); err != nil {
 		return "", nil, err
 	}
@@ -980,6 +1037,9 @@ func (w *workspace) makeLayer(
 	if s.baseRef, err = w.makeBase(c, fn, base); err != nil {
 		return "", nil, err
 	}
+	if s.mounts, err = w.mounts(c, fn, name, toolCaches, s); err != nil {
+		return "", nil, err
+	}
 	return name, s, nil
 }
 
@@ -989,14 +1049,14 @@ func (w *workspace) makeTask(
 ) (string, any, error) {
 	var name, source string
 	var base starlark.Value
-	var steps, include, exclude *starlark.List
+	var steps, toolCaches, include, exclude *starlark.List
 	sel := fileset.DefaultSelection()
 	params := append([]any{
 		"name", &name,
 		"base", &base,
 		"steps?", &steps,
 		"source?", &source,
-	}, selectionParams(sel, &include, &exclude, false)...)
+	}, append(selectionParams(sel, &include, &exclude, false), "tool_caches?", &toolCaches)...)
 	if err := starlark.UnpackArgs(fn.Name(), args, kwargs, params...); err != nil {
 		return "", nil, err
 	}
@@ -1031,6 +1091,9 @@ func (w *workspace) makeTask(
 		}
 	}
 	if s.baseRef, err = w.makeBase(c, fn, base); err != nil {
+		return "", nil, err
+	}
+	if s.mounts, err = w.mounts(c, fn, name, toolCaches, s); err != nil {
 		return "", nil, err
 	}
 	return name, s, nil
@@ -1207,6 +1270,7 @@ func parseRepository(repo string) (reference.Named, error) {
 
 // target returns the label and kind of the target that ref, given on the command line,
 // names from the package of -C, loading the BUILD file that declares it.
+// A tool cache is refused, since it is no target, whatever the command does with what it names.
 func (w *workspace) target(ref string) (string, string, error) {
 	pkg, name, err := parseLabel(ref, w.current)
 	if err != nil {
@@ -1219,6 +1283,9 @@ func (w *workspace) target(ref string) (string, string, error) {
 	d, ok := f.decls[name]
 	if !ok {
 		return "", "", f.missing(name)
+	}
+	if d.kind == "tool_cache" {
+		return "", "", noTarget(ref)
 	}
 	return label(pkg, name), d.kind, nil
 }

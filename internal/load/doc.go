@@ -44,6 +44,10 @@
 // so that target history keys a configuration alike in every invocation.
 // workspace.readGlobs captures sources after configuration.
 // Step values and their lowering live in step.go; changes must also reach graph and run.
+// toolcache.go owns tool caches: tool_cache() declares one, which is no target, so workspace.target and resolve refuse
+// its label wherever a target is wanted; mount() names one, and workspace.mounts resolves a task's or layer's
+// tool_caches and refuses the conflicts that loading can see, checking each literal path with graph.CheckCachePath;
+// checkNamedFor refuses a target that mounts caches in an unnamed workspace, as it is configured.
 // Pulls, in pulls.go, returns the pulls that vamos update pins: those named, or every pull of the workspace, whose
 // BUILD files it finds by walking it, the one workspace-wide scan, which skips hidden directories and other workspaces.
 // lock.go owns the lockfile's format: ReadLock, Lock.Marshal, which gives the same bytes for the same pins,
