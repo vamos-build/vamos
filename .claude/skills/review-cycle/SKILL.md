@@ -180,7 +180,14 @@ If nothing was accepted, skip to step 7. Otherwise fix the accepted findings and
 
 Reviewers share the checkout and have been seen to `git checkout <sha>` mid-review, so first check `git branch --show-current` is still `<START>`. If `HEAD` is detached at `<START>`'s tip with a clean tree, `git switch <START>` and note it in the report; anything else is off track.
 
-Make one commit for the round, on top. Never amend. Look at `git status` first so nothing stray gets swept in. Follow the repo's message conventions and describe what the fixes change and why, as a commit someone would write on their own, without mentioning reviewers, passes or rounds. Write the message to a new file so no editor opens and a failed write can't reuse an old one:
+Make one commit for the round, on top. Never amend. Look at `git status` first so nothing stray gets swept in. Follow the repo's message conventions and describe what the fixes change and why, as a commit someone would write on their own, without mentioning reviewers, passes or rounds. Write the message to a new file so no editor opens and a failed write can't reuse an old one. End it with one co-author trailer per agent, on separate lines, naming the Codex model version that actually ran (shown in its tab's footer):
+
+```text
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Co-Authored-By: Codex GPT-6.2 Sol <noreply@openai.com>
+```
+
+Then commit it:
 
 ```bash
 git add -A && git commit -F "$SCRATCH/commit-p<P>r<R>.txt"
