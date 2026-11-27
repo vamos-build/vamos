@@ -78,6 +78,8 @@ func (w *world) startLocalCoordinator() {
 		w.t.Fatal(err)
 	}
 	local.LimitAttemptTraces(w.attemptTraceLimit)
+	// A coordinator's clients have workspaces of their own, as for vamos coordinator --local.
+	local.ServeAsCoordinator()
 	w.coordinatorLocal = local
 	w.t.Cleanup(func() { local.Close() })
 	content, err := local.ContentStore()

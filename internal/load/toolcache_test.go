@@ -390,6 +390,18 @@ task(name = "build", base = "scratch", tool_caches = [mount("release")], steps =
 			err: `tool_caches[0] "release" is a publication(), not a tool_cache(); mount() names a tool cache`,
 		},
 		{
+			name: "a tool cache's name that isn't UTF-8",
+			build: `tool_cache(name = "é"[0], path = "/cache")
+task(name = "build", base = "scratch", steps = [run(["true"])])`,
+			err: "must be UTF-8, as the graph encodes it",
+		},
+		{
+			name: "a tool cache's path that isn't UTF-8",
+			build: `tool_cache(name = "tool", path = "/cache" + "é"[0])
+task(name = "build", base = "scratch", tool_caches = [mount("tool")], steps = [run(["true"])])`,
+			err: "must be UTF-8",
+		},
+		{
 			name: "a dep() of a tool cache",
 			build: `tool_cache(name = "tool", path = "/cache")
 d = dep("tool")
@@ -489,5 +501,26 @@ task(name = "build", base = "scratch", tool_caches = [mount("tool", path = None)
 	want := []graph.ToolCache{{Path: "/cache", Label: "//:tool"}}
 	if got := g.Node(g.Roots[0]).Task.ToolCaches; !reflect.DeepEqual(got, want) {
 		t.Errorf("build mounts %+v; want %+v", got, want)
+	}
+}
+
+// TestToolCacheLabelOfAColonPackage checks that a mount in a package whose directory's name holds a colon, which
+// only -C can reach, makes a graph that graph.Validate accepts.
+func TestToolCacheLabelOfAColonPackage(t *testing.T) {
+	fsys := afero.NewMemMapFs()
+	testenv.Must(t, afero.WriteFile(fsys, "/project/WORKSPACE", []byte(`workspace(name = "com.acme.shop")`), 0o644))
+	testenv.Must(t, afero.WriteFile(fsys, "/project/v2:tools/BUILD", []byte(`
+tool_cache(name = "tool", path = "/cache")
+task(name = "build", base = "scratch", tool_caches = [mount("tool")], steps = [run(["true"])])
+`), 0o644))
+	g, err := Load(t.Context(), fsys, Request{
+		Dir:          "/project/v2:tools",
+		Targets:      []string{"build"},
+		Want:         WantBuild,
+		ExecPlatform: imgspecv1.Platform{OS: "linux", Architecture: "amd64"},
+	})
+	testenv.Must(t, err)
+	if got := g.Node(g.Roots[0]).Task.ToolCaches[0].Label; got != "//v2:tools:tool" {
+		t.Errorf("the mount's label = %q; want //v2:tools:tool", got)
 	}
 }

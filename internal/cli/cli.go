@@ -90,6 +90,7 @@ type options struct {
 	emulate       bool          // --emulate
 	coordinator   string        // --coordinator, or $VAMOS_COORDINATOR
 	rebuild       bool          // build --rebuild
+	noToolCaches  bool          // build --no-tool-caches
 	replace       bool          // export --replace
 	tag           string        // save --tag
 	tags          []string      // publish --tag
@@ -365,12 +366,17 @@ func NewRootCommand(cfg Config) *cobra.Command {
 			"push, load, save and export find them. Targets already cached are reused, unless --rebuild is given:\n" +
 			"then the named targets run again, though the targets they use are still reused. A pull() named\n" +
 			"with --rebuild resolves nothing again, keeping its pin, if it has one; vamos update refreshes it.",
-		Example: "  vamos build packages //backend:test\n  vamos build compile --rebuild",
-		Args:    atLeastOne("target name", "vamos build packages"),
-		RunE:    handle(func(inv *invocation, args []string) error { return inv.build(args) }),
+		Example: "  vamos build packages //backend:test\n  vamos build compile --rebuild\n" +
+			"  vamos build compile --no-tool-caches --rebuild",
+		Args: atLeastOne("target name", "vamos build packages"),
+		RunE: handle(func(inv *invocation, args []string) error { return inv.build(args) }),
 	}
 	buildCmd.Flags().BoolVar(&opts.rebuild, "rebuild", false,
 		"run the named targets again rather than reuse cached results")
+	buildCmd.Flags().BoolVar(&opts.noToolCaches, "no-tool-caches", false,
+		"give each attempt the build starts empty tool caches of its own, for a clean build;\n"+
+			"results, and other builds' attempts, made with warm caches are still reused,\n"+
+			"unless --rebuild runs the named targets again")
 
 	updateCmd := &cobra.Command{
 		Use:   "update [pull...]",
@@ -706,6 +712,18 @@ func (inv *invocation) closeExecutor(ex executor) {
 	}
 }
 
+// newLocalCoordinator returns the local executor that vamos coordinator --local serves, on the container store that
+// options describe: in coordinator mode, which gives every attempt empty tool caches, since its clients' workspaces
+// are their own.
+func newLocalCoordinator(options storage.StoreOptions) (*run.Local, error) {
+	local, err := run.NewLocal(options)
+	if err != nil {
+		return nil, err
+	}
+	local.ServeAsCoordinator()
+	return local, nil
+}
+
 // coordinator coordinates builds for clients on the network, at --listen, until the command is interrupted:
 // across the workers that register, or, with --local, in this process with the local executor.
 func (inv *invocation) coordinator() error {
@@ -716,7 +734,7 @@ func (inv *invocation) coordinator() error {
 		if err != nil {
 			return err
 		}
-		local, err := run.NewLocal(options)
+		local, err := newLocalCoordinator(options)
 		if err != nil {
 			return err
 		}
@@ -1238,15 +1256,17 @@ func (inv *invocation) runLoaded(
 		return nil, nil, err
 	}
 	runReq := api.GraphRequest{
-		Graph:      stored,
-		Version:    g.Version,
-		Platform:   execPlatform,
-		Rebuild:    rebuild,
-		Timestamp:  time.Time(inv.opts.timestamp),
-		Emulate:    inv.opts.emulate,
-		Workspace:  inv.workspace,
-		Generation: inv.generation, // read before the sources were captured: a prune since refuses the build
-		Secrets:    secrets,
+		Graph:    stored,
+		Version:  g.Version,
+		Platform: execPlatform,
+		Rebuild:  rebuild,
+		// Only vamos build has the flag, so a command that sends its build's results keeps the caches.
+		NoToolCaches: inv.opts.noToolCaches,
+		Timestamp:    time.Time(inv.opts.timestamp),
+		Emulate:      inv.opts.emulate,
+		Workspace:    inv.workspace,
+		Generation:   inv.generation, // read before the sources were captured: a prune since refuses the build
+		Secrets:      secrets,
 	}
 	runReq.Parent, runReq.State = inv.outerTrace()
 	events.graph = g

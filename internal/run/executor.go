@@ -53,6 +53,9 @@ type Local struct {
 	sharing   *sched.Sharing     // runs actions through the runner, once for every job that needs the same one
 	// traceLimit bounds each attempt's stored trace, if positive; see LimitAttemptTraces.
 	traceLimit int
+	// coordinator says that it serves vamos coordinator --local, whose clients each have a workspace of their own:
+	// it gives every attempt empty tool caches, never a workspace's, and so checks no request's workspace name.
+	coordinator bool
 }
 
 // NewLocal returns a local executor on the container store that options describe, such as DefaultStoreOptions
@@ -96,6 +99,23 @@ func Version() string {
 // It is for tests, before any job is submitted.
 func (l *Local) RetainEvents(n int) {
 	l.jobs.RetainEvents(n)
+}
+
+// ServeAsCoordinator makes the executor serve vamos coordinator --local, rather than one client's standalone builds:
+// it gives every attempt empty tool caches of its own, as a coordinator's workers do, whatever workspace name a
+// request carries, which it therefore neither checks nor refuses, and which still keys target history.
+// It is for before any job is submitted.
+func (l *Local) ServeAsCoordinator() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.coordinator = true
+}
+
+// ServesAsCoordinator reports whether ServeAsCoordinator made the executor serve vamos coordinator --local.
+func (l *Local) ServesAsCoordinator() bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.coordinator
 }
 
 // LimitAttemptTraces makes each attempt's stored trace fit in limit bytes, rather than tracing.MaxTraceSize,
@@ -398,6 +418,12 @@ func (l *Local) run(ctx context.Context, req api.GraphRequest, ev sched.Events) 
 	if err := checkExecPlatform(g.ExecPlatform); err != nil {
 		return nil, err
 	}
+	coordinator := l.ServesAsCoordinator()
+	if !coordinator {
+		if err := checkWorkspaceFor(g, req.Workspace, req.NoToolCaches); err != nil {
+			return nil, err
+		}
+	}
 	if err := l.open(); err != nil {
 		return nil, err
 	}
@@ -407,9 +433,30 @@ func (l *Local) run(ctx context.Context, req api.GraphRequest, ev sched.Events) 
 	b := sched.Backend{Content: l.content, Records: l.records, Checker: l.runner, Runner: l.sharing}
 	opts := sched.Options{
 		Rebuild: req.Rebuild, Timestamp: req.Timestamp, Emulate: req.Emulate, Bound: 1, Secrets: req.Secrets,
-		Workspace: req.Workspace,
+		Workspace: req.Workspace, NoToolCaches: req.NoToolCaches || coordinator,
 	}
 	return sched.New(g, b, ev, opts).Run(ctx)
+}
+
+// checkWorkspaceFor refuses a standalone build of g, a graph that mounts tool caches, whose request names workspace,
+// if the name breaks the rules a workspace's name follows, or is empty and noToolCaches is not set, so that only a
+// name that load would have accepted chooses a workspace's persistent caches. The request comes from a client, not
+// from load: an API client, or an older one, can send any name, or none.
+func checkWorkspaceFor(g *graph.Graph, workspace string, noToolCaches bool) error {
+	if !slices.ContainsFunc(g.Nodes, func(n graph.Node) bool { return len(n.ToolCaches()) > 0 }) {
+		return nil
+	}
+	if workspace == "" {
+		if noToolCaches {
+			return nil
+		}
+		return errors.New("the build mounts tool caches, so the workspace needs a name in WORKSPACE, " +
+			`such as workspace(name = "com.example.app"), which chooses its caches`)
+	}
+	if err := graph.CheckWorkspaceName(workspace); err != nil {
+		return fmt.Errorf("the build mounts tool caches, and the request's workspace %w", err)
+	}
+	return nil
 }
 
 // checkResult refuses a result to push or export whose image IDs aren't image IDs, as Result.Image gives them,

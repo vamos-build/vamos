@@ -88,7 +88,11 @@ A mistake in `WORKSPACE`, such as a name that breaks these rules, fails every co
 `vamos update` included, naming the file, line and column, as a mistake in a `BUILD` file does.
 
 Every request that a command sends to an executor, to build, push, publish or export, carries the name,
-or none for an unnamed workspace, as metadata that changes nothing the executor does.
+or none for an unnamed workspace, as metadata that changes nothing the executor builds.
+The name chooses the workspace's [tool caches](build/tool-cache.md),
+which `vamos build` keeps by the name and each cache's label,
+so only a named workspace can mount them:
+a target that mounts one fails to load in an unnamed workspace.
 Vamos derives no name from anything else: not the workspace's directory, its repository or the repository's remotes.
 A workspace that doesn't call `workspace()` is unnamed.
 A name is trusted as declared, so choosing one that no other workspace uses is up to the workspace;
@@ -96,7 +100,7 @@ a reverse-DNS name of a domain you control, such as `com.acme.storefront`, is on
 
 Vamos never adds the name to an action's key, the graph or a step,
 so identical targets in workspaces named differently, or unnamed, share cached results,
-and renaming a workspace rebuilds nothing.
+and renaming a workspace rebuilds nothing, though its targets then mount the tool caches of the new name.
 A glob that selects the `WORKSPACE` file, such as `**` in the root package, builds on its contents
 as on any other file's, the name included,
 so renaming the workspace rebuilds the targets that use that glob.

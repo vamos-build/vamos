@@ -30,6 +30,10 @@
 // Task containers are discarded; layer images outlive the job in storage.
 // Where emulation needs permission, a target whose commands would run emulated fails before running without it;
 // the local executor doesn't require it, pending the decision that sched.Options.OptIn records.
+// A standalone build of a graph that mounts tool caches checks its request's workspace name, which chooses its
+// caches, as it reads the graph, with graph.CheckWorkspaceName, and fails before anything runs if it breaks the rules
+// of a name, or is empty without api.GraphRequest.NoToolCaches; Local.ServeAsCoordinator, which vamos coordinator
+// --local sets, skips that check and gives every attempt empty caches, since its clients' workspaces are their own.
 // Delivery follows successful execution.
 //
 // # Changes

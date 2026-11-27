@@ -24,6 +24,7 @@ func testSelection(t *testing.T, include, exclude []string) *fileset.Selection {
 
 // TestActionKeyStable pins how an Action is encoded, and so every target's key:
 // a change that alters it would make every cached result unusable, so it must be deliberate, and raise ActionVersion.
+// An action without tool caches encodes as it did before they were, but for its version.
 func TestActionKeyStable(t *testing.T) {
 	files := cache.Blob{Digest: digest.FromString("files"), Size: 5}
 	a := &Action{
@@ -44,7 +45,7 @@ func TestActionKeyStable(t *testing.T) {
 		Source:     "/out",
 		Output:     testSelection(t, []string{"dist"}, []string{"dist/*.map"}),
 	}
-	want := `{"version":11,"kind":"layer","base":"0123abcd","platform":"linux/arm64","steps":[` +
+	want := `{"version":12,"kind":"layer","base":"0123abcd","platform":"linux/arm64","steps":[` +
 		`{"op":"add","files":{"digest":"` + files.Digest.String() + `","size":5},"epoch":7,"dest":"/app",` +
 		`"owner":"app","group":"staff"},{"op":"run","argv":["make","all"],"secrets":[{"id":"token","env":"TOKEN"},` +
 		`{"id":"key","file":"/run/secrets/key"}]},{"op":"env","vars":["A=1","B=2"]},` +
@@ -82,6 +83,43 @@ func TestActionKeys(t *testing.T) {
 	b.Steps = []Step{a.Steps[0], {Op: "run", Argv: []string{"true"}, Secrets: []graph.Secret{{ID: "t", Env: "T"}}}}
 	if b.Key() == key {
 		t.Errorf("actions whose steps are given different secrets have the same key")
+	}
+}
+
+// TestToolCacheKeys checks that an Action's key changes with where each of its tool caches is mounted, which one it is,
+// and its owner and group, and that an action that mounts caches encodes them.
+func TestToolCacheKeys(t *testing.T) {
+	a := &Action{
+		Version:    ActionVersion,
+		Kind:       "task",
+		Base:       "Scratch",
+		Steps:      []Step{{Op: "run", Argv: []string{"go", "build"}}},
+		ToolCaches: []graph.ToolCache{{Path: "/cache", Label: "//tools:go-build", Owner: 1000, Group: 1000}},
+	}
+	keys := map[digest.Digest]string{a.Key(): "as declared"}
+	for name, change := range map[string]func(*graph.ToolCache){
+		"another path":  func(c *graph.ToolCache) { c.Path = "/other" },
+		"another label": func(c *graph.ToolCache) { c.Label = "//tools:go-mod" },
+		"another owner": func(c *graph.ToolCache) { c.Owner = 0 },
+		"another group": func(c *graph.ToolCache) { c.Group = 0 },
+	} {
+		b := *a
+		b.ToolCaches = []graph.ToolCache{a.ToolCaches[0]}
+		change(&b.ToolCaches[0])
+		if other, ok := keys[b.Key()]; ok {
+			t.Errorf("a tool cache with %s has the key of one %s", name, other)
+		}
+		keys[b.Key()] = name
+	}
+	b := *a
+	b.ToolCaches = nil
+	if _, ok := keys[b.Key()]; ok {
+		t.Errorf("an action without its tool cache has the key of one with it")
+	}
+	data, _ := json.Marshal(a)
+	want := `"tool_caches":[{"path":"/cache","label":"//tools:go-build","owner":1000,"group":1000}]`
+	if !strings.Contains(string(data), want) {
+		t.Errorf("an action that mounts a cache encodes as %s, without %s", data, want)
 	}
 }
 

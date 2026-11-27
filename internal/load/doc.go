@@ -30,7 +30,7 @@
 // # Changes
 //
 // Start with Load and Request.
-// In workspacefile.go, evalWorkspaceFile evaluates WORKSPACE, and checkWorkspaceName owns the rules of a name.
+// In workspacefile.go, evalWorkspaceFile evaluates WORKSPACE, whose name graph.CheckWorkspaceName checks.
 // LoadPublication loads a publication as the roots it checks and publishes, its checks then its images,
 // and returns the Publication saying where each image goes; its repositories never enter the graph.
 // expandPublication owns that expansion, which a build of a publication shares; resolve refuses a publication

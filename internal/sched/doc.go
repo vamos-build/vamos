@@ -12,7 +12,9 @@
 // Only Sharing writes results and tag records, once the runner has published the artifact and returned its Report,
 // so that no record names an artifact that isn't there; the latest write wins. The Scheduler adds to target history,
 // which names no artifact.
-// Action keys exclude provenance, emulation, the platform an action runs on, locations and target naming;
+// Action keys exclude provenance, emulation, the platform an action runs on, locations and target naming, and of a
+// tool cache, what it holds, where the executor keeps it and the workspace's name, which choose only which directory is
+// mounted and travel in Request; where each cache is mounted, which it is, and its owner and group are in the key;
 // ActionVersion changes when what a key covers, or how a target is built, changes.
 // An action runs on its image's platform where the executor runs that natively, as Options.Native and
 // Options.Offered say, and otherwise on the graph's execution platform, which Request.RunPlatform says; only commands

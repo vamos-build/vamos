@@ -7,6 +7,7 @@ import (
 	"path"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/vamos-build/vamos/internal/graph"
 
@@ -38,6 +39,10 @@ func (w *workspace) makeToolCache(
 	}
 	if err := graph.CheckCachePath("path", p); err != nil {
 		return "", nil, fmt.Errorf("%s: %w", fn.Name(), err)
+	}
+	// The graph encodes its label as JSON, which would make two names that aren't UTF-8 one.
+	if !utf8.ValidString(name) {
+		return "", nil, fmt.Errorf("%s: name %q must be UTF-8, as the graph encodes it", fn.Name(), name)
 	}
 	s := &toolCacheSpec{path: p}
 	// None is no owner or group, so that a function can pass on its own arguments' defaults.
@@ -172,6 +177,11 @@ func (w *workspace) resolveMounts(c *evalContext, who string, list *starlark.Lis
 		d, err := w.resolveAs(c, who, param, &ref, useCache)
 		if err != nil {
 			return nil, err
+		}
+		// The graph encodes it as JSON, which would make two labels that aren't UTF-8 one.
+		if !utf8.ValidString(ref.label) {
+			return nil, fmt.Errorf("%s: %s: the tool cache %q must be named, in a package, by UTF-8, "+
+				"as the graph encodes it", who, param, ref.label)
 		}
 		cache := d.static.(*toolCacheSpec)
 		m := graph.ToolCache{Path: cache.path, Label: ref.label, Owner: cache.owner, Group: cache.group}

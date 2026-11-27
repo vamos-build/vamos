@@ -16,6 +16,8 @@
 // Review Version when changing graph meaning, and Encode, Decode and Graph.Validate when changing its representation;
 // metadata that no key reads, and that a graph builds the same without, needs no new Version.
 // Step additions also require loader lowering, executor behavior and action-key coverage.
-// vars.go owns the variable syntax shared by loading and execution.
+// vars.go owns the variable syntax shared by loading and execution, toolcache.go the checks of a tool cache's path,
+// owner and group, and workspace.go the rules of a workspace's name, which an executor checks again before choosing a
+// workspace's tool caches by it.
 // Cache identity is owned by run, not this package.
 package graph

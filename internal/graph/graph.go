@@ -22,7 +22,8 @@ import (
 // so that a client and an executor of different versions refuse each other's graphs rather than build something else.
 // A field that no key reads and that a graph builds the same without, such as Node.Target, means nothing new,
 // and leaves it as it is.
-const Version = 4 // 4: a pull's pinned digest
+// 5: the tool caches of layers and tasks, which an executor of 4 would decode and drop, building without them.
+const Version = 5
 
 // Graph is everything a build runs:
 // each target in each configuration it's needed in, in an order where each node comes after the nodes it uses.
@@ -407,7 +408,10 @@ func (g *Graph) validateNode(ref Ref) error {
 				return err
 			}
 		}
-		return g.checkSteps(ref, l.Steps)
+		if err := g.checkSteps(ref, l.Steps); err != nil {
+			return err
+		}
+		return checkToolCaches(l.ToolCaches, l.Steps)
 
 	case n.Task != nil:
 		t := n.Task
@@ -429,7 +433,10 @@ func (g *Graph) validateNode(ref Ref) error {
 				return err
 			}
 		}
-		return g.checkSteps(ref, t.Steps)
+		if err := g.checkSteps(ref, t.Steps); err != nil {
+			return err
+		}
+		return checkToolCaches(t.ToolCaches, t.Steps)
 	}
 
 	if len(n.Index.Manifests) == 0 {

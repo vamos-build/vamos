@@ -227,7 +227,13 @@ type GraphRequest struct {
 	// Workspace is the name that the client's workspace declares in its WORKSPACE file, or "" for an unnamed one,
 	// as an older client sends.
 	// It is metadata, trusted as declared, like Emulate: no part of any action's key.
+	// A local executor of a standalone build chooses the workspace's tool caches by it, and refuses a graph that
+	// mounts caches if it breaks the rules of a name, or is empty without NoToolCaches.
 	Workspace string `json:"workspace,omitempty"`
+	// NoToolCaches asks the executor to give each attempt the job starts empty tool caches of its own, discarded when
+	// the attempt ends, for a clean build, as --no-tool-caches does. A result or attempt made with a warm cache may
+	// still be reused. It is metadata, like Workspace: no part of any action's key.
+	NoToolCaches bool `json:"no_tool_caches,omitempty"`
 	// Parent and State are the W3C traceparent and tracestate of an outer trace, such as a CI pipeline's, that the
 	// job joins, as the client's TRACEPARENT and TRACESTATE gave them, or "" for none, as an older client sends.
 	// They are metadata, like Workspace: an executor that exports traces checks them again, and one that doesn't

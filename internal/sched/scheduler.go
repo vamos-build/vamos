@@ -62,6 +62,12 @@ type Request struct {
 	// They are never encoded, so that no wire, record or trace carries them: only a Runner in the process that the
 	// job runs in, as the local executor's does, has them, and any other fails the step that needs one.
 	Secrets map[string][]byte `json:"-"`
+	// Workspace is the name of the workspace whose job started the attempt, as Options.Workspace gives it, which
+	// chooses the workspace's tool caches where the Runner keeps them; it is no part of the key, so that a result, or
+	// an attempt in flight, is shared by jobs of every workspace.
+	Workspace string `json:"workspace,omitempty"`
+	// NoToolCaches asks the Runner to give the attempt empty tool caches of its own, as Options.NoToolCaches says.
+	NoToolCaches bool `json:"no_tool_caches,omitempty"`
 }
 
 // ImagePlatform returns the platform of the image the action's run() steps run in: Platform, or for an action on
@@ -285,8 +291,12 @@ type Options struct {
 	// rest of the build. It is called by one goroutine at a time.
 	Offered func(platform string) bool
 	// Workspace is the name of the workspace the graph was loaded from, as api.GraphRequest.Workspace gives it,
-	// which keys its targets' history with their graph.Node.Target; an unnamed workspace keeps none.
+	// which keys its targets' history with their graph.Node.Target, an unnamed workspace keeping none, and which each
+	// target's Request carries, to choose its tool caches.
 	Workspace string
+	// NoToolCaches gives each attempt the job starts empty tool caches of its own, as api.GraphRequest.NoToolCaches
+	// asks; each target's Request carries it.
+	NoToolCaches bool
 }
 
 // Scheduler walks a graph in dependency order, resolving each node's inputs, computing its key,
@@ -829,6 +839,9 @@ func (s *Scheduler) prepareTarget(ref graph.Ref, why string, regenerating bool) 
 		Rewrite:   maps.Clone(s.corrupt), // the Runner's own, as a wire would give it
 		Permitted: s.opts.Emulate || !s.opts.OptIn,
 		Secrets:   s.secrets(a),
+		// Execution metadata, which the key leaves out.
+		Workspace:    s.opts.Workspace,
+		NoToolCaches: s.opts.NoToolCaches,
 	}
 	req.RunPlatform = s.runPlatform(req.ImagePlatform())
 	// The refusal is made here, since it names the platforms native now, which only the walk reads.
@@ -1401,6 +1414,7 @@ func (s *Scheduler) inputs(n *graph.Node) *Action {
 		a.Platform = n.Layer.Platform
 		a.Command, a.Entrypoint = n.Layer.Command, n.Layer.Entrypoint
 	}
+	a.ToolCaches = n.ToolCaches()
 	for _, in := range n.Steps() {
 		entry := StepOf(in)
 		if in.From != nil {

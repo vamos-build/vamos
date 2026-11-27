@@ -1,6 +1,7 @@
 package features
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -15,6 +16,26 @@ func newToolCacheMistakeWorld(t *testing.T) *world {
 	w := newWorld(t)
 	w.GivenTheProjectHolds(files{"WORKSPACE": `workspace(name = "com.acme.shop")`})
 	return w
+}
+
+// newToolCacheWorld starts a scenario of the tool caches feature, from its background: a workspace named
+// com.acme.shop, whose BUILD file pulls busybox and declares tool caches with tool_cache() and mounts them in tasks
+// and layers with tool_caches.
+func newToolCacheWorld(t *testing.T) *world {
+	t.Helper()
+	w := newBuildingWorld(t)
+	w.GivenTheProjectHolds(files{"WORKSPACE": `workspace(name = "com.acme.shop")`})
+	w.GivenAProjectThatPullsBusybox()
+	return w
+}
+
+// aBuildMountingTool declares the tool cache "tool" at /cache, with the owner and group owner gives, if any, and the
+// task "build", which mounts it as mount gives and echoes nonce, so that it runs the first time.
+func aBuildMountingTool(owner, mount, nonce string) string {
+	return fmt.Sprintf(`
+		tool_cache(name = "tool", path = "/cache"%s)
+		task(name = "build", base = "busybox", tool_caches = [%s], steps = [run(["echo", %q])])
+	`, owner, mount, nonce)
 }
 
 // theGoBuildCache declares, in the package tools, the tool cache "go-build" at /cache/go-build.
@@ -129,6 +150,42 @@ func TestToolCaches_AToolCacheIsMountedNeverBuilt(t *testing.T) {
 			w.ThenNoTargetRan()
 		})
 	}
+}
+
+// TestToolCaches_WhatACacheHoldsIsOutsideEveryKey specifies that a cache's contents, whether it holds anything, where
+// the executor keeps it and the workspace's name are no part of any action's key, while the path each cache is mounted
+// at, whether the cache's or the mount's, the cache's label, and its owner and group are.
+func TestToolCaches_WhatACacheHoldsIsOutsideEveryKey(t *testing.T) {
+	parallelRule(t)
+	t.Run("Overriding a cache's path with its own path keeps the hit", func(t *testing.T) {
+		w := newToolCacheWorld(t)
+		w.GivenTheBuildFileDeclares(aBuildMountingTool("", `mount("tool")`, testenv.NewNonce()))
+		w.WhenIBuild("build")
+		w.ThenItSucceeds()
+		w.ThenTheTargetsWere(statuses{task("build"): ran})
+		w.GivenTheBuildFileChanges(`mount("tool")`, `mount("tool", path = "/cache")`)
+		w.WhenIBuild("build")
+		w.ThenItSucceeds()
+		w.ThenTheTargetsWere(statuses{task("build"): reused})
+	})
+}
+
+// TestToolCaches_AStandaloneBuildRefusesARequestWithoutAValidWorkspaceName specifies that a standalone local build
+// whose graph mounts caches fails before anything runs when its request's workspace name breaks the rules a name
+// follows, or is empty and the request doesn't ask for empty tool caches.
+func TestToolCaches_AStandaloneBuildRefusesARequestWithoutAValidWorkspaceName(t *testing.T) {
+	parallelRule(t)
+	t.Run("An API request without a workspace name", func(t *testing.T) {
+		w := newToolCacheMistakeWorld(t)
+		w.GivenTheBuildFileDeclares(`
+			tool_cache(name = "tool", path = "/cache")
+			task(name = "build", base = "scratch", tool_caches = [mount("tool")], steps = [run(["true"])])
+		`)
+		w.WhenIShowTheGraph("build")
+		w.WhenAnAPIClientSendsTheGraphWithoutAWorkspaceName()
+		w.ThenItFailsWith("the build mounts tool caches, so the workspace needs a name in WORKSPACE")
+		w.ThenNoTargetRan()
+	})
 }
 
 // TestToolCaches_LoadingRefusesACachePathItCannotMount specifies that loading refuses a cache's or a mount's path that
@@ -345,4 +402,17 @@ func TestToolCaches_ACachesOwnerIsFixedByItsRule(t *testing.T) {
 			w.ThenNoTargetRan()
 		})
 	}
+
+	t.Run("Owners written differently are one owner", func(t *testing.T) {
+		w := newToolCacheWorld(t)
+		w.GivenTheBuildFileDeclares(aBuildMountingTool(`, owner = "1000", group = "1000"`, `mount("tool")`,
+			testenv.NewNonce()))
+		w.WhenIBuild("build")
+		w.ThenItSucceeds()
+		w.ThenTheTargetsWere(statuses{task("build"): ran})
+		w.GivenTheBuildFileChanges(`owner = "1000"`, `owner = "01000"`)
+		w.WhenIBuild("build")
+		w.ThenItSucceeds()
+		w.ThenTheTargetsWere(statuses{task("build"): reused})
+	})
 }

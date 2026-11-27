@@ -774,8 +774,11 @@ func (c *Coordinator) run(ctx context.Context, req api.GraphRequest, native []st
 	b := sched.Backend{Content: c.content, Records: c.records, Checker: c.checker, Runner: c.sharing}
 	// An action whose image's platform the build runs natively waits for a worker of it rather than being emulated,
 	// even if none is registered now, as after a restart.
+	// A worker gives every cache empty, so each task's and layer's assignment says so, whatever the client asked: the
+	// workspace's name keys target history here, and chooses no cache.
 	opts := sched.Options{Rebuild: req.Rebuild, Timestamp: req.Timestamp, Emulate: req.Emulate, OptIn: true,
-		Bound: c.cfg.Bound, Native: native, Offered: c.offer(jobOf(ctx), native), Workspace: req.Workspace}
+		Bound: c.cfg.Bound, Native: native, Offered: c.offer(jobOf(ctx), native), Workspace: req.Workspace,
+		NoToolCaches: true}
 	return sched.New(g, b, ev, opts).Run(ctx)
 }
 

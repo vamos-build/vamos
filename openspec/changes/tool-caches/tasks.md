@@ -61,7 +61,7 @@
 
 ## 2. Keys and requests
 
-- [ ] 2.1 Add `ToolCaches` (path, label, owner and group) to `sched.Action` for layers and tasks, filled from the graph,
+- [x] 2.1 Add `ToolCaches` (path, label, owner and group) to `sched.Action` for layers and tasks, filled from the graph,
   advance `ActionVersion` to 12 and `graph.Version` to 5 with their comments. Verify with `sched` action tests that an
   action without caches encodes as before apart from the version, that changing a mount's effective path, label, owner
   or group changes the key, a `cli` test that a client refuses an executor offering only graph version 4, a test that a
@@ -93,7 +93,7 @@
   reference beside `--rebuild`, noting that combined with it the named targets rerun cold while their unchanged
   dependencies are still reused. Verify with a `cli` flag test, `vamos build --help`, and "A clean rebuild reuses a
   dependency built warm".
-- [ ] 2.4 Count a target's `ToolCaches` among its own inputs in `sched`'s history attribution (`diffActions`), so that a
+- [x] 2.4 Count a target's `ToolCaches` among its own inputs in `sched`'s history attribution (`diffActions`), so that a
   mount that moved, another cache or another owner and group is `own-inputs`, and add mounted caches to the `own-inputs`
   row of the miss-cause table in [cache.md](../../../docs/user/reference/cache.md). Verify with
   `cache-miss-attribution`'s "A moved cache mount is own-inputs" in `internal/features/misses_test.go`, and `sched`

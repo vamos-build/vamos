@@ -1,10 +1,13 @@
 package graph
 
 import (
+	"errors"
 	"fmt"
 	"path"
+	"slices"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // ToolCache is a tool cache that a layer or task mounts for each of its run() steps: a directory that the executor
@@ -49,6 +52,8 @@ func CheckCachePath(param, p string) error {
 		return err
 	}
 	switch {
+	case !utf8.ValidString(p):
+		return fmt.Errorf("%s %q must be UTF-8, as the graph encodes it", param, p)
 	case !path.IsAbs(p):
 		return fmt.Errorf("%s %q must be an absolute path", param, p)
 	case path.Clean(p) != p:
@@ -90,4 +95,57 @@ func ParseID(param, s string) (uint32, error) {
 		return 0, fmt.Errorf("%s %q must be from 0 to %d", param, s, MaxID)
 	}
 	return uint32(n), nil
+}
+
+// checkToolCaches checks the tool caches a layer or task with steps mounts: each path one that CheckCachePath accepts,
+// sorted, none at or beneath another; each label canonical, as "//pkg:name", and mounted once; each owner and group in
+// range; and, if any is mounted, a run() step to lend them to.
+// Loading refuses all of these first, saying where, so an error here means a graph that Vamos didn't make.
+func checkToolCaches(caches []ToolCache, steps []Step) error {
+	for i, c := range caches {
+		if err := CheckCachePath("tool cache path", c.Path); err != nil {
+			return err
+		}
+		if !canonicalLabel(c.Label) {
+			return fmt.Errorf("tool cache %q at %s isn't a canonical label, such as //tools:go-build", c.Label, c.Path)
+		}
+		if c.Owner > MaxID || c.Group > MaxID {
+			return fmt.Errorf("tool cache %s's owner and group, %d and %d, must be from 0 to %d",
+				c.Label, c.Owner, c.Group, MaxID)
+		}
+		for _, other := range caches[:i] {
+			switch {
+			case other.Label == c.Label:
+				return fmt.Errorf("tool cache %s is mounted twice, at %s and %s", c.Label, other.Path, c.Path)
+			case other.Path >= c.Path:
+				return fmt.Errorf("tool caches at %s and %s aren't sorted by path, or are at one path",
+					other.Path, c.Path)
+			case Within(c.Path, other.Path):
+				return fmt.Errorf("tool cache %s at %s is within %s at %s", c.Label, c.Path, other.Label, other.Path)
+			}
+		}
+	}
+	if len(caches) > 0 && !slices.ContainsFunc(steps, func(in Step) bool { return in.Op == OpRun }) {
+		return errors.New("it mounts tool caches but has no run() step to lend them to")
+	}
+	return nil
+}
+
+// canonicalLabel reports whether label is a target's label in canonical form, "//pkg:name", as loading makes it: a
+// clean package within the workspace, "" for its root, which may hold ":" as a directory's name can, then the name,
+// after the last ":", without "/" and not "scratch", which names the empty image, and neither holding a NUL byte.
+func canonicalLabel(label string) bool {
+	rest, ok := strings.CutPrefix(label, "//")
+	i := strings.LastIndexByte(rest, ':')
+	if !ok || i < 0 || strings.Contains(label, "\x00") || !utf8.ValidString(label) {
+		return false
+	}
+	pkg, name := rest[:i], rest[i+1:]
+	switch {
+	case name == "", name == "scratch", strings.Contains(name, "/"):
+		return false
+	case pkg == "":
+		return true
+	}
+	return path.Clean(pkg) == pkg && !path.IsAbs(pkg) && pkg != "." && pkg != ".." && !strings.HasPrefix(pkg, "../")
 }

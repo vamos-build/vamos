@@ -1453,3 +1453,37 @@ func checkTries(t *testing.T, f *fixture, outcome api.Outcome, want []string) {
 		t.Errorf("no attempt stored the tries %q", want)
 	}
 }
+
+// TestAssignmentsGiveToolCachesEmpty checks that every task and layer a coordinator assigns to a worker asks for empty
+// tool caches, as a worker gives them whatever it is asked, and carries the client's workspace name, which keys
+// history; a pull's resolve mounts no cache, and carries neither.
+func TestAssignmentsGiveToolCachesEmpty(t *testing.T) {
+	f := newFixture(t, Config{})
+	var mu sync.Mutex
+	var requests []sched.Request
+	startWorker(t, f, amd64, 1, fakeRun(f, func(a *remote.Assignment, _ func() bool) error {
+		mu.Lock()
+		defer mu.Unlock()
+		requests = append(requests, *a.Request)
+		return nil
+	}))
+	req := testGraph(t, f, "named")
+	req.Workspace = "com.acme.shop"
+	if outcome, _ := runJob(t, f.c, req); outcome.Failure != nil {
+		t.Fatalf("outcome = %+v", outcome.Failure)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(requests) == 0 {
+		t.Fatal("no action was assigned")
+	}
+	for _, r := range requests {
+		if r.Action.Kind == sched.KindResolve {
+			continue
+		}
+		if !r.NoToolCaches || r.Workspace != "com.acme.shop" {
+			t.Errorf("an assigned %s action asks for no tool caches %v in workspace %q; want true in com.acme.shop",
+				r.Action.Kind, r.NoToolCaches, r.Workspace)
+		}
+	}
+}

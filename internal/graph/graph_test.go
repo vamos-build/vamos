@@ -54,6 +54,10 @@ func testGraph(t *testing.T) *Graph {
 					},
 				},
 				Output: &Output{Source: "/out", Selection: testSelection(t, []string{"."}, nil, nil)},
+				ToolCaches: []ToolCache{
+					{Path: "/cache/go-build", Label: "//tools:go-build", Owner: 1000, Group: 1000},
+					{Path: "/root/go/pkg/mod", Label: "//:go-mod"},
+				},
 			}},
 			{Label: "app", Desc: `layer "app"`, Layer: &Layer{
 				Base:     1,
@@ -251,6 +255,97 @@ func TestGraphValidate(t *testing.T) {
 			name:   "a root twice",
 			change: func(g *Graph) { g.Roots = []Ref{4, 4} },
 			want:   "invalid build graph: node 4 is a root twice",
+		},
+		{
+			name:   "a tool cache at a relative path",
+			change: func(g *Graph) { g.Nodes[2].Task.ToolCaches[0].Path = "cache" },
+			want:   `node 2 (task "build"): tool cache path "cache" must be an absolute path`,
+		},
+		{
+			name:   "a tool cache at /",
+			change: func(g *Graph) { g.Nodes[2].Task.ToolCaches[0].Path = "/" },
+			want:   `tool cache path "/" must not be the root directory`,
+		},
+		{
+			name:   "a tool cache with a NUL byte",
+			change: func(g *Graph) { g.Nodes[2].Task.ToolCaches[0].Path = "/cache\x00" },
+			want:   "must not contain a NUL byte",
+		},
+		{
+			name:   "a tool cache that contains a file buildah binds",
+			change: func(g *Graph) { g.Nodes[2].Task.ToolCaches[0].Path = "/etc" },
+			want:   `tool cache path "/etc" contains /etc/hosts`,
+		},
+		{
+			name:   "two tool caches at one path",
+			change: func(g *Graph) { g.Nodes[2].Task.ToolCaches[1].Path = "/cache/go-build" },
+			want:   "tool caches at /cache/go-build and /cache/go-build aren't sorted by path, or are at one path",
+		},
+		{
+			name:   "tool caches out of order",
+			change: func(g *Graph) { g.Nodes[2].Task.ToolCaches[1].Path = "/a" },
+			want:   "tool caches at /cache/go-build and /a aren't sorted by path",
+		},
+		{
+			name:   "one tool cache at two paths",
+			change: func(g *Graph) { g.Nodes[2].Task.ToolCaches[1].Label = "//tools:go-build" },
+			want:   "tool cache //tools:go-build is mounted twice, at /cache/go-build and /root/go/pkg/mod",
+		},
+		{
+			name:   "nested tool caches",
+			change: func(g *Graph) { g.Nodes[2].Task.ToolCaches[1].Path = "/cache/go-build/mod" },
+			want:   "tool cache //:go-mod at /cache/go-build/mod is within //tools:go-build at /cache/go-build",
+		},
+		{
+			name:   "a tool cache without a label",
+			change: func(g *Graph) { g.Nodes[2].Task.ToolCaches[0].Label = "" },
+			want:   `tool cache "" at /cache/go-build isn't a canonical label`,
+		},
+		{
+			name:   "a tool cache whose label isn't canonical",
+			change: func(g *Graph) { g.Nodes[2].Task.ToolCaches[0].Label = "//tools/../x:go-build" },
+			want:   "isn't a canonical label",
+		},
+		{
+			name:   "a tool cache of the root package spelled with a dot",
+			change: func(g *Graph) { g.Nodes[2].Task.ToolCaches[0].Label = "//.:go-build" },
+			want:   "isn't a canonical label",
+		},
+		{
+			name:   "a tool cache whose label holds a NUL byte",
+			change: func(g *Graph) { g.Nodes[2].Task.ToolCaches[0].Label = "//tools:go\x00build" },
+			want:   "isn't a canonical label",
+		},
+		{
+			name:   "a tool cache whose label isn't UTF-8",
+			change: func(g *Graph) { g.Nodes[2].Task.ToolCaches[0].Label = "//tools:go\xc3" },
+			want:   "isn't a canonical label",
+		},
+		{
+			name:   "a tool cache whose path isn't UTF-8",
+			change: func(g *Graph) { g.Nodes[2].Task.ToolCaches[0].Path = "/cache\xc3" },
+			want:   "must be UTF-8",
+		},
+		{
+			name:   "a tool cache named scratch",
+			change: func(g *Graph) { g.Nodes[2].Task.ToolCaches[0].Label = "//tools:scratch" },
+			want:   "isn't a canonical label",
+		},
+		{
+			name:   "a tool cache of a package whose directory's name holds a colon",
+			change: func(g *Graph) { g.Nodes[2].Task.ToolCaches[0].Label = "//tools:v2:go-build" },
+		},
+		{
+			name:   "a tool cache's owner out of range",
+			change: func(g *Graph) { g.Nodes[2].Task.ToolCaches[0].Owner = MaxID + 1 },
+			want:   "tool cache //tools:go-build's owner and group, 4294967295 and 1000, must be from 0 to 4294967294",
+		},
+		{
+			name: "tool caches on a node with no run() step",
+			change: func(g *Graph) {
+				g.Nodes[3].Layer.ToolCaches = []ToolCache{{Path: "/cache", Label: "//:tool"}}
+			},
+			want: `node 3 (layer "app"): it mounts tool caches but has no run() step to lend them to`,
 		},
 		{
 			name:   "a root that names no node",

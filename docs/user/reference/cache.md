@@ -195,7 +195,7 @@ Each layer or task that runs or joins another build's attempt, rather than being
 | `forced` | It runs because `--rebuild` named it, whatever else changed. |
 | `lost` | Its action is in history but the result is gone, as after a prune, or a cached result was found but couldn't be used. This includes a task run again because another target found its cached files unusable. |
 | `new` | It has no earlier build to compare with: a first build, a new configuration, or an unnamed workspace. |
-| `own-inputs` | A step, command, output, source file, or which target supplies its base or files changed; a source's added, removed and changed files are named. |
+| `own-inputs` | A step, command, output, source file, the [tool caches](build/tool-cache.md) it mounts, where, or with which owner and group, or which target supplies its base or files changed; a source's added, removed and changed files are named. |
 | `upstream` | Only the image that its base pull's tag names moved, as after `vamos update`; both manifests are named. |
 | `dependency` | Only what a target it depends on supplies changed, as a base layer's image or an added task's files; each is named. |
 

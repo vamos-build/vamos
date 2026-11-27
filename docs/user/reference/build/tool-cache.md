@@ -82,9 +82,9 @@ so adding, moving or removing a mount reruns the target.
 **An executor may give any cache empty**, and a build must succeed either way.
 `vamos build` keeps each workspace's caches between builds on the machine it runs on.
 A coordinator's workers, and `vamos coordinator --local`, give every cache empty.
-`--no-tool-caches` gives each target that a build runs empty caches of its own,
+`--no-tool-caches` gives each attempt that a build starts empty caches of its own,
 which its steps share and which are discarded when it finishes;
-a result made with a warm cache is still reused,
+a result made with a warm cache is still reused, as is an attempt of another build already running with one,
 and `--no-tool-caches --rebuild` reruns the named targets cold.
 [`vamos prune`](../cache.md#storage-and-pruning) deletes every workspace's caches,
 though a prune of `vamos coordinator --local` leaves them.
@@ -100,14 +100,15 @@ Some tools can break the assertion:
   as `go test` does with its cached results; run `go test -count=1`, which keeps the build cache.
 - A step that changes its cache's owner or mode must leave it usable by the cache's owner,
   or later builds fail with a warm cache and pass with an empty one.
-  `vamos prune` repairs the cache, `--no-tool-caches` gets the targets a build runs past it,
+  `vamos prune` repairs the cache, `--no-tool-caches` gets the attempts a build starts past it,
+  though a target can still join another build's attempt that has the cache,
   and `--no-tool-caches --rebuild` reruns a named target cold.
 
 ## Workspaces and owners
 
 A cache belongs to its workspace: it is kept by the workspace's name and the cache's label,
-so workspaces named differently never share one, and renaming a workspace starts its caches empty
-while still reusing its results.
+so workspaces named differently never share one, and renaming a workspace mounts the caches of the new name,
+empty unless a workspace of that name used them, while still reusing its results.
 Only a named workspace can mount caches:
 a target that mounts one fails to load in a workspace whose `WORKSPACE` file gives no name,
 saying that the workspace needs one.

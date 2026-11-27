@@ -225,6 +225,8 @@ func diffActions(current, earlier *Action, facts missFacts, e cache.HistoryEntry
 		equalEntrypoints(current.Entrypoint, earlier.Entrypoint),
 		current.Source == earlier.Source,
 		equalJSON(current.Output, earlier.Output),
+		// The tool caches it mounts, where, and with which owner and group, counted as one difference.
+		slices.Equal(current.ToolCaches, earlier.ToolCaches),
 	} {
 		if !same {
 			d.own++
