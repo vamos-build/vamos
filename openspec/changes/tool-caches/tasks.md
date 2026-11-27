@@ -267,7 +267,7 @@
 
 ## 7. Integration
 
-- [ ] 7.1 Run `scripts/check` with its full tier and `VAMOS_REQUIRE_INTEGRATION=1`, on a host where buildah's chroot
+- [x] 7.1 Run `scripts/check` with its full tier and `VAMOS_REQUIRE_INTEGRATION=1`, on a host where buildah's chroot
   isolation runs, so that no buildah scenario is skipped, and `openspec validate tool-caches --strict`, and run the
   smoke checks in [smoke-checks.md](../../../.agents/kb/smoke-checks.md) that build examples, confirming that examples
   without caches build and reuse results as before apart from the one-time version rebuild.
