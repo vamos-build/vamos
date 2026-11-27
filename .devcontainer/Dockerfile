@@ -113,6 +113,9 @@ RUN PUPPETEER_SKIP_DOWNLOAD=1 npm install -g --min-release-age=14 --no-fund --no
 # Their installers append PATH lines to .bashrc or .bash_profile; restore both, and set PATH once instead,
 # for every process rather than only interactive shells.
 # Fedora's .bashrc adds ~/.local/bin and ~/bin unless PATH already starts with them, so it starts with both.
+# Then install herdr's Claude, Codex and Antigravity integrations, and skip its first-run onboarding, which would ask
+# for them. herdr installs a hook only into an existing agent config directory, which Antigravity creates only on first
+# run. Panes start bash, since herdr falls back from an unset $SHELL to /bin/sh.
 ENV PATH=/root/.local/bin:/root/bin:$PATH
 RUN cp /root/.bashrc /root/.bash_profile /tmp/ \
  && curl -LfsS https://antigravity.google/cli/install.sh | bash \
@@ -120,7 +123,12 @@ RUN cp /root/.bashrc /root/.bash_profile /tmp/ \
  && curl -LfsS https://chatgpt.com/codex/install.sh | bash \
  && curl -LfsS https://herdr.dev/install.sh | bash \
  && curl -fsSL https://cli.dosu.dev/install | sh \
- && mv /tmp/.bashrc /tmp/.bash_profile /root/
+ && mv /tmp/.bashrc /tmp/.bash_profile /root/ \
+ && mkdir -p /root/.claude /root/.codex /root/.gemini/config /root/.config/herdr \
+ && herdr integration install claude \
+ && herdr integration install codex \
+ && herdr integration install antigravity-cli \
+ && printf '%s\n' 'onboarding = false' '' '[terminal]' 'default_shell = "/bin/bash"' > /root/.config/herdr/config.toml
 
 # Run build steps with chroot isolation, so no OCI runtime is needed.
 ENV BUILDAH_ISOLATION=chroot
