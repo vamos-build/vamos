@@ -138,6 +138,17 @@ The coordinator reassigns the failed work to another worker, up to `--retries` t
 Push operations and publication tagging are never retried automatically,
 because partial writes may have already occurred.
 
+### Tool caches on workers
+
+Workers give every [tool cache](build/tool-cache.md) empty, whatever the build asks:
+each attempt mounts empty directories of its own, deleted when it ends,
+so a `BUILD` file that mounts caches builds the same on a coordinator as locally, only without the speedup.
+A worker that crashed deletes what its attempts left when it starts again.
+The worker renews an attempt's lease while its runner deletes its caches;
+but after a subprocess crashes, or the worker stops it with a report still to send,
+deleting large caches it left can delay that report past the lease,
+and the coordinator then counts the attempt as lost, retrying it while `--retries` allows and failing it otherwise.
+
 ### Coordinator state and restarts
 
 The coordinator stores build cache data and job state in `--cache-dir`.

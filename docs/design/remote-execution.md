@@ -212,6 +212,29 @@ Execution timing enforces strict ordering:
   an estimate refined between two batches would move later steps by more than the gap between steps,
   and could place a step before the one it followed.
 
+### Tool caches on workers
+
+A worker keeps no [tool cache](storage.md#tool-caches) between attempts: its runner keeps no cache root, so every
+attempt mounts empty directories of its own, made in a `tool-caches/` directory of its buildah container's directory,
+on the store's volume, and records each cache as given empty in its result's provenance.
+The coordinator asks for them empty in every task and layer it assigns, as `sched.Request.NoToolCaches`, so that what
+a worker is told matches what it does; a BUILD file that mounts caches builds the same on a coordinator, only slower.
+The runner deletes an attempt's caches itself before it removes the container, while the lease is still renewed,
+since `DeleteContainer` holds the store's locks throughout and would stall the worker's other attempts.
+What a killed or crashed attempt leaves goes with its container: `run.RemoveAttempt`, which the worker calls after
+every attempt and, on starting, for each one a crash left, deletes the container directory's `tool-caches/` first,
+outside the store's locks, then removes the container, whose own removal tries the delete again if that failed, and returns the
+failure, wrapped to say it was the caches. It takes a container whose layer is gone as already unmounted, so that a
+removal that failed partway, as one racing a process that a failed kill left writing can, is finished by the next.
+
+Deleting a large temporary cache that a subprocess left, once it crashed or the worker stopped it with a report
+still to send, as for output it couldn't read, can outlast the lease.
+The coordinator then counts the attempt lost rather than taking its report, retries it while its retry budget allows,
+and otherwise fails it as lost rather than with the subprocess's own failure.
+That is accepted: it needs large temporary caches left behind with a report still to send, which the runner avoids by
+deleting them itself as its attempt ends, so that only a subprocess that ended abnormally, or failed to delete them,
+leaves them.
+
 ### Leases and monotonic fencing
 
 The coordinator grants execution leases that expire if heartbeats cease.

@@ -202,7 +202,7 @@
 
 ## 4. Remote executors
 
-- [ ] 4.1 Make a worker's runner mount a fresh empty directory for each cache, whatever the request says, and record
+- [x] 4.1 Make a worker's runner mount a fresh empty directory for each cache, whatever the request says, and record
   every cache as given empty, using the temporary directories of task 3.1, which the worker's existing removal of an
   attempt's container deletes; make `removeAttempt` delete the container directory's `tool-caches/` before removing the
   container, outside the store's locks, and take `storage.ErrLayerUnknown` from unmounting as already unmounted, on both

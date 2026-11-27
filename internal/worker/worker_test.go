@@ -291,7 +291,7 @@ func TestWorkerKillsOnCancel(t *testing.T) {
 		{Label: "app", Desc: `layer "app"`, Layer: &graph.Layer{Base: 0, Platform: platform, Steps: []graph.Step{
 			{Op: graph.OpRun, Display: `run(["sh", "-c", "..."])`, Argv: []string{"sh", "-c",
 				"setsid sleep 300 & sleep 300"}},
-		}}},
+		}, ToolCaches: []graph.ToolCache{{Path: "/cache", Label: "//:tool"}}}}, // whose empty directory goes too
 	}}
 	testenv.Must(t, g.Validate())
 	stored, err := f.m.PutBytes(ctx, graph.Encode(g))
@@ -911,4 +911,42 @@ func TestWorkerReportsNothingOfAFencedChildWithoutAReport(t *testing.T) {
 func (c *containment) running(id string) bool {
 	procs, err := os.ReadFile(filepath.Join(c.path(id), "cgroup.procs"))
 	return err == nil && strings.TrimSpace(string(procs)) != ""
+}
+
+// TestWorkerRemovesACrashedAttemptsToolCaches checks that a worker that starts to find the container of an attempt
+// that a crashed run left removes it, and the temporary tool caches in its directory with it.
+func TestWorkerRemovesACrashedAttemptsToolCaches(t *testing.T) {
+	f := newFixture(t)
+	stores := testenv.PrivateStores(t)
+	var caches string
+	testenv.Must(t, stores.WithStore(func(store storage.Store) error {
+		container, err := store.CreateContainer("", []string{attemptPrefix + "crashed"}, "", "", "", nil)
+		if err != nil {
+			return err
+		}
+		dir, err := store.ContainerDirectory(container.ID)
+		if err != nil {
+			return err
+		}
+		caches = filepath.Join(dir, "tool-caches")
+		if err := os.MkdirAll(filepath.Join(caches, "0"), 0o755); err != nil {
+			return err
+		}
+		return os.WriteFile(filepath.Join(caches, "0", "written"), []byte("left"), 0o644)
+	}))
+	startWorker(t, f, func(cfg *Config) {
+		cfg.Store, cfg.Child = stores.Options, TestChild(stores.Options)
+	})
+	for start := time.Now(); ; time.Sleep(50 * time.Millisecond) {
+		leftover, err := run.LeftoverAttempts(stores.Options)
+		testenv.Must(t, err)
+		_, serr := os.Stat(caches)
+		if !slices.Contains(leftover, "crashed") && errors.Is(serr, os.ErrNotExist) {
+			break
+		}
+		if time.Since(start) > time.Minute {
+			t.Fatalf("a minute after the worker started, the crashed attempt's container %v and caches %v remain",
+				leftover, serr)
+		}
+	}
 }

@@ -2,6 +2,8 @@ package run
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -22,6 +24,7 @@ import (
 	"go.podman.io/buildah/define"
 	"go.podman.io/buildah/pkg/parse"
 	"go.podman.io/storage"
+	"go.podman.io/storage/pkg/system"
 )
 
 // TestResolveIn checks that a path is resolved in a root filesystem as the container would follow it, never leaving
@@ -680,6 +683,163 @@ func TestTempToolCachesRemoved(t *testing.T) {
 	dir, err := st.caches.tempToolCache(st.runner.store, st.builder.ContainerID, 0, m)
 	testenv.Must(t, err)
 	testenv.Must(t, os.WriteFile(filepath.Join(dir, "written"), nil, 0o644))
+	temp := st.caches.temp
+	testenv.Must(t, st.delete())
+	if _, err := os.Stat(temp); !os.IsNotExist(err) {
+		t.Errorf("the attempt's temporary caches at %s are still there: %v", temp, err)
+	}
+}
+
+// attemptTarget returns a target of the attempt id being built from scratch, its container named for the attempt and
+// mounted, as a worker's runner makes it, with an empty tool cache of its own holding a file.
+func attemptTarget(t *testing.T, id string) (*targetState, storage.Store) {
+	t.Helper()
+	testenv.RequireBuildah(t)
+	store, err := storage.GetStore(testenv.PrivateStores(t).Options)
+	testenv.Must(t, err)
+	t.Cleanup(func() { _, _ = store.Shutdown(true) })
+	sys, err := SystemContext()
+	testenv.Must(t, err)
+	options := builderOptions("scratch", nil, sys)
+	options.Container = attemptPrefix + id
+	b, err := buildah.NewBuilder(t.Context(), store, options)
+	testenv.Must(t, err)
+	st := &targetState{runner: &localRunner{store: store, isolation: define.IsolationChroot}, builder: b}
+	if st.mountPoint, err = b.Mount(""); err != nil {
+		t.Fatal(err)
+	}
+	st.caches = &toolCaches{}
+	m := &toolCacheMount{Path: "/cache", Label: "//:tool", hostUID: uint32(os.Getuid()), hostGID: uint32(os.Getgid())}
+	dir, err := st.caches.tempToolCache(store, b.ContainerID, 0, m)
+	testenv.Must(t, err)
+	testenv.Must(t, os.WriteFile(filepath.Join(dir, "written"), nil, 0o644))
+	return st, store
+}
+
+// TestRemoveAttemptRemovesItsToolCaches checks that removing a killed attempt's container deletes its temporary
+// tool caches too.
+func TestRemoveAttemptRemovesItsToolCaches(t *testing.T) {
+	st, store := attemptTarget(t, "killed")
+	temp := st.caches.temp
+	testenv.Must(t, removeAttempt(store, "killed"))
+	if _, err := os.Stat(temp); !os.IsNotExist(err) {
+		t.Errorf("the attempt's temporary caches at %s are still there: %v", temp, err)
+	}
+	if _, err := store.Container(attemptPrefix + "killed"); !errors.Is(err, storage.ErrContainerUnknown) {
+		t.Errorf("the attempt's container is still there: %v", err)
+	}
+}
+
+// TestRemoveAttemptWhoseToolCachesWontGo checks that a failure to delete an attempt's temporary tool caches still
+// removes its container, which deletes what is left, and is returned, saying it was the caches.
+func TestRemoveAttemptWhoseToolCachesWontGo(t *testing.T) {
+	st, store := attemptTarget(t, "stuck")
+	held := errors.New("a process holds them")
+	removeAll = func(p string) error {
+		// The caches go first, while the container is still there.
+		if p != st.caches.temp {
+			t.Errorf("the attempt's caches were removed at %s; want %s", p, st.caches.temp)
+		}
+		if _, err := store.Container(attemptPrefix + "stuck"); err != nil {
+			t.Errorf("the attempt's container was gone before its caches: %v", err)
+		}
+		return held
+	}
+	t.Cleanup(func() { removeAll = system.EnsureRemoveAll })
+	err := removeAttempt(store, "stuck")
+	want := "removing the attempt's temporary tool caches: a process holds them"
+	if err == nil || !strings.Contains(err.Error(), want) || !errors.Is(err, held) {
+		t.Errorf("removeAttempt = %v; want the caches' failure", err)
+	}
+	if _, err := store.Container(attemptPrefix + "stuck"); !errors.Is(err, storage.ErrContainerUnknown) {
+		t.Errorf("the attempt's container is still there: %v", err)
+	}
+}
+
+// TestRemoveAttemptFinishesAPartialRemoval checks that a removal that failed once the container's layer and buildah's
+// state were gone, as one racing a process that a failed kill left writing can, is finished by the next: the layer
+// store no longer knows the layer, as DeleteContainer leaves it once it deleted it first, whether or not buildah's
+// state is gone too.
+func TestRemoveAttemptFinishesAPartialRemoval(t *testing.T) {
+	for _, keepState := range []bool{false, true} {
+		t.Run(fmt.Sprintf("buildah's state kept: %v", keepState), func(t *testing.T) {
+			removePartial(t, keepState)
+		})
+	}
+}
+
+// removePartial checks that a removal left with the container's layer gone, and buildah's state too unless keepState,
+// is finished, through buildah's builder if its state is there, or the store's container otherwise.
+func removePartial(t *testing.T, keepState bool) {
+	st, store := attemptTarget(t, "partial")
+	testenv.Must(t, st.builder.Unmount())
+	container, err := store.Container(attemptPrefix + "partial")
+	testenv.Must(t, err)
+	dir, err := store.ContainerDirectory(container.ID)
+	testenv.Must(t, err)
+	if !keepState {
+		testenv.Must(t, os.Remove(filepath.Join(dir, "buildah.json")))
+	}
+	options := storage.StoreOptions{GraphRoot: store.GraphRoot(), RunRoot: store.RunRoot(),
+		GraphDriverName: store.GraphDriverName(), GraphDriverOptions: store.GraphOptions()}
+	_, err = store.Shutdown(true)
+	testenv.Must(t, err)
+	// A container's layer is recorded in volatile-layers.json, or else layers.json.
+	var layers string
+	var data []byte
+	for _, name := range []string{"volatile-layers.json", "layers.json"} {
+		p := filepath.Join(options.GraphRoot, options.GraphDriverName+"-layers", name)
+		if d, err := os.ReadFile(p); err == nil && strings.Contains(string(d), container.LayerID) {
+			layers, data = p, d
+			break
+		}
+	}
+	if layers == "" {
+		t.Fatal("no record of the container's layer found")
+	}
+	var records []map[string]any
+	testenv.Must(t, json.Unmarshal(data, &records))
+	records = slices.DeleteFunc(records, func(r map[string]any) bool { return r["id"] == container.LayerID })
+	data, err = json.Marshal(records)
+	testenv.Must(t, err)
+	testenv.Must(t, os.WriteFile(layers, data, 0o600))
+	reopened, err := storage.GetStore(options)
+	testenv.Must(t, err)
+	t.Cleanup(func() { _, _ = reopened.Shutdown(true) })
+	testenv.Must(t, removeAttempt(reopened, "partial"))
+	if _, err := reopened.Container(attemptPrefix + "partial"); !errors.Is(err, storage.ErrContainerUnknown) {
+		t.Errorf("the attempt's container is still there: %v", err)
+	}
+}
+
+// TestRemoveAttemptReportsEveryFailure checks that a failure to delete an attempt's temporary tool caches is returned
+// with a failure to remove its container, each as it was.
+func TestRemoveAttemptReportsEveryFailure(t *testing.T) {
+	st, store := attemptTarget(t, "twice")
+	held := errors.New("a process holds them")
+	removeAll = func(string) error { return held }
+	t.Cleanup(func() { removeAll = system.EnsureRemoveAll })
+	// A file buildah's state can't be read from fails opening the container's builder.
+	dir, err := store.ContainerDirectory(st.builder.ContainerID)
+	testenv.Must(t, err)
+	testenv.Must(t, os.WriteFile(filepath.Join(dir, "buildah.json"), []byte("not JSON"), 0o600))
+	err = removeAttempt(store, "twice")
+	if err == nil || !errors.Is(err, held) || !strings.Contains(err.Error(), "opening the attempt's container") {
+		t.Errorf("removeAttempt = %v; want both the caches' failure and the container's", err)
+	}
+}
+
+// TestTempToolCachesRemovedReadOnly checks that an attempt's own caches go even when a tool left directories in them
+// read-only, as Go's module cache does: container storage runs as root, which deletes them regardless.
+func TestTempToolCachesRemovedReadOnly(t *testing.T) {
+	st := cacheTarget(t)
+	m := &toolCacheMount{Path: "/cache", Label: "//:tool", hostUID: uint32(os.Getuid()), hostGID: uint32(os.Getgid())}
+	dir, err := st.caches.tempToolCache(st.runner.store, st.builder.ContainerID, 0, m)
+	testenv.Must(t, err)
+	testenv.Must(t, os.MkdirAll(filepath.Join(dir, "mod", "pkg"), 0o755))
+	testenv.Must(t, os.WriteFile(filepath.Join(dir, "mod", "pkg", "go.mod"), nil, 0o444))
+	testenv.Must(t, os.Chmod(filepath.Join(dir, "mod", "pkg"), 0o555))
+	testenv.Must(t, os.Chmod(filepath.Join(dir, "mod"), 0o555))
 	temp := st.caches.temp
 	testenv.Must(t, st.delete())
 	if _, err := os.Stat(temp); !os.IsNotExist(err) {

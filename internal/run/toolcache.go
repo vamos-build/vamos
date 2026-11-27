@@ -306,7 +306,7 @@ func (tc *toolCaches) remove() error {
 	if tc == nil || tc.temp == "" {
 		return nil
 	}
-	if err := os.RemoveAll(tc.temp); err != nil {
+	if err := removeAll(tc.temp); err != nil {
 		return fmt.Errorf("removing its temporary tool caches: %w", err)
 	}
 	tc.temp = ""

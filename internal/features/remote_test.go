@@ -362,3 +362,26 @@ func TestRemote_CoordinatorThatCantBeUsedFails(t *testing.T) {
 		w.ThenTheCoordinatorWasSentNothing()
 	})
 }
+
+// TestRemote_AWorkerGivesEveryToolCacheEmpty specifies that a coordinator's workers give every tool cache empty, so
+// that a BUILD file that mounts caches builds the same on a coordinator, only slower.
+func TestRemote_AWorkerGivesEveryToolCacheEmpty(t *testing.T) {
+	parallelRule(t)
+	t.Run("A remote build gives every cache empty", func(t *testing.T) {
+		w := newBuildingWorld(t)
+		w.GivenARegistry()
+		w.GivenACoordinatorWithAWorker()
+		w.GivenTheProjectHolds(files{"WORKSPACE": `workspace(name = "com.acme.shop")`})
+		w.GivenAProjectThatPullsBusybox()
+		w.GivenTheBuildFileDeclares(theProbe(`mount("tool")`))
+		w.WhenIBuild("probe", setting("file=one"), onTheCoordinator("<coordinator>"))
+		w.ThenItSucceeds()
+		w.ThenTheTargetsWere(statuses{task("probe"): ran})
+		w.ThenTheStepsObserved(observations{"listing": ""})
+		w.WhenIBuild("probe", setting("file=two"), onTheCoordinator("<coordinator>"))
+		w.ThenItSucceeds()
+		w.ThenTheCoordinatorWasGivenTheBuild()
+		w.ThenTheTargetsWere(statuses{task("probe", `file="two"`): ran})
+		w.ThenTheStepsObserved(observations{"listing": ""})
+	})
+}
