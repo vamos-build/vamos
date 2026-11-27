@@ -93,12 +93,14 @@ RUN GOBIN=/usr/local/bin GOMODCACHE=/tmp/gomodcache GOCACHE=/tmp/gocache \
       go install golang.org/x/vuln/cmd/govulncheck@v1.9.0 \
  && rm -rf /tmp/gomodcache /tmp/gocache
 
+# markdownlint-cli2, the engine behind the davidanson.vscode-markdownlint extension, to report the same
+# Markdown problems at the command line.
 # Mermaid's CLI, mmdc, to render the diagrams in Markdown, such as docs/design's, to images for review.
 # Puppeteer drives Fedora's headless Chromium rather than downloading its own, with Chromium's sandbox off,
 # since Chromium won't start as root with it on; the wrapper gives mmdc both through a Puppeteer config.
 # min-release-age takes dependencies at least two weeks old, as the repository's npm projects do.
 RUN PUPPETEER_SKIP_DOWNLOAD=1 npm install -g --min-release-age=14 --no-fund --no-audit \
-      @mermaid-js/mermaid-cli@12.2.0 puppeteer@25.16.0 \
+      markdownlint-cli2@0.24.1 @mermaid-js/mermaid-cli@12.2.0 puppeteer@25.16.0 \
  && printf '%s\n' '{ "executablePath": "/usr/lib64/chromium-browser/headless_shell", "args": ["--no-sandbox"] }' \
       > /usr/local/etc/mmdc-puppeteer.json \
  && rm -f /usr/local/bin/mmdc \

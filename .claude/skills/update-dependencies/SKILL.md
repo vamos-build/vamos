@@ -85,6 +85,7 @@ The only file is [.devcontainer/Dockerfile](../../../.devcontainer/Dockerfile).
   `npm view @mermaid-js/mermaid-cli@<v> peerDependencies`.
   The browser is Fedora's `chromium-headless`, unpinned like the other packages; if a Fedora release moves
   `headless_shell` out of `/usr/lib64/chromium-browser/`, update the path in the Dockerfile's Puppeteer config.
+- **markdownlint-cli2**: its version in the same `npm install -g` line, newest from `npm view markdownlint-cli2 time --json`.
 - **Coding agents** (Claude, Codex, herdr, Antigravity) are installed from their `install.sh` scripts unpinned,
   and they update themselves. Nothing to edit; the rebuild refreshes them.
   Check only that each installer URL still answers: `curl -fsSI <url>`.
