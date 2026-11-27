@@ -71,7 +71,7 @@
   and so refuse a NUL byte, in one function of `graph` that
   `load` calls too, and the scenarios
   "Overriding a cache's path with its own path keeps the hit" and "Owners written differently are one owner".
-- [ ] 2.2 Add `NoToolCaches` to `api.GraphRequest`, and `Workspace` and `NoToolCaches` to `sched.Request` as metadata
+- [x] 2.2 Add `NoToolCaches` to `api.GraphRequest`, and `Workspace` and `NoToolCaches` to `sched.Request` as metadata
   outside the key, filled by the scheduler from `sched.Options.Workspace`, which already keys target history, and a new
   `Options.NoToolCaches`; have the local executor, where it sets `Workspace` in the scheduler's options, fail a job,
   when it reads the graph and before anything runs, whose graph mounts caches with a `Workspace` that breaks the
@@ -89,7 +89,7 @@
   `run()` step that reads `/proc/self/mountinfo` and finds no workspace name in it. Update the configuration reference's
   account of the workspace name to say that it chooses a workspace's tool caches, and that only a named workspace can
   mount them.
-- [ ] 2.3 Add the `--no-tool-caches` build flag in `cli`, passed into the graph request, and document it in the CLI flag
+- [x] 2.3 Add the `--no-tool-caches` build flag in `cli`, passed into the graph request, and document it in the CLI flag
   reference beside `--rebuild`, noting that combined with it the named targets rerun cold while their unchanged
   dependencies are still reused. Verify with a `cli` flag test, `vamos build --help`, and "A clean rebuild reuses a
   dependency built warm".
@@ -119,7 +119,7 @@
   under umask 077 having mode 0755, and a real non-root buildah `run()` step, with a builder whose ID mappings differ
   from the store's, writing to a persistent and to a temporary cache, seeing the rule's owner and group on it, and
   leaving the image's mount point with them once unmounted.
-- [ ] 3.2 Resolve each cache path with `securejoin` before the attempt's steps, recording each location's device and
+- [x] 3.2 Resolve each cache path with `securejoin` before the attempt's steps, recording each location's device and
   inode, failing the attempt for a location that is occupied, overlaps another cache's, is at or beneath `/dev`, `/proc`
   or `/sys` or reached through one of them, or equals, lies beneath or contains where `/etc/hosts`, `/etc/hostname`,
   `/etc/resolv.conf`, `/run/.containerenv`, `/run/secrets`, `/etc/crypto-policies/back-ends` or
@@ -164,39 +164,39 @@
   each, created or kept, the rule's owner and group, and create missing parents as the image's user, as `workdir()`
   does; verify with "A cache's mount point belongs to its owner", "A cache does not take a workdir() above it from its
   user", "A workdir() above a cache" and "An add() above a cache".
-- [ ] 3.2a Fail an attempt that mounts caches, before its steps and naming the isolation, when the executor's isolation
+- [x] 3.2a Fail an attempt that mounts caches, before its steps and naming the isolation, when the executor's isolation
   is not chroot, taking the isolation from an executor option that defaults to buildah's own resolution, as the runner
   uses it today, so that a build that mounts no cache keeps its isolation, and that also sets the steps'
   `RunOptions.Isolation`, so that the check and the run agree and a parallel scenario can set it without `t.Setenv`;
   verify with "A cache under OCI isolation" and a `run` test that an attempt that mounts no cache under OCI is given
   `RunOptions.Isolation` OCI, and that with the option unset it is given buildah's own resolution, checking the chosen
   options rather than running a step.
-- [ ] 3.2b Fail the attempt, before the steps, before each `run()` step and after the last, when the resolution of a
+- [x] 3.2b Fail the attempt, before the steps, before each `run()` step and after the last, when the resolution of a
   cache path, the working directory, a secret's file, a bound file or a declared volume passes through a cache's
   location, its own included, before its end. Verify with "A cache path reached through another cache" and "A step that
   re-links a cache path through another cache", and `run` unit tests of a cache path linked through its own cache, of
   `/etc/hostname` linked through a cache to a file outside it, of a last `run()` step that makes such a link, which the
   check after the steps catches, and of a `workdir("/alias/sub")` with `/alias` linked through a cache to a directory
   outside it failing before the next `run()` step.
-- [ ] 3.3 Bind-mount each cache read-write for every `run()` step, as a `bind` `specs.Mount` in `RunOptions.Mounts`
+- [x] 3.3 Bind-mount each cache read-write for every `run()` step, as a `bind` `specs.Mount` in `RunOptions.Mounts`
   rather than in `RunOptions.RunMounts`, which buildah turns into a discarded overlay, at the mount points task 3.2
   creates; give `add()` steps no mount. Verify with the scenarios "A later build sees what an earlier one left", "A
   mount overrides the cache's path", "A step is given no variable for its cache" and "A layer's image keeps no cache
   contents", with the same layer then built again with `--rebuild` on a warm cache, which its step sees a marker in, and
   running, and holding the same files.
-- [ ] 3.4 Verify the key rules end to end with "A changed cache does not cost a hit", "Moving a mount reruns the target"
+- [x] 3.4 Verify the key rules end to end with "A changed cache does not cost a hit", "Moving a mount reruns the target"
   and "Renaming the workspace reuses results", and the workspace scoping with "Two workspaces with the same label keep
   separate caches" and "Two packages share one cache".
-- [ ] 3.5 Verify the clean build with "A clean build gives every cache empty", "A clean build gives each target its own
+- [x] 3.5 Verify the clean build with "A clean build gives every cache empty", "A clean build gives each target its own
   empty cache", "A clean build keeps the cache for later builds" and "An attempt's steps share an empty cache", and the
   owner with "A non-root step writes to its cache", "A non-root step writes to an empty cache", "Changing a cache's
   owner gives it empty" and "Changing a cache's owner back finds what it held".
-- [ ] 3.6 Record `ToolCaches []ToolCacheUse{Label, Empty}` in `cache.Provenance` from the attempt, with `Empty` true
+- [x] 3.6 Record `ToolCaches []ToolCacheUse{Label, Empty}` in `cache.Provenance` from the attempt, with `Empty` true
   only for an attempt's own temporary directory, as under `--no-tool-caches`, on a worker and in coordinator mode.
   Verify with "A clean build's provenance", a `run` test of coordinator mode's provenance, that provenance stays outside
   the key in the existing key tests, and `sched` tests of a clean job joining a warm job's attempt and a warm job
   joining a clean one, each reusing the result and its provenance.
-- [ ] 3.7 Describe tool caches in [storage.md](../../../docs/design/storage.md) as storage beside the three stores,
+- [x] 3.7 Describe tool caches in [storage.md](../../../docs/design/storage.md) as storage beside the three stores,
   with their trust model, layout, lock and lifetime, and in [run's doc.go](../../../internal/run/doc.go); verify the
   diagrams render and `scripts/check`'s doc checks pass.
 

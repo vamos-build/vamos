@@ -472,7 +472,8 @@ killed standalone prune left, and the count all belong to a standalone executor'
   the guarantee that a cache's contents stay out of the image covers writes that reach the mount.
 - [On a FIPS host, an image whose `/usr/share/crypto-policies/back-ends/FIPS` links to where a cache's mount point
   will be] → Buildah resolves that probe through the image's symlinks, so creating the mount point makes it add its
-  FIPS binds, which the runner then checks as it checks any bind. The reference names this.
+  FIPS binds, whose destinations the runner checks as it checks any bind, though not their sources; the reference
+  says to keep such links away from a cache's path.
 - [Caches grow without bound] → `vamos prune` clears them; size limits are a later change.
 - [A tool that can't share its cache between concurrent attempts] → Shared is the only mode for now; `locked` can
   be added as a `tool_cache` rule argument without changing what is already written.

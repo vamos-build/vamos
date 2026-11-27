@@ -12,6 +12,8 @@ import (
 	"github.com/vamos-build/vamos/internal/api"
 	"github.com/vamos-build/vamos/internal/remote"
 	"github.com/vamos-build/vamos/internal/run"
+
+	"go.podman.io/buildah/define"
 )
 
 // TestCommandsRefuseAToolCache checks that every command that takes a target refuses a tool cache's label, saying
@@ -73,7 +75,7 @@ task(name = "app", base = "scratch", tool_caches = [mount("tool")], steps = [run
 // TestLocalCoordinatorGivesCachesEmpty checks that vamos coordinator --local serves a local executor in coordinator
 // mode, which gives every attempt empty tool caches, since its clients' workspaces are their own.
 func TestLocalCoordinatorGivesCachesEmpty(t *testing.T) {
-	local, err := newLocalCoordinator(stores(t).Options)
+	local, err := newLocalCoordinator(stores(t).Options, nil)
 	must(t, err)
 	defer local.Close()
 	if !local.ServesAsCoordinator() {
@@ -100,7 +102,7 @@ func (r *refusingExecutor) Submit(_ context.Context, req api.Request) (api.JobID
 // TestNoToolCachesFlag checks that vamos build --no-tool-caches asks the executor for empty tool caches in its graph
 // request, with the workspace's name, and that a build without it doesn't.
 func TestNoToolCachesFlag(t *testing.T) {
-	local, err := newLocalCoordinator(stores(t).Options)
+	local, err := newLocalCoordinator(stores(t).Options, nil)
 	must(t, err)
 	defer local.Close()
 	content, err := local.ContentStore()
@@ -129,5 +131,18 @@ task(name = "app", base = "scratch", tool_caches = [mount("tool")], steps = [run
 			t.Errorf("request %d asks for no tool caches %v in workspace %q; want %v in com.acme.shop",
 				i, got.NoToolCaches, got.Workspace, want)
 		}
+	}
+}
+
+// TestLocalCoordinatorIsolation checks that vamos coordinator --local runs steps with the isolation Config gives.
+func TestLocalCoordinatorIsolation(t *testing.T) {
+	oci := define.IsolationOCI
+	local, err := newLocalCoordinator(stores(t).Options, &oci)
+	must(t, err)
+	defer local.Close()
+	caps, err := local.Capabilities(t.Context())
+	must(t, err)
+	if caps.Isolation != "oci" {
+		t.Errorf("vamos coordinator --local's executor runs steps with %s isolation; want oci", caps.Isolation)
 	}
 }

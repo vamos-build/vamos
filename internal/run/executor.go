@@ -7,9 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime/debug"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/vamos-build/vamos/internal/api"
@@ -22,6 +24,7 @@ import (
 	"github.com/containerd/platforms"
 	"github.com/opencontainers/go-digest"
 	imgspecv1 "github.com/opencontainers/image-spec/specs-go/v1"
+	"go.podman.io/buildah/define"
 	"go.podman.io/buildah/pkg/parse"
 	containersconfig "go.podman.io/common/pkg/config"
 	imagecopy "go.podman.io/image/v5/copy"
@@ -56,6 +59,9 @@ type Local struct {
 	// coordinator says that it serves vamos coordinator --local, whose clients each have a workspace of their own:
 	// it gives every attempt empty tool caches, never a workspace's, and so checks no request's workspace name.
 	coordinator bool
+	// isolation, if set, is how run() steps run, rather than as buildah's environment says; see UseIsolation.
+	// It is apart from mu, which open holds while the store opens, so that Capabilities never waits for that.
+	isolation atomic.Pointer[define.Isolation]
 }
 
 // NewLocal returns a local executor on the container store that options describe, such as DefaultStoreOptions
@@ -118,6 +124,27 @@ func (l *Local) ServesAsCoordinator() bool {
 	return l.coordinator
 }
 
+// stepIsolation returns how run() steps run: as UseIsolation set, or else as buildah's environment says.
+func (l *Local) stepIsolation() (define.Isolation, error) {
+	return resolveIsolation(l.isolation.Load())
+}
+
+// resolveIsolation returns how run() steps run: as given, if set, or else as buildah's environment says, as it does
+// for define.IsolationDefault, which buildah takes as asking it.
+func resolveIsolation(given *define.Isolation) (define.Isolation, error) {
+	if given != nil && *given != define.IsolationDefault {
+		return *given, nil
+	}
+	return parse.IsolationOption("")
+}
+
+// UseIsolation makes run() steps run with isolation, rather than as buildah's environment says, as BUILDAH_ISOLATION
+// would, so that a test can choose it without setting the process's environment.
+// It is for before any job is submitted.
+func (l *Local) UseIsolation(isolation define.Isolation) {
+	l.isolation.Store(&isolation)
+}
+
 // LimitAttemptTraces makes each attempt's stored trace fit in limit bytes, rather than tracing.MaxTraceSize,
 // so that tests can see a trace cut short without recording megabytes of spans.
 // It is for tests, before any job is submitted.
@@ -171,7 +198,7 @@ func (l *Local) open() error {
 	if err != nil {
 		return err
 	}
-	isolation, err := parse.IsolationOption("")
+	isolation, err := l.stepIsolation()
 	if err != nil {
 		return err
 	}
@@ -185,6 +212,11 @@ func (l *Local) open() error {
 		systemContext: l.systemContext,
 		capabilities:  capabilities,
 		isolation:     isolation,
+	}
+	// A standalone executor keeps the workspaces' tool caches in the build cache, under its lock; a local coordinator
+	// keeps none.
+	if !l.coordinator {
+		l.runner.toolCacheRoot = filepath.Join(cacheDir(l.storeOptions), toolCachesDir)
 	}
 	l.sharing = sched.NewSharing(l.runner, l.directory, l.directory)
 	l.sharing.LimitTraces(l.traceLimit)
@@ -242,7 +274,7 @@ var graphVersions = []int{graph.Version}
 // Capabilities reports the host's platform, the one execution platform it offers, the graph versions this version
 // of Vamos runs, how commands are isolated, and the time.
 func (l *Local) Capabilities(context.Context) (api.Capabilities, error) {
-	isolation, err := parse.IsolationOption("")
+	isolation, err := l.stepIsolation()
 	if err != nil {
 		return api.Capabilities{}, err
 	}

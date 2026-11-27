@@ -2,12 +2,15 @@ package run
 
 import (
 	"encoding/json"
+	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/vamos-build/vamos/internal/api"
+	"github.com/vamos-build/vamos/internal/cache"
 	"github.com/vamos-build/vamos/internal/graph"
 	"github.com/vamos-build/vamos/internal/remote"
 	"github.com/vamos-build/vamos/internal/sched"
@@ -168,4 +171,86 @@ func TestWorkspaceNameAccepted(t *testing.T) {
 			}
 		})
 	}
+}
+
+// outputOf runs req on l to its end and returns what its steps printed, failing the test if the job failed.
+func outputOf(t *testing.T, l *Local, req api.GraphRequest) string {
+	t.Helper()
+	ctx := t.Context()
+	id, err := l.Submit(ctx, api.Request{Graph: &req})
+	testenv.Must(t, err)
+	var out strings.Builder
+	testenv.Must(t, l.Watch(ctx, id, 0, func(e api.Event) error {
+		if e.Kind == api.EventOutput {
+			out.Write(e.Data)
+		}
+		return nil
+	}))
+	outcome, err := l.Result(ctx, id)
+	testenv.Must(t, err)
+	if outcome.Failure != nil {
+		t.Fatalf("the job failed: %s\n%s", outcome.Failure.Message, out.String())
+	}
+	return out.String()
+}
+
+// TestCoordinatorModeGivesCachesEmpty checks that in coordinator mode two attempts of different keys under one
+// workspace name each find their cache empty, the second seeing nothing the first wrote, with a name or without one,
+// and that their results record the caches as given empty.
+func TestCoordinatorModeGivesCachesEmpty(t *testing.T) {
+	testenv.RequireBuildah(t)
+	for _, workspace := range []string{"com.acme.shop", "", "../shop"} {
+		t.Run(fmt.Sprintf("workspace %q", workspace), func(t *testing.T) {
+			l, err := NewLocal(testenv.PrivateStores(t).Options)
+			testenv.Must(t, err)
+			defer l.Close()
+			l.ServeAsCoordinator()
+			for i := range 2 {
+				req := cacheGraph(t, l, "sh", "-c", fmt.Sprintf("echo listing=$(ls -A /cache); touch /cache/%d-%s", i,
+					testenv.NewNonce()))
+				req.Workspace = workspace
+				if out := outputOf(t, l, req); !strings.Contains(out, "listing=\n") {
+					t.Errorf("attempt %d found its cache holding something:\n%s", i, out)
+				}
+			}
+			uses := recordedToolCaches(t, l)
+			if len(uses) != 2 || !uses[0].Empty || !uses[1].Empty {
+				t.Errorf("the results record the tool caches %+v; want each of the two given empty", uses)
+			}
+		})
+	}
+}
+
+// TestMountTableNamesNoWorkspace checks that a step that mounts a workspace's cache finds no workspace name in its
+// mount table, which holds a digest of the name in the cache's directory, as it may hold any path of the executor's.
+func TestMountTableNamesNoWorkspace(t *testing.T) {
+	testenv.RequireBuildah(t)
+	l, err := NewLocal(testenv.PrivateStores(t).Options)
+	testenv.Must(t, err)
+	defer l.Close()
+	req := cacheGraph(t, l, "sh", "-c", "echo "+testenv.NewNonce()+"; echo naming=$(grep -c com.acme.shop "+
+		"/proc/self/mountinfo); echo mounted=$(grep -c ' /cache ' /proc/self/mountinfo)")
+	req.Workspace = "com.acme.shop"
+	out := outputOf(t, l, req)
+	if !strings.Contains(out, "naming=0\n") || !strings.Contains(out, "mounted=1\n") {
+		t.Errorf("the step's mount table, as it reported it:\n%s\nwant the cache mounted and no workspace named", out)
+	}
+}
+
+// recordedToolCaches returns the tool caches that the results in l's build cache record in their provenance.
+func recordedToolCaches(t *testing.T, l *Local) []cache.ToolCacheUse {
+	t.Helper()
+	paths, err := filepath.Glob(filepath.Join(cacheDir(l.storeOptions), "ac", "*"))
+	testenv.Must(t, err)
+	var uses []cache.ToolCacheUse
+	for _, p := range paths {
+		data, err := os.ReadFile(p)
+		testenv.Must(t, err)
+		var result cache.ActionResult
+		testenv.Must(t, json.Unmarshal(data, &result))
+		if result.Provenance != nil {
+			uses = append(uses, result.Provenance.ToolCaches...)
+		}
+	}
+	return uses
 }

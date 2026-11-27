@@ -51,6 +51,13 @@
 // LeftoverAttempts clean up the containers named for attempts, vamos-attempt-<id>, after a kill or a crash.
 // pull.go resolves tags, completes tag instances, maps a registry to its pull-through cache in mirror, and supplies
 // platform contexts.
+// toolcache.go lends a target's tool caches to its run() steps: openToolCaches gives each the workspace's directory
+// in the build cache, which persistentToolCache makes on first use, or, for a worker's runner, a local coordinator's or
+// a request that asks, an empty one of the attempt's own in its container's directory, which delete removes before
+// the container. resolveIn follows a cache path in the container as the container would; beforeSteps, beforeRun and
+// afterSteps hold each cache to the empty directory it resolved to, refusing what buildah mounts or binds, the
+// working directory, secrets, volumes and add() destinations overlapping or passing through one, and beforeRun bind-
+// mounts each as a specs.Mount, never a RunMounts entry, which buildah would make an overlay it discards.
 // step.go applies action steps; a run() step's secrets become buildah secret mounts, their values written to files
 // that only this process reads and removed after the step, which buildah copies outside the image's root filesystem.
 // Local.traced runs each job but a prune under sched.ForJob and stores its manifest before the outcome is returned;

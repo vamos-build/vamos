@@ -36,6 +36,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/afero"
 	"github.com/spf13/cobra"
+	"go.podman.io/buildah/define"
 	"go.podman.io/image/v5/docker/reference"
 	"go.podman.io/image/v5/pkg/sysregistriesv2"
 	"go.podman.io/image/v5/types"
@@ -60,17 +61,22 @@ type Config struct {
 	// Getenv, if set, is where a coordinator reads its telemetry's OTEL_* settings; otherwise the process's
 	// environment. Scenarios set it, so that coordinators exporting to collectors of their own run at once.
 	Getenv func(string) string
+	// Isolation, if set, is how the executors in this process, the local one and vamos coordinator --local's, run run()
+	// steps, rather than as buildah's environment says, as BUILDAH_ISOLATION would; a worker's attempts still read the
+	// environment. Scenarios set it, so that one that needs another isolation runs beside the others.
+	Isolation *define.Isolation
 }
 
 // app is the Vamos command line: what every invocation shares.
 // Each command is a method of invocation, which holds the state of one run, so that a handler can be tested
 // without constructing the root command.
 type app struct {
-	fs       afero.Fs
-	store    *storage.StoreOptions
-	registry Registry            // Config's, or nil for the upstream registry
-	cgroups  string              // Config's CgroupRoot
-	getenv   func(string) string // Config's Getenv, or nil for os.Getenv
+	fs        afero.Fs
+	store     *storage.StoreOptions
+	registry  Registry            // Config's, or nil for the upstream registry
+	cgroups   string              // Config's CgroupRoot
+	getenv    func(string) string // Config's Getenv, or nil for os.Getenv
+	isolation *define.Isolation   // Config's
 }
 
 // options are the flags of one invocation; each command reads the ones it takes.
@@ -204,7 +210,8 @@ func (inv *invocation) release(ex api.Executor) {
 
 // NewRootCommand returns the Vamos command line, with its subcommands, as cfg says.
 func NewRootCommand(cfg Config) *cobra.Command {
-	a := &app{fs: cfg.Fs, store: cfg.Store, registry: cfg.Registry, cgroups: cfg.CgroupRoot, getenv: cfg.Getenv}
+	a := &app{fs: cfg.Fs, store: cfg.Store, registry: cfg.Registry, cgroups: cfg.CgroupRoot, getenv: cfg.Getenv,
+		isolation: cfg.Isolation}
 	defaults := defaultOptions()
 	opts := &defaults
 
@@ -664,6 +671,9 @@ func (inv *invocation) executor() (executor, *types.SystemContext, error) {
 	if err != nil {
 		return nil, nil, err
 	}
+	if inv.app.isolation != nil {
+		ex.UseIsolation(*inv.app.isolation)
+	}
 	return ex, sys, nil
 }
 
@@ -714,13 +724,16 @@ func (inv *invocation) closeExecutor(ex executor) {
 
 // newLocalCoordinator returns the local executor that vamos coordinator --local serves, on the container store that
 // options describe: in coordinator mode, which gives every attempt empty tool caches, since its clients' workspaces
-// are their own.
-func newLocalCoordinator(options storage.StoreOptions) (*run.Local, error) {
+// are their own, running run() steps with isolation, if set, as Config.Isolation says.
+func newLocalCoordinator(options storage.StoreOptions, isolation *define.Isolation) (*run.Local, error) {
 	local, err := run.NewLocal(options)
 	if err != nil {
 		return nil, err
 	}
 	local.ServeAsCoordinator()
+	if isolation != nil {
+		local.UseIsolation(*isolation)
+	}
 	return local, nil
 }
 
@@ -734,7 +747,7 @@ func (inv *invocation) coordinator() error {
 		if err != nil {
 			return err
 		}
-		local, err := newLocalCoordinator(options)
+		local, err := newLocalCoordinator(options, inv.app.isolation)
 		if err != nil {
 			return err
 		}

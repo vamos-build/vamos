@@ -18,6 +18,7 @@ import (
 	"github.com/vamos-build/vamos/internal/tracing"
 
 	"github.com/containerd/platforms"
+	specs "github.com/opencontainers/runtime-spec/specs-go"
 	"go.podman.io/buildah"
 	"go.podman.io/buildah/define"
 )
@@ -32,6 +33,8 @@ type targetState struct {
 	buildEnv   map[string]string // set by build_env(), and not since by env()
 	emulated   bool              // a run() step ran under emulation, the image being for another platform
 	secrets    map[string][]byte // the values of the secrets that the target's run() steps are given, by ID
+	caches     *toolCaches       // the tool caches it mounts for its run() steps, once its builder exists
+	mounts     []specs.Mount     // the mounts of the next run() step, its tool caches', once checked
 }
 
 // lookup returns a function that gives the value of a variable as a run in the target would see it now:
@@ -122,6 +125,9 @@ func (st *targetState) apply(ctx context.Context, in sched.Step) error {
 		if err != nil {
 			return err
 		}
+		if err := st.checkInto("add() destination", dest); err != nil {
+			return err
+		}
 		span.Set("tree", in.Files.Digest.String(), "dest", dest, "owner", chown(in.Owner, in.Group))
 		span.Use(graph.TreeFlow(*in.Files))
 		return st.addSource(ctx, *in.Files, dest, chown(in.Owner, in.Group))
@@ -149,6 +155,7 @@ func (st *targetState) apply(ctx context.Context, in sched.Step) error {
 			Env:       env,
 			Stdout:    stdout,
 			Stderr:    stderr,
+			Mounts:    st.mounts,
 		}
 		if len(in.Secrets) > 0 {
 			dir, err := st.giveSecrets(in.Secrets, &options)

@@ -154,4 +154,5 @@ Tool caches need buildah's chroot isolation, which Vamos's image sets:
 a target that mounts caches under another isolation, such as `BUILDAH_ISOLATION=oci`, fails before its steps,
 while one that mounts none builds as before.
 On a FIPS host, an image whose `/usr/share/crypto-policies/back-ends/FIPS` links to where a cache's mount point will
-be makes buildah bind its FIPS files once the mount point exists, which fails the target.
+be makes buildah bind its FIPS files once the mount point exists, which changes what the target's steps see;
+keep such links away from a cache's path.

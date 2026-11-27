@@ -1,7 +1,7 @@
 # Storage and identity
 
 This document describes storage, artifact identity, and caching in Vamos: the three storage layers,
-action key generation, image naming, pin resolution, and cache pruning.
+tool caches beside them, action key generation, image naming, pin resolution, and cache pruning.
 
 ## The three storage layers
 
@@ -196,6 +196,69 @@ A miss reads the history once and adds its entry once the target succeeds;
 a hit reads only the history's head, and adds its entry when its fingerprint isn't the newest,
 or the record wasn't used for a week, so that `Used` follows reuse within a week.
 
+## Tool caches
+
+A [tool cache](../user/reference/build/tool-cache.md) is a directory that a standalone local executor keeps between
+builds and bind-mounts into the `run()` steps of the targets that mount it, such as Go's build cache.
+It is storage beside the three stores, never one of them: nothing in it is content-addressed or recorded,
+and no key, record or image names what it holds.
+
+**Trust model.** Declaring a cache is the user's assertion that what it holds changes only how long a build takes,
+never what it makes, as a `run()` that fetches a pinned URL asserts that the URL is stable.
+Vamos verifies nothing of it.
+So the key covers how a mount shapes the container, its path, the cache's label, and its owner and group,
+and never what the cache holds, whether it holds anything, where the executor keeps it or the workspace's name,
+which travel in `sched.Request` as execution metadata.
+Because a cache never changes a result, any executor may give any cache empty, and a build succeeds either way:
+a coordinator's workers, `vamos coordinator --local` and `--no-tool-caches` all do.
+
+**Layout.** Caches live in `tool-caches/` inside `cache.Directory`, beneath `run.CacheDir`:
+
+```
+tool-caches/
+  <sha256 of the workspace name>/
+    <sha256 of the canonical label>/
+      label                         the label, for diagnostics
+      <owner>-<group>-<mapping>/    the rule's numeric IDs and a digest of the builder's ID mappings, or host
+        data/                       what is mounted, owned by the rule's owner and group on the host
+```
+
+Digests keep `/` and `:` out of directory names, and the workspace's name out of the mount table a step can read.
+Each owner, group and ID mapping has a directory of its own, so no directory is ever chowned,
+and a builder that maps IDs otherwise finds an empty one rather than files it sees owned by IDs it no longer maps.
+A directory is made under a `.tmp-` name beside its place and renamed into it,
+so a rename that finds another attempt's in place lost a race, and no attempt sees one half made;
+one that a killed process left is never mounted, and stays until the next standalone prune.
+
+The following diagram shows which directory an attempt mounts at each cache path.
+
+```mermaid
+flowchart TD
+    start{"runner keeps caches?<br/>localRunner.toolCacheRoot"}
+    clean{"request asks for<br/>empty caches?<br/>sched.Request.NoToolCaches"}
+    name{"workspace name valid?<br/>graph.CheckWorkspaceName"}
+    temp["an empty directory of the attempt's own,<br/>in its container's directory,<br/>deleted as the attempt ends"]
+    keep["the workspace's cache,<br/>tool-caches/&lt;workspace&gt;/&lt;label&gt;/&lt;owner&gt;-&lt;group&gt;-&lt;mapping&gt;/data"]
+    fail["the attempt fails"]
+    start -- "no: a worker,<br/>a local coordinator" --> temp
+    start -- yes --> clean
+    clean -- yes --> temp
+    clean -- no --> name
+    name -- no --> fail
+    name -- yes --> keep
+```
+
+**Lock and lifetime.** Builds hold `cache.Directory`'s shared lock while they run,
+so a prune, which takes it exclusively, never deletes a cache that a build has mounted.
+A standalone prune renames all of `tool-caches/` aside under the exclusive lock and deletes it once it holds the lock
+shared again; a local coordinator's prune leaves it, since it holds standalone builds' caches.
+An attempt's own empty caches live in its buildah container's directory, on the store's volume,
+and the runner deletes them before it removes the container, so that their deletion holds no store lock.
+Concurrent attempts share one cache; caches grow until a prune.
+
+The runner checks each cache path where it resolves in the container, before the steps, before each `run()` step and
+after the last: see [run](../../internal/run/doc.go) and the tool cache reference's paths.
+
 ## Identities
 
 The system maintains distinct identifiers across the build lifecycle:
@@ -230,6 +293,7 @@ flowchart LR
         steps["steps, including<br/>source trees and task epochs"]
         cfg["command, entrypoint,<br/>task output selection"]
         sec["secret IDs and how<br/>each is given"]
+        tc["tool caches: path, label,<br/>owner and group"]
         ver["ActionVersion"]
     end
     subgraph outside["Outside the key"]
@@ -239,6 +303,7 @@ flowchart LR
         locs["image locations"]
         ts["--timestamp"]
         secv["secret values"]
+        tcv["what a tool cache holds,<br/>workspace name"]
     end
     inputs --> key(("action key"))
     outside -. "never" .-x key

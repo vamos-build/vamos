@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -572,5 +573,66 @@ func TestSharingNativeOverEmulated(t *testing.T) {
 			t.Errorf("%s was told it joined %v, want %v alone", tc.name, tc.j.out.starters, tc.starter)
 		}
 		tc.j.out.mu.Unlock()
+	}
+}
+
+// cacheRunner is a blockingRunner whose results record the tool cache their attempt mounted, given empty if its
+// request asked for empty caches, as a runner records what made a result.
+type cacheRunner struct {
+	*blockingRunner
+}
+
+// Run runs req as the blockingRunner does, recording its tool cache in the result's provenance.
+func (c cacheRunner) Run(ctx context.Context, req Request, ev Output) (*Report, error) {
+	rep, err := c.blockingRunner.Run(ctx, req, ev)
+	if rep != nil {
+		rep.Result.Provenance = &cache.Provenance{ToolCaches: []cache.ToolCacheUse{
+			{Label: "//:tool", Empty: req.NoToolCaches},
+		}}
+	}
+	return rep, err
+}
+
+// TestSharingAcrossCleanAndWarmJobs checks that a clean job, which asks for empty tool caches, joins a warm job's
+// attempt in flight, and a warm job a clean one's, each reusing the attempt's result and its provenance, which says
+// how the attempt that made it mounted its caches: no part of the key, nor of whether jobs share an attempt.
+func TestSharingAcrossCleanAndWarmJobs(t *testing.T) {
+	for _, firstClean := range []bool{false, true} {
+		t.Run(fmt.Sprintf("the first clean: %v", firstClean), func(t *testing.T) {
+			b := &blockingRunner{release: make(chan struct{})}
+			s, _ := testSharing(cacheRunner{b})
+			type got struct {
+				result *cache.ActionResult
+				err    error
+			}
+			results := make(chan got, 2)
+			for i, clean := range []bool{firstClean, !firstClean} {
+				req := testRequest(false)
+				req.NoToolCaches = clean
+				go func() {
+					r, err := s.attempt(t.Context(), req, &outputs{})
+					results <- got{r, err}
+				}()
+				// An attempt that fails at once says why, rather than as the wait's timeout.
+				waitFor(t, func() bool { return b.runs.Load() == 1 && attachedCount(s) == i+1 || len(results) > 0 })
+				if len(results) > 0 {
+					testenv.Must(t, (<-results).err)
+					t.Fatal("a job's attempt ended before the Runner was released")
+				}
+			}
+			close(b.release)
+			for range 2 {
+				g := <-results
+				testenv.Must(t, g.err)
+				r := g.result
+				want := []cache.ToolCacheUse{{Label: "//:tool", Empty: firstClean}}
+				if r.Epoch != 1 || r.Provenance == nil || !slices.Equal(r.Provenance.ToolCaches, want) {
+					t.Errorf("a job got %+v; want the first attempt's result, recording %+v", r, want)
+				}
+			}
+			if b.runs.Load() != 1 {
+				t.Errorf("the Runner ran %d times, want once", b.runs.Load())
+			}
+		})
 	}
 }

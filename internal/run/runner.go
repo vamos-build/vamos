@@ -63,6 +63,9 @@ type localRunner struct {
 	// pullThrough maps each upstream registry to the pull-through cache that mirrors it, by host; empty pulls
 	// from upstream directly, as the local executor does.
 	pullThrough map[string]string
+	// toolCacheRoot is where the workspaces' tool caches are kept, in the build cache, under its lock; "" keeps none,
+	// giving every attempt empty caches of its own, as a worker's runner and a local coordinator's do.
+	toolCacheRoot string
 }
 
 // builderOptions returns the options of a target's builder, from the image from.
@@ -152,6 +155,9 @@ func (r *localRunner) run(ctx context.Context, req sched.Request, ev sched.Outpu
 			if a.Output == nil {
 				return nil
 			}
+			if err := st.checkInto("source", a.Source); err != nil {
+				return err
+			}
 			_, span := tracing.Start(ctx, "collect output", "source", a.Source,
 				"include", a.Output.Include, "exclude", a.Output.Exclude)
 			output, stats, err := collectOutput(ctx, st.mountPoint, a.Source, a.Output,
@@ -217,6 +223,12 @@ func (r *localRunner) runTarget(
 	}
 
 	result := &cache.ActionResult{Epoch: req.Epoch.Unix(), Provenance: r.provenance(st.emulated)}
+	if st.caches.active() {
+		for _, m := range st.caches.mounts {
+			result.Provenance.ToolCaches = append(result.Provenance.ToolCaches,
+				cache.ToolCacheUse{Label: m.Label, Empty: m.empty})
+		}
+	}
 	// Save the log first, so that a failure saving it can't leave an image no result names.
 	if result.Log, err = log.Save(ctx, r.content); err != nil {
 		return nil, fmt.Errorf("saving to the build cache: %w", err)
@@ -387,6 +399,17 @@ func (r *localRunner) start(
 		return st, err
 	}
 	startSpan.Set("container", builder.ContainerID)
+	// Its tool caches, and where their paths lead in the image, before any step.
+	if err := r.openToolCaches(st, req); err != nil {
+		return st, err
+	}
+	var secrets []graph.Secret
+	for _, in := range a.Steps {
+		secrets = append(secrets, in.Secrets...)
+	}
+	if err := st.beforeSteps(secrets); err != nil {
+		return st, err
+	}
 	startSpan.End()
 
 	for i, in := range a.Steps {
@@ -398,8 +421,14 @@ func (r *localRunner) start(
 		if i < len(req.Displays) {
 			display = req.Displays[i]
 		}
-		if in.Op == graph.OpRun && emulated(builder) {
-			st.emulated = true
+		if in.Op == graph.OpRun {
+			if emulated(builder) {
+				st.emulated = true
+			}
+			// A failure names the step as each job's BUILD file wrote it, since jobs may share the attempt.
+			if st.mounts, err = st.beforeRun(in.Secrets); err != nil {
+				return st, &sched.StepError{Step: i, Err: fmt.Errorf("before it ran: %w", err)}
+			}
 		}
 		if err := st.tracedApply(ctx, in, display); err != nil {
 			return st, &sched.StepError{Step: i, Err: err, Hint: emulatorHint(in, builder)}
@@ -407,6 +436,9 @@ func (r *localRunner) start(
 	}
 	if err := ctx.Err(); err != nil {
 		return st, err
+	}
+	if err := st.afterSteps(); err != nil {
+		return st, fmt.Errorf("after its steps: %w", err)
 	}
 
 	if a.Kind == sched.KindLayer {
@@ -481,6 +513,10 @@ func (st *targetState) delete() error {
 		return nil
 	}
 	var errs []error
+	// Before the container, whose removal would delete them under the store's locks, holding up other attempts.
+	if err := st.caches.remove(); err != nil {
+		errs = append(errs, err)
+	}
 	if st.mountPoint != "" {
 		if err := st.builder.Unmount(); err != nil {
 			errs = append(errs, fmt.Errorf("unmounting: %w", err))

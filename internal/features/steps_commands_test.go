@@ -215,6 +215,14 @@ func rebuilding() option {
 	}}
 }
 
+// withNoToolCaches gives each attempt the build starts empty tool caches of its own, with --no-tool-caches. Build takes
+// it.
+func withNoToolCaches() option {
+	return option{"withNoToolCaches", []string{"build"}, func(_ *world, c *commandLine) {
+		c.flags = append(c.flags, "--no-tool-caches")
+	}}
+}
+
 // alongWith names targets after the one the step names. Build takes it.
 func alongWith(targets ...string) option {
 	return option{"alongWith", []string{"build"}, func(_ *world, c *commandLine) {
@@ -249,19 +257,20 @@ func withFlags(flags ...string) option {
 //
 //nolint:unused // withFlags's check, kept with it
 var namedFlags = map[string]string{
-	"--tag":           "tagged or taggedAs",
-	"-t":              "tagged",
-	"--timestamp":     "stampedAt",
-	"--set":           "setting",
-	"--secret":        "withSecrets",
-	"--platform":      "forPlatform",
-	"--exec-platform": "onTheExecPlatform",
-	"--replace":       "replacing",
-	"--rebuild":       "rebuilding",
-	"--push-from":     "fromTheClient",
-	"--tls-verify":    "withTLSVerification or withoutTLSVerification",
-	"-C":              "GivenIWorkIn",
-	"--dir":           "GivenIWorkIn",
+	"--tag":            "tagged or taggedAs",
+	"-t":               "tagged",
+	"--timestamp":      "stampedAt",
+	"--set":            "setting",
+	"--secret":         "withSecrets",
+	"--platform":       "forPlatform",
+	"--exec-platform":  "onTheExecPlatform",
+	"--replace":        "replacing",
+	"--rebuild":        "rebuilding",
+	"--no-tool-caches": "withNoToolCaches",
+	"--push-from":      "fromTheClient",
+	"--tls-verify":     "withTLSVerification or withoutTLSVerification",
+	"-C":               "GivenIWorkIn",
+	"--dir":            "GivenIWorkIn",
 }
 
 // apply applies options to the command line of command, failing the scenario if command doesn't take one.
