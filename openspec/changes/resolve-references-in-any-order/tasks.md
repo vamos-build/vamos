@@ -71,6 +71,6 @@
 
 ## 5. Integration
 
-- [ ] 5.1 Run `scripts/check`, then `scripts/check full`, and fix what they report. Run the root `BUILD`'s checks as
+- [x] 5.1 Run `scripts/check`, then `scripts/check full`, and fix what they report. Run the root `BUILD`'s checks as
   `.agents/kb/self-build.md` describes, and fix any BUILD file in the repository or its examples that changes a list
   after passing it to a rule.
