@@ -1084,6 +1084,8 @@ func (w *workspace) chooseManifest(l string, manifests []confLabel, platform img
 
 // enter records that the target l is being configured, reporting a cycle if it already is, in any configuration:
 // a target can't use itself, even in another configuration.
+// It sees only the targets being configured, so a label repeated through a target configured already goes unseen,
+// which the configured graph, having no cycle, allows.
 // The caller must call leave.
 func (cr *configurer) enter(l string) error {
 	if i := slices.Index(cr.path, l); i >= 0 {

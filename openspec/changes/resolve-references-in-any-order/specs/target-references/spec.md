@@ -3,8 +3,8 @@
 ## Purpose
 
 Says how BUILD files declare targets and when their rules are evaluated, so that a reference can name any target of
-the workspace wherever it is declared, and whether a target builds never depends on the order BUILD files run in or on
-the target a command names.
+the workspace wherever it is declared, and whether a target builds never depends on the order targets are declared in
+or BUILD files run in.
 
 ## ADDED Requirements
 
@@ -42,7 +42,7 @@ configured references it, with that configuration. Evaluating it SHALL read its 
 load the packages they name. A rule with no function of `ctx` SHALL be evaluated once, and its mistakes reported
 without the configuration.
 
-#### Scenario: The issue's workspace builds from every entry point
+#### Scenario: A workspace whose packages name each other's later targets builds from every entry point
 
 - **GIVEN** a root BUILD file pulling `base` and declaring `layer(name="app", base="//app:image")`
 - **AND** `app/BUILD` declaring `layer(name="image", base="//:base", steps=[add("//lib:files", "/app")])`
@@ -155,9 +155,10 @@ with the names it could be, in any package.
 
 ### Requirement: Targets whose references form a cycle fail as they are configured
 
-Targets whose references form a cycle SHALL fail the command configuring them with an error naming every label of the
-cycle in order, as other target errors display labels, and the file, line and column of the reference that closes it,
-whether the references are given as the BUILD file runs or by functions of `ctx`.
+Targets whose references form a cycle SHALL fail the command configuring them, naming every label of the cycle in
+order, at the declaration of the target whose reference closes it, naming that reference, such as `add: source "b"`,
+whether the references are given as the BUILD file runs or by functions of `ctx`. A label repeated only through a
+target configured already need not be found.
 
 #### Scenario: A target that is its own base
 
@@ -165,19 +166,20 @@ whether the references are given as the BUILD file runs or by functions of `ctx`
 - **WHEN** I build `app`
 - **THEN** it fails at the `layer()` call with `targets use each other in a cycle: app -> app`
 
-#### Scenario: Two packages whose targets name each other
+#### Scenario: Targets of two packages that name each other in a cycle fail
 
 - **GIVEN** a root BUILD file declaring `layer(name="app", base="//lib:base")`
 - **AND** `lib/BUILD` declaring `layer(name="base", base="//:app")`
 - **WHEN** I build `app`
-- **THEN** it fails with `targets use each other in a cycle: app -> //lib:base -> app`, at `//lib:base`'s `layer()` call
+- **THEN** it fails with `targets use each other in a cycle: app -> //lib:base -> app`, at `//lib:base`'s `layer()` call,
+  naming its `base "//:app"`
 
-#### Scenario: Three packages in a cycle
+#### Scenario: Targets of three packages that use each other in a cycle fail
 
 - **GIVEN** packages `.`, `b` and `c` whose layers `app`, `b` and `c` take as base `//b:b`, `//c:c` and `//:app`
 - **WHEN** I build `app`
-- **THEN** it fails with `targets use each other in a cycle: app -> //b:b -> //c:c -> app`, at the reference closing
-  it
+- **THEN** it fails with `targets use each other in a cycle: app -> //b:b -> //c:c -> app`, at `//c:c`'s `layer()`
+  call, naming its `base "//:app"`
 
 ### Requirement: A rule's arguments are frozen when it is called
 

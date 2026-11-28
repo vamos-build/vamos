@@ -5,7 +5,8 @@
 A reference to a target must come after that target's declaration, within a BUILD file and across packages, and a
 cross-package reference works or fails depending on which file started loading first, which depends on the target the
 command names ([issue #1](https://github.com/vamos-build/vamos/issues/1)).
-So an error can appear in a file that is not wrong on its own, a graph that builds from one target fails from another,
+So an error can appear in a file that is not wrong on its own, a graph that builds from one target fails from another
+(but for a cycle that a reused configuration hides, which the design leaves to a follow-up),
 and users wrap references in `lambda ctx:` only to make them resolve late.
 
 That workaround has a flaw of its own: a target given by a function of `ctx` reads its argument lists after the file

@@ -107,6 +107,20 @@ func TestWorkspaces_OnlyNeededTargetsLoad(t *testing.T) {
 		w.ThenItSucceeds()
 		w.ThenTheTargetsWere(statuses{task("test"): notBuilt})
 	})
+
+	t.Run("A mistake in a target is reported when it is built", func(t *testing.T) {
+		w := newWorkspaceWorld(t)
+		w.GivenThePackageDeclares(".", `layer(name="app", base="//lib:base")`)
+		w.GivenThePackageDeclares("lib", `
+			layer(name="base", base="scratch")
+			layer(name="other", base="//:missing")
+		`)
+		w.WhenIBuild("//:app")
+		w.ThenItSucceeds()
+		w.WhenIBuild("//lib:other")
+		w.ThenItFailsWith(`/project/lib/BUILD:2:6: layer: base "//:missing": /project/BUILD has no target "missing"`)
+		w.ThenNoTargetRan()
+	})
 }
 
 // TestWorkspaces_RootIsTheNearestWorkspaceFile specifies that Vamos searches for the nearest WORKSPACE
@@ -222,11 +236,12 @@ func TestWorkspaces_BuildVmsIsABuildFile(t *testing.T) {
 	})
 }
 
-// TestWorkspaces_PackagesMayNameEachOthersTargets specifies that packages may name each other's targets:
-// a package's BUILD file runs when another first names one of its targets, while that other file is still running,
-// and can then name the other file's targets declared above that point: a target declared below that point isn't
-// declared yet, which is an error saying where the first file stopped, and targets that name each other in a cycle
-// are an error.
+// TestWorkspaces_PackagesMayNameEachOthersTargets specifies that packages may name each other's targets,
+// declared anywhere in them, above or below the reference:
+// a package's BUILD file runs whole, declaring its targets, when a target being configured first names one of them,
+// so that whether a target builds never depends on the order targets are declared in or BUILD files run in;
+// and that targets that use each other in a cycle fail, naming the cycle,
+// at the declaration of the target whose reference closes it, naming the reference.
 func TestWorkspaces_PackagesMayNameEachOthersTargets(t *testing.T) {
 	parallelRule(t)
 	for _, example := range []struct {
@@ -257,6 +272,14 @@ func TestWorkspaces_PackagesMayNameEachOthersTargets(t *testing.T) {
 			},
 		},
 		{
+			name: "A package names a target that the package naming it declares below",
+			packages: map[string]string{
+				".":     "layer(name=\"app\", base=\"//scala:x\")\nlayer(name=\"y\", base=\"scratch\")",
+				"scala": `layer(name="x", base="//:y")`,
+			},
+			statuses: statuses{layer("y"): ranOrReused, layer("//scala:x"): ranOrReused, layer("app"): ranOrReused},
+		},
+		{
 			name: "A function of ctx names a target declared below, once every BUILD file has run",
 			packages: map[string]string{
 				".":     "layer(name=\"app\", base=\"//scala:x\")\nlayer(name=\"y\", base=\"scratch\")",
@@ -275,6 +298,30 @@ func TestWorkspaces_PackagesMayNameEachOthersTargets(t *testing.T) {
 			w.ThenTheTargetsWere(example.statuses)
 		})
 	}
+
+	t.Run("A workspace whose packages name each other's later targets builds from every entry point",
+		func(t *testing.T) {
+			w := newWorkspaceWorld(t)
+			w.GivenThePackageDeclares(".", testenv.PullBusybox)
+			w.GivenThePackageDeclares(".", `layer(name="app", base="//app:image")`)
+			w.GivenThePackageDeclares("app", `
+				layer(name="image", base="//:busybox", steps=[add("//lib:files", "/app")])
+			`)
+			w.GivenThePackageDeclares("lib", `
+				layer(name="tools", base="//:busybox")
+				glob(name="files", include=["src"])
+			`)
+			w.GivenTheProjectHolds(files{"lib/src": "source"})
+			w.WhenISave("//:app")
+			w.ThenItSucceeds()
+			w.ThenTheImageHolds(under("/app"), files{"/app/src": "source"})
+			w.WhenIBuild("//lib:tools")
+			w.ThenItSucceeds()
+			w.ThenTheTargetsWere(statuses{layer("//lib:tools"): ranOrReused})
+			w.WhenIBuild("//app:image")
+			w.ThenItSucceeds()
+			w.ThenTheTargetsWere(statuses{layer("//app:image"): ranOrReused})
+		})
 
 	t.Run("Packages may add each other's files", func(t *testing.T) {
 		w := newWorkspaceWorld(t)
@@ -298,33 +345,23 @@ func TestWorkspaces_PackagesMayNameEachOthersTargets(t *testing.T) {
 		error    string
 	}{
 		{
-			name: "A target declared below the point where its file loaded the other package fails",
-			packages: map[string]string{
-				".":     "layer(name=\"app\", base=\"//scala:x\")\nlayer(name=\"y\", base=\"scratch\")",
-				"scala": `layer(name="x", base="//:y")`,
-			},
-			error: `/project/scala/BUILD:1:6: layer: base "//:y": //:y isn't declared yet: its BUILD file is stopped ` +
-				"at /project/BUILD:1:6, loading this package; declare y above that line, or name it from a function " +
-				"of ctx, which runs once every BUILD file has run",
-		},
-		{
-			name: "Targets of three packages that name each other in a cycle fail, naming the cycle",
+			name: "Targets of three packages that use each other in a cycle fail",
 			packages: map[string]string{
 				".": `layer(name="app", base="//b:b")`,
 				"b": `layer(name="b", base="//c:c")`,
 				"c": `layer(name="c", base="//:app")`,
 			},
-			error: `/project/c/BUILD:1:6: layer: base "//:app": targets name each other in a cycle: ` +
-				"//:app -> //b:b -> //c:c -> //:app",
+			error: `/project/c/BUILD:1:6: layer: base "//:app": targets use each other in a cycle: ` +
+				"app -> //b:b -> //c:c -> app",
 		},
 		{
-			name: "Targets of two packages that name each other in a cycle fail, naming the cycle",
+			name: "Targets of two packages that name each other in a cycle fail",
 			packages: map[string]string{
 				".":   `layer(name="app", base="//lib:base")`,
 				"lib": `layer(name="base", base="//:app")`,
 			},
-			error: `/project/lib/BUILD:1:6: layer: base "//:app": targets name each other in a cycle: ` +
-				"//:app -> //lib:base -> //:app",
+			error: `/project/lib/BUILD:1:6: layer: base "//:app": targets use each other in a cycle: ` +
+				"app -> //lib:base -> app",
 		},
 	} {
 		t.Run(example.name, func(t *testing.T) {

@@ -1044,7 +1044,7 @@ const (
 // It checks the arguments ref gives the target too.
 // It runs as the target naming ref is made, as it is configured, once every BUILD file it names has run whole,
 // so ref may name a target declared anywhere: above or below it, in its own package or another.
-// Configuration reports targets that name each other in a cycle.
+// Configuration reports targets that use each other in a cycle.
 // No target can name a publication, which only the command line names, and only mount() names a tool cache.
 func (w *workspace) resolve(
 	c *evalContext, fn *starlark.Builtin, param string, ref *targetRef, use refUse,

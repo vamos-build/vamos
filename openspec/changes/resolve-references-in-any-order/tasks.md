@@ -36,18 +36,23 @@
 
 ## 3. References across packages and cycles
 
-- [ ] 3.1 Rewrite `TestWorkspaces_PackagesMayNameEachOthersTargets` in `internal/features/workspaces_test.go` so its doc
-  comment and scenarios specify that packages may name targets declared anywhere in each other: turn "A target declared
-  below the point where its file loaded the other package fails" into "A package names a target that the package
-  naming it declares below", which succeeds; add "The issue's workspace builds from every entry point", building
-  `//:app` and `//lib:tools`; and extend `TestWorkspaces_OnlyNeededTargetsLoad` with "A mistake in a target is reported
-  when it is built". Verify with `go test -short ./internal/features/ -run Workspaces`.
-- [ ] 3.2 Move the workspace cycle examples to "targets use each other in a cycle" at the closing reference, as
-  "Two packages whose targets name each other" and "Three packages in a cycle", and add "A target that is its own
-  base" to `TestTargets_CyclesAreErrors`, keeping its scenarios of cycles through functions of `ctx` unchanged. A cycle
-  is reported at the declaration of the target whose reference closes it, naming the reference, such as `add: source
-  "b"`, as those scenarios have it: say so in the spec's cycle requirement, which now says the reference's own
-  position. Verify with `go test -short ./internal/features/`.
+- [x] 3.1 Rewrite `TestWorkspaces_PackagesMayNameEachOthersTargets` in `internal/features/workspaces_test.go` so its doc
+  comment and scenarios specify that packages may name targets declared anywhere in each other:
+  turn "A target declared below the point where its file loaded the other package fails"
+  into "A package names a target that the package naming it declares below", which succeeds;
+  add "A workspace whose packages name each other's later targets builds from every entry point",
+  saving `//:app` to see the files its `add()` names and building `//lib:tools` and `//app:image`;
+  and extend `TestWorkspaces_OnlyNeededTargetsLoad` with "A mistake in a target is reported when it is built".
+  Verify with `go test ./internal/features/ -run Workspaces`, without `-short`, where buildah builds.
+- [x] 3.2 Move the workspace cycle examples to "targets use each other in a cycle" at the closing reference, as
+  "Targets of two packages that name each other in a cycle fail"
+  and "Targets of three packages that use each other in a cycle fail",
+  and add "A target that is its own base" to `TestTargets_CyclesAreErrors`,
+  keeping its scenarios of cycles through functions of `ctx` unchanged.
+  A cycle is reported at the declaration of the target whose reference closes it, naming the reference,
+  such as `add: source "b"`, as those scenarios have it:
+  say so in the spec's cycle requirement, which now says the reference's own position.
+  Verify with `go test ./internal/features/ -run 'Workspaces|Targets'`, without `-short`, where buildah builds.
 
 ## 4. Documentation
 

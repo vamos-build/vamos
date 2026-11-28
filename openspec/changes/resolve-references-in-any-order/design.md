@@ -92,6 +92,14 @@ any other rule.
 - [Evaluating per configuration costs more] → Only rules with a function of `ctx` are evaluated more than once, as now.
 - [Freezing breaks a BUILD file that changes a list after passing it] → The error names the line; accepted as the
   issue's intended behavior.
+- [A label repeated through a target configured already is missed, as before this change] → `configurer.image`
+  returns a target configured already, such as `loop`, without walking it, so `enter` doesn't see that it reaches
+  another configuration of a label being configured, such as `app` in debug mode below `app` in release mode: `seed`
+  then `app` builds where `app` then `seed` reports `app -> loop -> app`. The configured graph has no cycle either way,
+  so what builds is sound; only the label rule is applied unevenly. `vamos update` likewise keeps the pins no pull uses
+  when the target that would close the cycle is declared first, and may drop one when another is. Checking every reuse
+  was tried and dropped: summaries of what each target reaches cost quadratic memory on shallow shared graphs, and
+  walking again costs quadratic time once a label has two configurations. A follow-up can bound that work.
 
 ## Migration Plan
 

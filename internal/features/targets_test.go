@@ -434,9 +434,10 @@ func newTargetWorld(t *testing.T) *world {
 	return w
 }
 
-// TestTargets_CyclesAreErrors specifies that references produced by a function of ctx can name later targets,
-// and that dependency cycles are errors, reported at the declaration of the target whose reference closes the cycle,
-// and the configuration that a function of ctx made it in.
+// TestTargets_CyclesAreErrors specifies that targets that use each other in a cycle are errors,
+// reported at the declaration of the target whose reference closes the cycle,
+// naming the reference and the configuration that a function of ctx made it in,
+// whether the references are given as they are or by functions of ctx, which may name a target declared after them.
 func TestTargets_CyclesAreErrors(t *testing.T) {
 	parallelRule(t)
 	t.Run("A function of ctx names a target declared after it", func(t *testing.T) {
@@ -455,6 +456,11 @@ func TestTargets_CyclesAreErrors(t *testing.T) {
 		build string // after the pull of busybox, on line 2
 		error string
 	}{
+		{
+			name:  "A target that is its own base fails, naming the cycle",
+			build: `layer(name="app", base="app")`,
+			error: `/project/BUILD:2:6: layer: base "app": targets use each other in a cycle: app -> app`,
+		},
 		{
 			name: "Targets that use each other through a function fail, naming the cycle",
 			build: `
