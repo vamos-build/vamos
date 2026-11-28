@@ -671,6 +671,26 @@ func TestToolCaches_ATaskOrLayerMountsCachesForItsRunSteps(t *testing.T) {
 		w.ThenTheStepsObserved(observations{"listing": "one"})
 	})
 
+	t.Run("A tool cache declared below", func(t *testing.T) {
+		w := newToolCacheWorld(t)
+		w.GivenTheBuildFileDeclares(`
+			task(
+			    name = "probe",
+			    base = "busybox",
+			    params = {"file": "one"},
+			    tool_caches = [mount("tool")],
+			    steps = lambda ctx: [run(["sh", "-c", 'echo "observed listing=$(echo $(ls -A /cache))"; touch /cache/' +
+			        ctx.file])],
+			)
+			tool_cache(name = "tool", path = "/cache")
+		`)
+		w.WhenIBuild("probe", setting("file=one"))
+		w.ThenItSucceeds()
+		w.WhenIBuild("probe", setting("file=two"))
+		w.ThenItSucceeds()
+		w.ThenTheStepsObserved(observations{"listing": "one"})
+	})
+
 	t.Run("A mount overrides the cache's path", func(t *testing.T) {
 		w := newToolCacheWorld(t)
 		nonce := testenv.NewNonce()

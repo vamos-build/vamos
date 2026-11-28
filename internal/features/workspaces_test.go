@@ -195,14 +195,14 @@ func TestWorkspaces_BuildVmsIsABuildFile(t *testing.T) {
 				"react/build/out": "a build directory",
 			})
 			w.WhenISave("app")
-			w.ThenItFailsWith(`/project/react/BUILD.vms:1:6: layer: base "busybx" is not "scratch" or an earlier ` +
-				"pull() or layer(); there are none before this")
+			w.ThenItFailsWith(`/project/react/BUILD.vms:1:6: layer: base "busybx": /project/react/BUILD.vms has no ` +
+				`target "busybx"; it declares no pulls or layers`)
 			w.ThenNoTargetRan()
 			w.ThenNothingIsSaved()
 			w.GivenIWorkIn("react")
 			w.WhenISave("site")
-			w.ThenItFailsWith(`/project/react/BUILD.vms:1:6: layer: base "busybx" is not "scratch" or an earlier ` +
-				"pull() or layer(); there are none before this")
+			w.ThenItFailsWith(`/project/react/BUILD.vms:1:6: layer: base "busybx": /project/react/BUILD.vms has no ` +
+				`target "busybx"; it declares no pulls or layers`)
 			w.ThenNoTargetRan()
 			w.ThenNothingIsSaved()
 		})
@@ -342,7 +342,8 @@ func TestWorkspaces_PackagesMayNameEachOthersTargets(t *testing.T) {
 
 // TestWorkspaces_LabelsNameTargetsOfPackagesWithinTheWorkspace specifies that a label, such as //backend:schema,
 // names a target of a package beneath the workspace root, by a clean path to its directory, which is no symbolic link,
-// and the target's name: any other label fails as the BUILD file loads, saying why.
+// and the target's name, declared above or below the label in its own package: any other label fails, saying why, as it
+// is given if its form is wrong, and otherwise as the command, or the target giving it, needs it.
 func TestWorkspaces_LabelsNameTargetsOfPackagesWithinTheWorkspace(t *testing.T) {
 	parallelRule(t)
 	for _, example := range []struct {
@@ -387,20 +388,8 @@ func TestWorkspaces_LabelsNameTargetsOfPackagesWithinTheWorkspace(t *testing.T) 
 		{
 			name: "A label without its leading slashes fails, saying how a label starts",
 			app:  `layer(name="app", base="scratch", steps=[add("lib:code", "/app")])`,
-			error: `/project/app/BUILD:1:45: add: source "lib:code" is not an earlier glob() or task(); ` +
+			error: `/project/app/BUILD:1:45: add: source "lib:code": /project/app/BUILD has no target "lib:code"; ` +
 				`a label starts with "//", as in "//lib:code"`,
-		},
-		{
-			name: "A label to a target of its own package, declared later, fails",
-			app:  "layer(name=\"app\", base=\":base\")\nlayer(name=\"base\", base=\"scratch\")",
-			error: `/project/app/BUILD:1:6: layer: base ":base" is not "scratch" or an earlier pull() or layer(); ` +
-				"there are none before this",
-		},
-		{
-			name: "A full label to a target of its own package, declared later, fails",
-			app:  "layer(name=\"app\", base=\"//app:base\")\nlayer(name=\"base\", base=\"scratch\")",
-			error: `/project/app/BUILD:1:6: layer: base "//app:base" is not "scratch" or an earlier pull() ` +
-				"or layer(); there are none before this",
 		},
 		{
 			name:  "A label to another package's glob as a base fails",
@@ -423,6 +412,18 @@ func TestWorkspaces_LabelsNameTargetsOfPackagesWithinTheWorkspace(t *testing.T) 
 			w.ThenItFailsWith(example.error)
 			w.ThenNoTargetRan()
 			w.ThenNothingIsSaved()
+		})
+	}
+
+	for _, base := range []string{":base", "//app:base"} {
+		t.Run("A label "+base+" to a target of its own package declared below names it", func(t *testing.T) {
+			w := newWorkspaceWorld(t)
+			w.GivenThePackageDeclares("app", `layer(name="app", base="`+base+`")`+"\n"+
+				`layer(name="base", base="scratch", command=["serve"])`)
+			w.GivenIWorkIn("app")
+			w.WhenISave("app")
+			w.ThenItSucceeds()
+			w.ThenTheImageCommandIs("serve")
 		})
 	}
 
