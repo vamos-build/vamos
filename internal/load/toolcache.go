@@ -159,8 +159,7 @@ func (w *workspace) mounts(
 
 // resolveMounts returns the tool caches that list, the tool_caches argument of the target who, mounts, sorted by
 // path, refusing a path a cache can't be mounted at, one path or one cache twice, and nested paths.
-// A target given by a function of ctx resolves a list given as it is as it is declared, as a static one does,
-// so that it names only caches declared earlier, and its mistakes are reported then.
+// It runs as the target is made, so that list may name a cache declared anywhere.
 func (w *workspace) resolveMounts(c *evalContext, who string, list *starlark.List) ([]graph.ToolCache, error) {
 	if list == nil || list.Len() == 0 {
 		return nil, nil

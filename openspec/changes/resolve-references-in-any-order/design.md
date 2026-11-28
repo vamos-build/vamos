@@ -73,6 +73,11 @@ small edit; they were already wrong for deferred targets.
 the reference that closes it. With every reference resolved there, it reports static cycles too, including a target
 that names itself.
 
+`vamos update` is the exception: it configures every target, and leaves one it can't configure unsure, keeping the
+pins, so a cycle there would pass. It also looks for cycles among the references that the targets it checks give as
+they are, which every configuration has, and fails on one before configuring anything, naming the closing reference as
+`placeCycle` does; a cycle that a function of `ctx` makes in some configurations stays unsure.
+
 ### Pulls and publications evaluate what they use
 
 `everyPull` already configures every target; the pulls it collects by `kind` are then evaluated for their images by

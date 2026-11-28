@@ -54,8 +54,7 @@ func (inv *invocation) update(names []string) error {
 	if i := slices.IndexFunc(pulls, func(p load.Pull) bool { return p.Configured }); i >= 0 {
 		keptFor = fmt.Sprintf("pull %q may in another configuration", pulls[i].Label)
 	} else if unsure != "" {
-		keptFor = fmt.Sprintf("%q, which couldn't be configured as building it would, may use a pull that does",
-			unsure)
+		keptFor = unsure
 	}
 	if keptFor != "" {
 		remove = false

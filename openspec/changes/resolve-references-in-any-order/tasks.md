@@ -2,7 +2,7 @@
 
 ## 1. Declaration records
 
-- [ ] 1.1 Make the declarer in `internal/load/buildfile.go` take the deferred path for every kind but `tool_cache`:
+- [x] 1.1 Make the declarer in `internal/load/buildfile.go` take the deferred path for every kind but `tool_cache`:
   unpack against the rule's parameters, take `params`, compute `hasOutput` and the listed steps from the raw
   arguments, `Freeze` every argument, store `fn`, `args`, `kwargs` and `make`, and stop calling `makeBase` and
   `resolveMounts`; remove `copyToolCaches`. Add the scenarios "A missing required argument of an unused target", "A
@@ -10,7 +10,7 @@
   argument scenarios "Appending to a list after passing it as steps", "Removing from a list after passing it as steps"
   and "A list shared by two targets" to the same file, the first two reproducing issue #25. Verify with
   `go test -short ./internal/load/... ./internal/features/ -run Buildfile`.
-- [ ] 1.2 Stop `newAdd`, `newDep` in `config.go`, `mount()` and the declarer's checks from resolving references as a
+- [x] 1.2 Stop `newAdd`, `newDep` in `config.go`, `mount()` and the declarer's checks from resolving references as a
   file runs: parse the label and keep the `targetRef`; give `addStep` the position of its `add()` call, the innermost
   frame outside `<builtin>`. Remove `workspace.loading`, `buildFile.thread`, `buildFile.declaring`, `notDeclaredYet`,
   the "not an earlier" branches of `resolveAs` and `load`'s rollback of packages stored by a failed load, and update
@@ -44,17 +44,24 @@
   when it is built". Verify with `go test -short ./internal/features/ -run Workspaces`.
 - [ ] 3.2 Move the workspace cycle examples to "targets use each other in a cycle" at the closing reference, as
   "Two packages whose targets name each other" and "Three packages in a cycle", and add "A target that is its own
-  base" to `TestTargets_CyclesAreErrors`, keeping its scenarios of cycles through functions of `ctx` unchanged. Verify
-  with `go test -short ./internal/features/`.
+  base" to `TestTargets_CyclesAreErrors`, keeping its scenarios of cycles through functions of `ctx` unchanged. A cycle
+  is reported at the declaration of the target whose reference closes it, naming the reference, such as `add: source
+  "b"`, as those scenarios have it: say so in the spec's cycle requirement, which now says the reference's own
+  position. Verify with `go test -short ./internal/features/`.
 
 ## 4. Documentation
 
 - [ ] 4.1 Rewrite "Cross-package dependencies" in `docs/user/reference/configuration.md`: a BUILD file declares its
   targets, each is evaluated when a command needs it, a reference may name any target declared anywhere, a mistake in
-  a target is reported when it is built, and a rule's arguments are frozen; drop the advice to declare targets above,
-  and check `docs/user/` for other mentions of declaration order. Update `internal/load/doc.go`'s invariants and
-  lifecycle: declaration and evaluation as separate stages, and no partially loaded package. Verify with
-  `scripts/check`'s markdownlint and `go doc ./internal/load`.
+  a target is reported when it is built, and a rule's arguments, and `dep()`'s as it is called, are frozen; drop the
+  advice to declare targets above, and check `docs/user/` for other mentions of declaration order. Update
+  `internal/load/doc.go`'s invariants and lifecycle: declaration and evaluation as separate stages, and no partially
+  loaded package. Verify with `scripts/check`'s markdownlint and `go doc ./internal/load`.
+- [ ] 4.2 Update `docs/user/reference/cli/update.md` for how a full update finds pulls now: it checks the rules of the
+  targets the walk finds and of what they use as given, failing on a mistake there or on targets that use each other so
+  in a cycle; follows the labels given to `add()`
+  and `dep()` as BUILD and `.star` files run; and keeps the pins no pull found uses, with a "kept ..., since ..." line,
+  when a target can't be configured, a target beyond those has a mistake, or a package can't be loaded.
 
 ## 5. Integration
 

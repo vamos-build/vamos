@@ -501,6 +501,11 @@ type targetRef struct {
 	platform *platformValue // for the target, if not the using target's: given by dep(), or an index's entry
 	exec     bool           // for the target on the exec platform, as dep() gives with EXEC_PLATFORM
 	args     []depArg       // in the order given; once checked, canonical, unless arg()
+	// of the call to dep() giving the label, if a BUILD file made it, or a function it calls, where a mistake in what
+	// dep() says, such as its arguments, is reported; one made as a .star file is loaded is reported where it is used
+	pos    syntax.Position
+	frozen bool // once freeze has frozen args
+	viaDep bool // dep() gave it, rather than a label alone
 }
 
 // depArg is an argument that dep() gives a parameter of the target it names: a value, or an arg().
@@ -541,6 +546,30 @@ func (d *declaration) checkArgs(ref *targetRef) error {
 	return nil
 }
 
+// freeze freezes the values of ref's arguments, as freezeValueIn does, so that a list given to dep() is fixed too,
+// once. dep() freezes them as it is called, having refused a function within them, so they are data.
+func (ref *targetRef) freeze() { ref.freezeIn(map[any]bool{}) }
+
+// freezeIn is freeze, with the values in clean, frozen already and holding no function, left as they are.
+func (ref *targetRef) freezeIn(clean map[any]bool) {
+	if ref.frozen {
+		return
+	}
+	ref.frozen = true
+	for _, a := range ref.args {
+		freezeValueIn(a.value, clean)
+	}
+}
+
+// values returns the values of ref's arguments, in order.
+func (ref *targetRef) values() []starlark.Value {
+	values := make([]starlark.Value, len(ref.args))
+	for i, a := range ref.args {
+		values[i] = a.value
+	}
+	return values
+}
+
 // argValues returns the arg()s among ref's arguments, in order.
 func (ref *targetRef) argValues() []*argValue {
 	var found []*argValue
@@ -555,15 +584,65 @@ func (ref *targetRef) argValues() []*argValue {
 // depValue is the value of a call to dep(): a label, with arguments for the target it names,
 // which base, add() and an index accept wherever they accept a label.
 type depValue struct {
-	target targetRef
+	target  targetRef
+	printed *map[*depValue]bool // while a dep() holding it is printed: the dep()s that printing has shown in full
+}
+
+// depsWithin returns the dep()s that values hold, through lists, tuples, dicts, dep()s and add()s, each once,
+// skipping the values in seen.
+func depsWithin(values []starlark.Value, seen map[any]bool) []*depValue {
+	var found []*depValue
+	for _, v := range values {
+		key := identity(v)
+		switch v.(type) {
+		case *starlark.List, *starlark.Dict, starlark.Tuple, *depValue, *addStep:
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+		}
+		switch v := v.(type) {
+		case *depValue:
+			found = append(found, v)
+			found = append(found, depsWithin(v.target.values(), seen)...)
+		case *addStep:
+			found = append(found, depsWithin([]starlark.Value{v.given}, seen)...)
+		case *starlark.List, starlark.Tuple:
+			found = append(found, depsWithin(slices.Collect(starlark.Elements(v.(starlark.Iterable))), seen)...)
+		case *starlark.Dict:
+			for _, item := range v.Items() {
+				found = append(found, depsWithin([]starlark.Value{item[0], item[1]}, seen)...)
+			}
+		}
+	}
+	return found
 }
 
 func (v *depValue) Type() string          { return "dep" }
-func (v *depValue) Freeze()               {} // immutable
+func (v *depValue) Freeze()               { v.target.freeze() }
 func (v *depValue) Truth() starlark.Bool  { return true }
 func (v *depValue) Hash() (uint32, error) { return 0, errors.New("unhashable type: dep") }
 
 func (v *depValue) String() string {
+	// A dep() is shown in full the first time one being printed holds it, and by its label alone after, so that one
+	// held many times over is printed once.
+	if v.printed != nil {
+		if (*v.printed)[v] {
+			return fmt.Sprintf("dep(%s, ...)", starlark.String(v.target.ref))
+		}
+		(*v.printed)[v] = true
+	} else {
+		printed := map[*depValue]bool{v: true}
+		held := append(depsWithin(v.target.values(), map[any]bool{}), v)
+		for _, d := range held {
+			d.printed = &printed
+		}
+		defer func() {
+			for _, d := range held {
+				d.printed = nil
+			}
+		}()
+	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "dep(%s", starlark.String(v.target.ref))
 	switch {
@@ -583,7 +662,7 @@ func (v *depValue) String() string {
 // and, if given, for a platform other than the using target's.
 // Labels are relative to the package of the BUILD file running,
 // or of the target whose attribute a function of ctx is giving.
-// The arguments are checked here if the target is declared already.
+// The target using it resolves the label, and checks the arguments, as it is made.
 func (w *workspace) newDep(
 	thread *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple,
 ) (starlark.Value, error) {
@@ -598,9 +677,9 @@ func (w *workspace) newDep(
 	if c.file == nil && !strings.HasPrefix(ref, "//") {
 		return nil, fmt.Errorf(`%s: label %q: as a .star file is loaded, labels must start with "//"`, fn.Name(), ref)
 	}
-	target := targetRef{ref: ref}
+	target := targetRef{ref: ref, viaDep: true}
 	if c.file != nil {
-		target.pkg = c.file.pkg
+		target.pkg, target.pos = c.file.pkg, callerPos(thread)
 	}
 	if _, _, err := parseLabel(ref, target.pkg); err != nil {
 		return nil, fmt.Errorf("%s: %w", fn.Name(), err)
@@ -625,22 +704,22 @@ func (w *workspace) newDep(
 				fn.Name(), v.Type())
 		}
 	}
-
-	// A target declared already is checked now, so that a mistake is reported here;
-	// resolve reports one that isn't, and checks the arguments of a dep() made as a .star file is loaded.
-	if c.file != nil {
-		from, name, err := w.lookup(c.file, target.ref, target.pkg)
-		if err != nil {
-			return nil, fmt.Errorf("%s: %q: %w", fn.Name(), ref, err)
+	if c.mode == declaring || c.mode == loadingModule {
+		c.addRef(target)
+	}
+	// A parameter's value is never a function, so one within an argument is refused now, which leaves the arguments
+	// data, which are fixed as dep() is called, as a rule's are, so that the target is configured with them.
+	for _, a := range target.args {
+		if where, ok := functionWithin(a.value, c.clean, map[any]bool{}); ok {
+			slices.Reverse(where)
+			return nil, fmt.Errorf("%s: %s%s is a function, which no parameter's value can be", fn.Name(), a.name,
+				strings.Join(where, ""))
 		}
-		if d, ok := from.decls[name]; ok {
-			if d.kind == "tool_cache" {
-				return nil, fmt.Errorf("%s: %w", fn.Name(), noTarget(ref))
-			}
-			if err := d.checkArgs(&target); err != nil {
-				return nil, fmt.Errorf("%s: %w", fn.Name(), err)
-			}
-		}
+	}
+	if c.clean != nil {
+		target.freezeIn(c.clean)
+	} else {
+		target.freeze()
 	}
 	return &depValue{target: target}, nil
 }
@@ -674,30 +753,29 @@ func newArg(
 // argsIn returns the arg()s that v, an attribute of a target, passes on:
 // in its dep()s, and those of its add() steps, in order.
 func argsIn(v starlark.Value) []*argValue {
-	return argsWithin(v, map[starlark.Value]bool{})
+	return argsWithin(v, map[any]bool{})
 }
 
-// argsWithin is argsIn, skipping the lists and dicts in seen, so that one holding itself ends the walk.
-func argsWithin(v starlark.Value, seen map[starlark.Value]bool) []*argValue {
+// argsWithin is argsIn, skipping the lists, tuples and dicts in seen, so that one holding itself ends the walk, and
+// one held many times over is walked once.
+func argsWithin(v starlark.Value, seen map[any]bool) []*argValue {
+	key := identity(v)
 	switch v.(type) {
-	case *starlark.List, *starlark.Dict:
-		if seen[v] {
+	case *starlark.List, *starlark.Dict, starlark.Tuple:
+		if seen[key] {
 			return nil
 		}
-		seen[v] = true
+		seen[key] = true
 	}
 	switch v := v.(type) {
 	case *depValue:
 		return v.target.argValues()
 	case *addStep:
 		return v.target.argValues()
-	case starlark.Indexable: // a list or tuple
-		if _, ok := v.(starlark.String); ok {
-			return nil
-		}
+	case *starlark.List, starlark.Tuple:
 		var found []*argValue
-		for i := range v.Len() {
-			found = append(found, argsWithin(v.Index(i), seen)...)
+		for e := range starlark.Elements(v.(starlark.Iterable)) {
+			found = append(found, argsWithin(e, seen)...)
 		}
 		return found
 	case *starlark.Dict:
@@ -799,6 +877,7 @@ type configurer struct {
 	// pinning says that targets are configured only to find the pulls they use, for vamos update,
 	// so that a target that mounts caches in an unnamed workspace, which can't be built, still names its pulls.
 	pinning bool
+	undo    []func() // while pinning: what forgets each target configured, in order, for mark
 }
 
 // configure returns the graph that building roots needs: the targets,
@@ -903,14 +982,7 @@ func (l *lowering) image(cl confLabel) (graph.Ref, error) {
 			}
 		} else {
 			n.Desc = l.w.describe("layer", cl)
-			platform := cl.cfg.platform.String()
-			// A layer's base must be for its platform, since the base's files are; dep() can give it another.
-			if base != graph.Scratch {
-				if got := l.g.Node(base).Platform(); got != platform {
-					return 0, fmt.Errorf("%s: its base %s is for %s, not %s; a layer's base must be for its platform",
-						n.Desc, l.g.Node(base).Label, got, platform)
-				}
-			}
+			platform := cl.cfg.platform.String() // its base's too, as configuring it checks
 			n.Layer = &graph.Layer{
 				Base: base, Platform: platform, Steps: steps, Command: s.command, Entrypoint: s.entrypoint,
 				ToolCaches: s.mounts,
@@ -1050,7 +1122,7 @@ func (cr *configurer) placeCycle(err error, d *declaration, cl confLabel, what s
 	var cycle *cycleError
 	if errors.As(err, &cycle) && cycle.at == "" {
 		cycle.at = fmt.Sprintf("%s: %s: %s", d.pos, d.kind, what)
-		if d.static == nil {
+		if d.usesCtx {
 			cycle.configuring = cr.w.describeConfigured(cl)
 		}
 	}
@@ -1059,6 +1131,27 @@ func (cr *configurer) placeCycle(err error, d *declaration, cl confLabel, what s
 
 // leave records that the target being configured last is done.
 func (cr *configurer) leave() { cr.path = cr.path[:len(cr.path)-1] }
+
+// mark returns what restores cr, which is pinning, to what it has configured now, forgetting what it configures after,
+// for a target whose configuration fails part way, and what keeps that instead, once the target is configured.
+func (cr *configurer) mark() (forget, keep func()) {
+	n := len(cr.undo)
+	forget = func() {
+		for _, undo := range slices.Backward(cr.undo[n:]) {
+			undo()
+		}
+		cr.undo, cr.path = cr.undo[:n], nil
+	}
+	keep = func() { cr.undo = cr.undo[:n] }
+	return forget, keep
+}
+
+// configured records that cl is configured, as undo forgets, if cr is pinning, for mark.
+func (cr *configurer) configured(undo func()) {
+	if cr.pinning {
+		cr.undo = append(cr.undo, undo)
+	}
+}
 
 // image configures the pull, layer, task or index cl, and the targets it uses.
 // Scratch needs none.
@@ -1083,6 +1176,7 @@ func (cr *configurer) image(cl confLabel) error {
 	if p, ok := tmpl.(*pullSpec); ok {
 		instance := &pullSpec{label: p.label, id: cl, image: p.image}
 		cr.pulls[cl] = instance
+		cr.configured(func() { delete(cr.pulls, cl) })
 		return nil
 	}
 	if idx, ok := tmpl.(*indexSpec); ok {
@@ -1099,6 +1193,7 @@ func (cr *configurer) image(cl confLabel) error {
 			manifests = append(manifests, m)
 		}
 		cr.indexes[cl] = manifests
+		cr.configured(func() { delete(cr.indexes, cl) })
 		return nil
 	}
 
@@ -1128,6 +1223,12 @@ func (cr *configurer) image(cl confLabel) error {
 	if err := cr.image(base); err != nil {
 		return cr.placeCycle(err, d, cl, fmt.Sprintf("base %q", t.baseRef.ref))
 	}
+	// A layer's base must be for its platform, since the base's files are; dep() can give it another. A task's base
+	// may be for any, since only its output, if any, is kept.
+	if !t.task && base.label != scratch && base.cfg.platform.String() != cl.cfg.platform.String() {
+		return fmt.Errorf("%s: its base %s is for %s, not %s; a layer's base must be for its platform",
+			cr.w.describe("layer", cl), cr.w.display(base.label), base.cfg.platform, cl.cfg.platform)
+	}
 	s.base = base
 	for _, in := range t.steps {
 		if add, ok := in.(*addStep); ok {
@@ -1147,6 +1248,7 @@ func (cr *configurer) image(cl confLabel) error {
 		s.output = &fileSet{label: t.label, task: s, sel: t.output.sel}
 	}
 	cr.targets[cl] = s
+	cr.configured(func() { delete(cr.targets, cl) })
 	return nil
 }
 
@@ -1167,29 +1269,34 @@ func (cr *configurer) set(cl confLabel) (*fileSet, error) {
 		return nil, err
 	}
 	set := tmpl.(*fileSet)
-	if d.static == nil {
+	if d.usesCtx {
 		set.configuring = cr.w.describeConfigured(cl)
 	}
 	cr.globs[cl] = set
+	cr.configured(func() { delete(cr.globs, cl) })
 	return set, nil
 }
 
-// template returns the template of the target that d declares, in the configuration of cl:
-// the one made as the BUILD file ran,
-// or, if an attribute is a function of ctx, one made now, with what each function returns in its place.
+// template returns the template of the target that d declares, in the configuration of cl, making it from the
+// arguments of the call declaring it, which resolves the targets it names, loading their packages:
+// once, if no argument is a function of ctx, or else in each configuration, with what each function returns in its
+// place.
+// A mistake is reported at the call, or where a value in it was made, such as an add() or arg(), with the
+// configuration only for a template that depends on it.
 func (w *workspace) template(d *declaration, cl confLabel) (any, error) {
 	if d.static != nil {
 		return d.static, nil
 	}
-	c := &evalContext{mode: configuring, file: d.file}
+	c := &evalContext{mode: configuring, file: d.file, target: d}
 	thread := &starlark.Thread{Name: d.file.path}
 	thread.SetLocal(contextKey, c)
 	defer cancelWith(w.ctx, thread)()
 	ctx := &ctxValue{params: d.params, cfg: cl.cfg, glob: d.kind == "glob", exec: w.execPlatform}
-	var results []starlark.Value // of the functions, whose arg()s are checked once they run
+	var values []starlark.Value // the arguments, as the functions give them, whose arg()s are checked
 	call := func(param string, v starlark.Value) (starlark.Value, error) {
 		fn, ok := v.(starlark.Callable)
 		if !ok {
+			values = append(values, v)
 			return v, nil
 		}
 		result, err := starlark.Call(thread, fn, starlark.Tuple{ctx}, nil)
@@ -1199,7 +1306,7 @@ func (w *workspace) template(d *declaration, cl confLabel) (any, error) {
 		if _, ok := result.(starlark.Callable); ok {
 			return nil, fmt.Errorf("%s: %s gave a function, not the value of %s", d.kind, fn.Name(), param)
 		}
-		results = append(results, result)
+		values = append(values, result)
 		return result, nil
 	}
 
@@ -1220,29 +1327,159 @@ func (w *workspace) template(d *declaration, cl confLabel) (any, error) {
 		kwargs[i] = starlark.Tuple{kv[0], v}
 	}
 	if err == nil {
-		err = checkArgNames(w.display(cl.label), d.params, results...)
+		err = checkArgNames(w.display(cl.label), d.params, values...)
 	}
 	var tmpl any
 	if err == nil {
 		_, tmpl, err = d.make(c, d.fn, args, kwargs)
 	}
 	if err == nil {
+		if !d.usesCtx {
+			d.static = tmpl
+		}
 		return tmpl, nil
 	}
-	// An interruption is reported as itself, not as a mistake in the file.
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+	err = placeMistake(d, err)
+	if !d.usesCtx || !isMistake(err) {
 		return nil, err
 	}
+	return nil, fmt.Errorf("%w (configuring %s)", err, w.describeConfigured(cl))
+}
 
-	// An error loading another package's BUILD file already says where it is.
+// placeMistake returns err, from making the template of the target that d declares, as it is reported: at the call
+// declaring it, or where the value at fault was made, such as an add() or arg().
+// An interruption, or an error loading another package's BUILD file, which already says where it is, is returned as
+// it is.
+func placeMistake(d *declaration, err error) error {
 	if nested, ok := errors.AsType[*loadError](err); ok {
-		return nil, nested
+		return nested
 	}
-	msg := fmt.Sprintf("%s: %s", d.pos, err)
+	if !isMistake(err) {
+		return err
+	}
 	if evalErr, ok := errors.AsType[*starlark.EvalError](err); ok {
-		msg = describeEvalError(evalErr)
+		return errors.New(describeEvalError(evalErr))
 	} else if at, ok := errors.AsType[*posError](err); ok {
-		msg = at.Error()
+		return errors.New(at.Error())
 	}
-	return nil, fmt.Errorf("%s (configuring %s)", msg, w.describeConfigured(cl))
+	return fmt.Errorf("%s: %w", d.pos, err)
+}
+
+// isMistake reports whether err is a mistake in a rule, rather than an interruption or an error loading another
+// package's BUILD file.
+func isMistake(err error) bool {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	_, nested := errors.AsType[*loadError](err)
+	return !nested
+}
+
+// kwargsValues returns the values of the keyword arguments of the call declaring d, in order.
+func (d *declaration) kwargsValues() []starlark.Value {
+	values := make([]starlark.Value, len(d.kwargs))
+	for i, kv := range d.kwargs {
+		values[i] = kv[1]
+	}
+	return values
+}
+
+// givenRefs resolves the targets that the arguments of d, the target l, name as they are given, not by a function of
+// ctx, as making its template would, loading their packages: its base, the add()s of its steps and its tool_caches, an
+// index's layer, and a publication's images and checks; and checks the arg()s they pass on. It returns them.
+// It finds the packages a target uses, and its mistakes, where its configuration can't be made.
+func (w *workspace) givenRefs(d *declaration, l string) ([]use, error) {
+	var used []use
+	c := &evalContext{mode: configuring, file: d.file, target: d}
+	given := func(param string) (starlark.Value, bool) {
+		v, ok := d.given[param]
+		if _, isFunction := v.(starlark.Callable); isFunction {
+			return nil, false
+		}
+		return v, ok
+	}
+	var values []starlark.Value // in the order given, as template checks them
+	for _, v := range append(slices.Clone(d.args), d.kwargsValues()...) {
+		if _, isFunction := v.(starlark.Callable); !isFunction {
+			values = append(values, v)
+		}
+	}
+	err := checkArgNames(w.display(l), d.params, values...)
+	if base, ok := given("base"); ok && err == nil {
+		var ref targetRef
+		if ref, err = w.makeBase(c, d.fn, base); err == nil && ref.label != scratch {
+			used = append(used, use{ref.label, fmt.Sprintf("base %q", ref.ref)})
+		}
+	}
+	if steps, ok := given("steps"); ok && err == nil {
+		if list, ok := steps.(*starlark.List); ok {
+			// Only the add()s among them: the rest are checked as the target is configured.
+			var adds []starlark.Value
+			for e := range list.Elements() {
+				if add, ok := e.(*addStep); ok {
+					adds = append(adds, add)
+				}
+			}
+			var steps []step
+			steps, err = w.stepList(c, d.fn.Name(), starlark.NewList(adds))
+			for _, in := range steps {
+				add := in.(*addStep)
+				used = append(used, use{add.target.label, fmt.Sprintf("add: source %q", add.target.ref)})
+			}
+		}
+	}
+	if caches, ok := given("tool_caches"); ok && err == nil {
+		if list, ok := caches.(*starlark.List); ok {
+			name := l[strings.LastIndexByte(l, ':')+1:] // as making the template names the target
+			_, err = w.resolveMounts(c, fmt.Sprintf("%s %q", d.fn.Name(), name), list)
+		}
+	}
+	// What else names a target, as dict values or list elements, by the parameter it is given for.
+	resolve := func(param string, v starlark.Value, as refUse) {
+		if err != nil {
+			return
+		}
+		var ref targetRef
+		if ref, err = targetRefOf(c, d.fn.Name(), param, v); err == nil && d.kind == "index" &&
+			(ref.exec || ref.platform != nil) {
+			at := "platforms[0]" // as makeIndex says of the first, for layer given with platforms, or by a dict
+			if param != "layer" {
+				at = param + "'s key"
+			}
+			err = fmt.Errorf("%s: %s: an index's dep() can't give platform, since %s says what each "+
+				"manifest is for", d.fn.Name(), param, at)
+		}
+		if err == nil {
+			if _, err = w.resolve(c, d.fn, param, &ref, as); err == nil {
+				used = append(used, use{ref.label, fmt.Sprintf("%s %q", param, ref.ref)})
+			}
+		}
+	}
+	if layer, ok := given("layer"); ok {
+		if dict, ok := layer.(*starlark.Dict); ok {
+			for _, item := range dict.Items() {
+				resolve(fmt.Sprintf("layer[%s]", item[0]), item[1], useImage)
+			}
+		} else {
+			resolve("layer", layer, useImage)
+		}
+	}
+	if images, ok := given("images"); ok {
+		if dict, ok := images.(*starlark.Dict); ok {
+			for _, item := range dict.Items() {
+				resolve(fmt.Sprintf("images[%s]", item[0]), item[1], usePublished)
+			}
+		}
+	}
+	if checks, ok := given("checks"); ok {
+		if list, ok := checks.(*starlark.List); ok {
+			for i := range list.Len() {
+				resolve(fmt.Sprintf("checks[%d]", i), list.Index(i), useCheck)
+			}
+		}
+	}
+	if err != nil {
+		return nil, placeMistake(d, err)
+	}
+	return used, nil
 }

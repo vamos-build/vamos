@@ -799,8 +799,8 @@ func TestParameters_FunctionsOfCtxGiveWholeAttributes(t *testing.T) {
 		{
 			name:  "A function as an entry of a list fails, saying to give the whole list",
 			build: `layer(name="app", base="busybox", command=["echo", lambda ctx: ctx.platform])`,
-			error: "/project/BUILD:2:6: layer: command[1] is function, want string; " +
-				"a function of ctx must give the whole list",
+			error: "/project/BUILD:2:6: layer: command[1] is a function; " +
+				"a function of ctx must give the whole command, not a value within it",
 		},
 		{
 			name: "A function that gives a list holding itself fails",
@@ -830,7 +830,7 @@ func TestParameters_FunctionsOfCtxGiveWholeAttributes(t *testing.T) {
 			name:  "A function that names a target there isn't fails, naming the configuration",
 			build: `layer(name="app", params={"mode": "release"}, base=lambda ctx: "base-" + ctx.mode)`,
 			error: `/project/BUILD:2:6: layer: base "base-release": /project/BUILD has no target "base-release"; ` +
-				`its targets are "busybox", "app" (configuring //:app)`,
+				`its pulls and layers are "busybox" (configuring //:app)`,
 		},
 		{
 			name: "A glob whose function selects a folder there isn't fails, naming the configuration",

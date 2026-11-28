@@ -501,7 +501,32 @@ func TestWorkspaces_MistakesAreReportedWhereTheyAre(t *testing.T) {
 		w.GivenThePackageDeclares("app", `layer(name="app", base="//lib:base")`)
 		w.GivenIWorkIn("app")
 		w.WhenISave("app")
-		w.ThenItFailsWith(`/project/lib/BUILD:2:6: layer: base "busybx" is not "scratch" or an earlier pull()`)
+		w.ThenItFailsWith(`/project/lib/BUILD:2:6: layer: base "busybx": /project/lib/BUILD has no target "busybx"; ` +
+			`did you mean "busybox"?`)
+		w.ThenTheCommandDoesNotSay("app/BUILD")
+		w.ThenNoTargetRan()
+		w.ThenNothingIsSaved()
+	})
+
+	t.Run("A mistake in the BUILD file of a package that an add() names names that file alone", func(t *testing.T) {
+		w := newWorkspaceMistakeWorld(t)
+		w.GivenThePackageDeclares("lib", `glob(name="code")`)
+		w.GivenThePackageDeclares("app", `layer(name="app", base="scratch", steps=[add("//lib:code", "/lib")])`)
+		w.GivenIWorkIn("app")
+		w.WhenISave("app")
+		w.ThenItFailsWith("/project/lib/BUILD:1:5: glob: missing argument for include")
+		w.ThenTheCommandDoesNotSay("app/BUILD")
+		w.ThenNoTargetRan()
+		w.ThenNothingIsSaved()
+	})
+
+	t.Run("A mistake in how another package's BUILD file declares a target names that file alone", func(t *testing.T) {
+		w := newWorkspaceMistakeWorld(t)
+		w.GivenThePackageDeclares("lib", `layer(name="base")`)
+		w.GivenThePackageDeclares("app", `layer(name="app", base="//lib:base")`)
+		w.GivenIWorkIn("app")
+		w.WhenISave("app")
+		w.ThenItFailsWith("/project/lib/BUILD:1:6: layer: missing argument for base")
 		w.ThenTheCommandDoesNotSay("app/BUILD")
 		w.ThenNoTargetRan()
 		w.ThenNothingIsSaved()

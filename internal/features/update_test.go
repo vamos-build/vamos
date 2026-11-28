@@ -443,6 +443,410 @@ func TestUpdate_ReResolvesPinsAndReportsWhatChanged(t *testing.T) {
 		w.ThenTheLockfileIs(lockfilePinning(pin{"<registry>/base:v1", "v1", "<digest of <registry>/base:v1>"}))
 	})
 
+	t.Run("A pull in a hidden folder that a target the command line can't configure names is pinned",
+		func(t *testing.T) {
+			w := newWorld(t)
+			w.GivenTheRegistryListsTags("<registry>/base", "v1")
+			w.GivenTheProjectHolds(files{"WORKSPACE": ""})
+			w.GivenThePackageDeclares(".shared", pullOfBase("v1"))
+			w.GivenThePackageDeclares("ui", `
+				layer(name="app", params={"version": param(type="string")}, base="//.shared:base")
+			`)
+			w.WhenIUpdate()
+			w.ThenItSucceeds()
+			w.ThenTheLockfileIs(lockfilePinning(pin{"<registry>/base:v1", "v1", "<digest of <registry>/base:v1>"}))
+		})
+
+	t.Run("A pull in a hidden folder that a target also given a function of ctx names is pinned", func(t *testing.T) {
+		w := newWorld(t)
+		w.GivenTheRegistryListsTags("<registry>/base", "v1")
+		w.GivenTheProjectHolds(files{"WORKSPACE": ""})
+		w.GivenThePackageDeclares(".shared", pullOfBase("v1"))
+		w.GivenThePackageDeclares("ui", `
+			layer(name="app", params={"version": param(type="string")}, base="//.shared:base",
+			      command=lambda ctx: [ctx.version])
+		`)
+		w.WhenIUpdate()
+		w.ThenItSucceeds()
+		w.ThenTheLockfileIs(lockfilePinning(pin{"<registry>/base:v1", "v1", "<digest of <registry>/base:v1>"}))
+	})
+
+	t.Run("A mistake in what a target also given a function of ctx names fails", func(t *testing.T) {
+		w := newWorld(t)
+		w.GivenTheRegistryListsTags("<registry>/base", "v1")
+		w.GivenTheProjectHolds(files{"WORKSPACE": ""})
+		w.GivenThePackageDeclares(".shared", pullOfBase("v1"))
+		w.GivenThePackageDeclares("ui", `layer(name="app", base="//.shared:bsae", command=lambda ctx: ["echo"])`)
+		w.WhenIUpdate()
+		w.ThenItFailsWith(`/project/ui/BUILD:1:6: layer: base "//.shared:bsae": /project/.shared/BUILD has no ` +
+			`target "bsae"; did you mean "base"?`)
+	})
+
+	t.Run("An arg() of a parameter the target lacks fails, beside a function of ctx", func(t *testing.T) {
+		w := newWorld(t)
+		w.GivenTheRegistryListsTags("<registry>/base", "v1")
+		w.GivenTheProjectHolds(files{"WORKSPACE": ""})
+		w.GivenThePackageDeclares(".shared", pullOfBase("v1"))
+		w.GivenThePackageDeclares("ui", `
+			layer(name="lib", params={"mode": "release"}, base="//.shared:base")
+			layer(name="app", params={"mode": "release"}, base=dep("lib", mode=arg("mdoe")),
+			      command=lambda ctx: [ctx.mode])
+		`)
+		w.WhenIUpdate()
+		w.ThenItFailsWith(`/project/ui/BUILD:2:71: arg: "//ui:app" has no parameter "mdoe" to pass on; ` +
+			`did you mean "mode"?`)
+	})
+
+	t.Run("A step that isn't a step, beside a function of ctx, leaves its target unsure", func(t *testing.T) {
+		w := newWorld(t)
+		w.GivenTheRegistryListsTags("<registry>/base", "v1")
+		w.GivenTheProjectHolds(files{"WORKSPACE": ""})
+		w.GivenThePackageDeclares(".shared", pullOfBase("v1"))
+		w.GivenThePackageDeclares("ui", `
+			layer(name="app", base="//.shared:base", steps=[1], command=lambda ctx: ["echo"])
+		`)
+		old := pin{"<registry>/old:v1", "v1", "sha256:" + strings.Repeat("0", 64)}
+		w.GivenTheLockfileHolds(lockfilePinning(old))
+		w.WhenIUpdate()
+		w.ThenItSucceeds()
+		w.ThenTheOutputIncludes(`kept <registry>/old:v1, which no pull uses here, since "//ui:app", which ` +
+			"couldn't be configured as building it would, may use a pull that does\n")
+	})
+
+	t.Run("A misspelled add() source after a step that isn't one fails, beside a function of ctx", func(t *testing.T) {
+		w := newWorld(t)
+		w.GivenTheRegistryListsTags("<registry>/base", "v1")
+		w.GivenTheProjectHolds(files{"WORKSPACE": ""})
+		w.GivenThePackageDeclares(".shared", pullOfBase("v1")+"\n"+
+			`task(name="out", base="base", source="/out", include=["."])`)
+		w.GivenThePackageDeclares("ui", `
+			layer(name="app", params={"version": param(type="string")}, base="scratch",
+			      steps=[1, add("//.shared:otu", "/out")], command=lambda ctx: [ctx.version])
+		`)
+		w.WhenIUpdate()
+		w.ThenItFailsWith(`/project/ui/BUILD:2:20: add: source "//.shared:otu": /project/.shared/BUILD has no ` +
+			`target "otu"; did you mean "out"?`)
+	})
+
+	t.Run("A pull that a target given a function of ctx adds the files of, after a step that isn't one, is pinned",
+		func(t *testing.T) {
+			w := newWorld(t)
+			w.GivenTheRegistryListsTags("<registry>/base", "v1")
+			w.GivenTheProjectHolds(files{"WORKSPACE": ""})
+			w.GivenThePackageDeclares(".shared", pullOfBase("v1")+"\n"+
+				`task(name="out", base="base", source="/out", include=["."])`)
+			w.GivenThePackageDeclares("ui", `
+				layer(name="app", params={"version": param(type="string")}, base="scratch",
+				      steps=[1, add("//.shared:out", "/out")], command=lambda ctx: [ctx.version])
+			`)
+			w.WhenIUpdate()
+			w.ThenItSucceeds()
+			w.ThenTheLockfileIs(lockfilePinning(pin{"<registry>/base:v1", "v1", "<digest of <registry>/base:v1>"}))
+		})
+
+	t.Run("A pull that an add() made as the BUILD file ran leads to, which only a function of ctx lists, is pinned",
+		func(t *testing.T) {
+			w := newWorld(t)
+			w.GivenTheRegistryListsTags("<registry>/base", "v1")
+			w.GivenTheProjectHolds(files{"WORKSPACE": ""})
+			w.GivenThePackageDeclares(".shared", pullOfBase("v1")+"\n"+
+				`task(name="out", base="base", source="/out", include=["."])`)
+			w.GivenThePackageDeclares("ui", `
+				out = add("//.shared:out", "/out")
+				layer(name="app", params={"version": param(type="string")}, base="scratch",
+				      steps=lambda ctx: [out])
+			`)
+			w.WhenIUpdate()
+			w.ThenItSucceeds()
+			w.ThenTheLockfileIs(lockfilePinning(pin{"<registry>/base:v1", "v1", "<digest of <registry>/base:v1>"}))
+		})
+
+	t.Run("An add() that no target configured lists is left to the targets that list it, as building does",
+		func(t *testing.T) {
+			w := newWorld(t)
+			w.GivenTheRegistryListsTags("<registry>/base", "v1")
+			w.GivenTheProjectHolds(files{"WORKSPACE": ""})
+			w.GivenThePackageDeclares(".shared", pullOfBase("v1")+"\n"+
+				`task(name="out", base="base", source="/out", include=["."])`)
+			w.GivenThePackageDeclares("ui", `
+				old = add("//.shared:otu", "/a")
+				new = add("//.shared:out", "/b")
+				layer(name="app", params={"version": "new"}, base="scratch",
+				      steps=lambda ctx: [old] if ctx.version == "old" else [new])
+			`)
+			w.WhenIUpdate()
+			w.ThenItSucceeds()
+			w.ThenTheLockfileIs(lockfilePinning(pin{"<registry>/base:v1", "v1", "<digest of <registry>/base:v1>"}))
+		})
+
+	t.Run("A mistake in a hidden package that only a function of ctx uses keeps the pins no pull found uses",
+		func(t *testing.T) {
+			w := newWorld(t)
+			w.GivenTheRegistryListsTags("<registry>/base", "v1")
+			w.GivenTheProjectHolds(files{"WORKSPACE": ""})
+			w.GivenThePackageDeclares(".shared", pullOfBase("v1")+"\nglob(name=\"broken\", include=[1])")
+			w.GivenThePackageDeclares("ui", `layer(name="app", base=lambda ctx: "//.shared:base")`)
+			old := pin{"<registry>/old:v1", "v1", "sha256:" + strings.Repeat("0", 64)}
+			w.GivenTheLockfileHolds(lockfilePinning(old))
+			w.WhenIUpdate()
+			w.ThenItSucceeds()
+			w.ThenTheOutputIncludes(`kept <registry>/old:v1, which no pull uses here, since "//.shared:broken", ` +
+				"which couldn't be configured as building it would, may use a pull that does\n")
+		})
+
+	t.Run("A hidden package that an add() made as the BUILD file ran names, which can't be loaded, keeps the pins",
+		func(t *testing.T) {
+			w := newWorld(t)
+			w.GivenTheRegistryListsTags("<registry>/base", "v1")
+			w.GivenTheProjectHolds(files{"WORKSPACE": "", ".tools/BUILD": "glob(name="})
+			w.GivenThePackageDeclares("ui", `
+				tools = add("//.tools:src", "/t")
+				layer(name="app", params={"version": param(type="string")}, base="scratch",
+				      steps=lambda ctx: [tools])
+			`)
+			old := pin{"<registry>/old:v1", "v1", "sha256:" + strings.Repeat("0", 64)}
+			w.GivenTheLockfileHolds(lockfilePinning(old))
+			w.WhenIUpdate()
+			w.ThenItSucceeds()
+			w.ThenTheOutputIncludes(`kept <registry>/old:v1, which no pull uses here, since the package ".tools", ` +
+				"which couldn't be loaded (/project/.tools/BUILD:1:11: got end of file, want primary expression), " +
+				"may use a pull that does\n")
+		})
+
+	t.Run("A mistake in a hidden target that a target found uses as it is given fails, as building it would",
+		func(t *testing.T) {
+			w := newWorld(t)
+			w.GivenTheRegistryListsTags("<registry>/base", "v1")
+			w.GivenTheProjectHolds(files{"WORKSPACE": ""})
+			w.GivenThePackageDeclares(".shared", `layer(name="broken", base="scratch", steps=[1])`)
+			w.GivenThePackageDeclares("ui", `layer(name="app", base="//.shared:broken")`)
+			w.WhenIUpdate()
+			w.ThenItFailsWith("/project/.shared/BUILD:1:6: layer: steps[0] is int, want a step, such as add() or run()")
+		})
+
+	t.Run("A hidden pull with a mistake that only a dep() made as the BUILD file ran leads to keeps the pins",
+		func(t *testing.T) {
+			w := newWorld(t)
+			w.GivenTheRegistryListsTags("<registry>/base", "v1")
+			w.GivenTheProjectHolds(files{"WORKSPACE": ""})
+			w.GivenThePackageDeclares(".shared", `pull(name="base", image="<registry>/base:v1")`)
+			w.GivenThePackageDeclares("ui", `
+				shared = dep("//.shared:base")
+				layer(name="app", params={"mode": "plain"},
+				      base=lambda ctx: "scratch" if ctx.mode == "plain" else shared)
+			`)
+			old := pin{"<registry>/old:v1", "v1", "sha256:" + strings.Repeat("0", 64)}
+			w.GivenTheLockfileHolds(lockfilePinning(old))
+			w.WhenIUpdate()
+			w.ThenItSucceeds()
+			w.ThenTheOutputIncludes(`kept <registry>/old:v1, which no pull uses here, since "//.shared:base", ` +
+				"which couldn't be configured as building it would, may use a pull that does\n")
+		})
+
+	t.Run("A pull that a dep() a .star file makes as it loads names, which another configuration uses, is pinned",
+		func(t *testing.T) {
+			w := newWorld(t)
+			w.GivenTheRegistryListsTags("<registry>/base", "v1")
+			w.GivenTheProjectHolds(files{"WORKSPACE": "", "ui/defs.star": `SHARED = dep("//.shared:base")`})
+			w.GivenThePackageDeclares(".shared", pullOfBase("v1"))
+			w.GivenThePackageDeclares("ui", `
+				load("//ui:defs.star", "SHARED")
+				layer(name="app", params={"mode": "plain"},
+				      base=lambda ctx: "scratch" if ctx.mode == "plain" else SHARED)
+			`)
+			w.WhenIUpdate()
+			w.ThenItSucceeds()
+			w.ThenTheLockfileIs(lockfilePinning(pin{"<registry>/base:v1", "v1", "<digest of <registry>/base:v1>"}))
+		})
+
+	t.Run("A hidden pull given a function of ctx is pinned in the configuration that the target using it gives",
+		func(t *testing.T) {
+			w := newWorld(t)
+			w.GivenTheRegistryListsTags("<registry>/base", "v1")
+			w.GivenTheProjectHolds(files{"WORKSPACE": ""})
+			w.GivenThePackageDeclares(".shared", `
+				pull(name="base", image="<registry>/base", tag=lambda ctx: {"linux/arm64": "v1"}[ctx.platform])
+			`)
+			w.GivenThePackageDeclares("ui", `
+				task(name="app", base=dep("//.shared:base", platform="linux/arm64"), steps=[run(["true"])])
+			`)
+			old := pin{"<registry>/old:v1", "v1", "sha256:" + strings.Repeat("0", 64)}
+			w.GivenTheLockfileHolds(lockfilePinning(old))
+			w.WhenIUpdate(forPlatform("linux/amd64"))
+			w.ThenItSucceeds()
+			w.ThenTheLockfileIs(lockfilePinning(
+				pin{"<registry>/base:v1", "v1", "<digest of <registry>/base:v1>"},
+				old,
+			))
+		})
+
+	t.Run("A hidden pull that only a target whose configuration fails configures isn't pinned", func(t *testing.T) {
+		w := newWorld(t)
+		w.GivenTheRegistryListsTags("<registry>/base", "v1")
+		w.GivenTheProjectHolds(files{"WORKSPACE": ""})
+		w.GivenThePackageDeclares(".shared", `
+			pull(name="base", image="<registry>/base", tag=lambda ctx: {"linux/arm64": "v1"}[ctx.platform])
+			glob(name="files", params={"kind": param(default="a", values=["a"])}, include=["."])
+		`)
+		w.GivenThePackageDeclares("ui", `
+			task(name="app", params={"mode": "x"}, base=dep("//.shared:base", platform="linux/arm64"),
+			     steps=[add(dep("//.shared:files", kind=arg("mode")), "/f"), run(["true"])])
+		`)
+		old := pin{"<registry>/old:v1", "v1", "sha256:" + strings.Repeat("0", 64)}
+		w.GivenTheLockfileHolds(lockfilePinning(old))
+		w.WhenIUpdate(forPlatform("linux/amd64"))
+		w.ThenItSucceeds()
+		w.ThenTheLockfileIs(lockfilePinning(old))
+	})
+
+	t.Run("A pull given a function of ctx is pinned in the command line's configuration and those its users give",
+		func(t *testing.T) {
+			w := newWorld(t)
+			w.GivenTheRegistryListsTags("<registry>/base", "v1", "v2")
+			w.GivenTheBuildFileDeclares(`
+				pull(name="base", image="<registry>/base",
+				     tag=lambda ctx: {"linux/amd64": "v1", "linux/arm64": "v2"}[ctx.platform])
+				task(name="app", base=dep("base", platform="linux/arm64"), steps=[run(["true"])])
+			`)
+			w.WhenIUpdate(forPlatform("linux/amd64"))
+			w.ThenItSucceeds()
+			w.ThenTheLockfileIs(lockfilePinning(
+				pin{"<registry>/base:v1", "v1", "<digest of <registry>/base:v1>"},
+				pin{"<registry>/base:v2", "v2", "<digest of <registry>/base:v2>"},
+			))
+		})
+
+	t.Run("Targets that use each other in a cycle fail, as building them would", func(t *testing.T) {
+		w := newWorld(t)
+		w.GivenTheRegistryListsTags("<registry>/base", "v1")
+		w.GivenTheProjectHolds(files{"WORKSPACE": ""})
+		w.GivenThePackageDeclares("ui", pullOfBase("v1")+"\n"+`layer(name="app", base="app")`)
+		w.WhenIUpdate()
+		w.ThenItFailsWith("/project/ui/BUILD:2:6: layer: base \"app\": targets use each other in a cycle: " +
+			"//ui:app -> //ui:app")
+	})
+
+	t.Run("Targets that use each other in a cycle fail, even where the command line can't configure them",
+		func(t *testing.T) {
+			w := newWorld(t)
+			w.GivenTheRegistryListsTags("<registry>/base", "v1")
+			w.GivenTheProjectHolds(files{"WORKSPACE": ""})
+			w.GivenThePackageDeclares("ui", `
+				layer(name="a", params={"version": param(type="string")}, base="b")
+				layer(name="b", base=dep("a", version="1"))
+			`)
+			w.WhenIUpdate()
+			w.ThenItFailsWith("/project/ui/BUILD:2:6: layer: base \"a\": targets use each other in a cycle: " +
+				"//ui:a -> //ui:b -> //ui:a")
+		})
+
+	t.Run("Targets that a function of ctx makes use each other in one configuration leave the pins",
+		func(t *testing.T) {
+			w := newWorld(t)
+			w.GivenTheRegistryListsTags("<registry>/base", "v1")
+			w.GivenTheProjectHolds(files{"WORKSPACE": ""})
+			w.GivenThePackageDeclares("ui", pullOfBase("v1")+"\n"+
+				`layer(name="app", base=lambda ctx: "app" if ctx.platform == "linux/arm64" else "base")`)
+			old := pin{"<registry>/old:v1", "v1", "sha256:" + strings.Repeat("0", 64)}
+			w.GivenTheLockfileHolds(lockfilePinning(old))
+			w.WhenIUpdate(forPlatform("linux/arm64"))
+			w.ThenItSucceeds()
+			w.ThenTheOutputIncludes(`kept <registry>/old:v1, which no pull uses here, since "//ui:app", ` +
+				"which couldn't be configured as building it would, may use a pull that does\n")
+		})
+
+	t.Run("A hidden pull that no target configures, which the command line can't configure, keeps the pins",
+		func(t *testing.T) {
+			w := newWorld(t)
+			w.GivenTheRegistryListsTags("<registry>/base", "v1")
+			w.GivenTheProjectHolds(files{"WORKSPACE": ""})
+			w.GivenThePackageDeclares(".shared", `
+				pull(name="base", image="<registry>/base", tag=lambda ctx: {"linux/arm64": "v1"}[ctx.platform])
+			`)
+			w.GivenThePackageDeclares("ui", `
+				shared = dep("//.shared:base")
+				layer(name="app", params={"mode": "plain"},
+				      base=lambda ctx: "scratch" if ctx.mode == "plain" else shared)
+			`)
+			old := pin{"<registry>/old:v1", "v1", "sha256:" + strings.Repeat("0", 64)}
+			w.GivenTheLockfileHolds(lockfilePinning(old))
+			w.WhenIUpdate(forPlatform("linux/amd64"))
+			w.ThenItSucceeds()
+			w.ThenTheOutputIncludes(`kept <registry>/old:v1, which no pull uses here, ` +
+				`since the pull "//.shared:base", which couldn't be configured as building it would, ` +
+				"may be one that does\n")
+		})
+
+	t.Run("An index's dep() that gives a platform fails, beside a function of ctx", func(t *testing.T) {
+		w := newWorld(t)
+		w.GivenTheRegistryListsTags("<registry>/base", "v1")
+		w.GivenTheProjectHolds(files{"WORKSPACE": ""})
+		w.GivenThePackageDeclares("ui", pullOfBase("v1")+"\n"+
+			`index(name="app", layer=dep("base", platform="linux/arm64"), platforms=lambda ctx: ["linux/amd64"])`)
+		w.WhenIUpdate()
+		w.ThenItFailsWith("/project/ui/BUILD:2:6: index: layer: an index's dep() can't give platform")
+	})
+
+	t.Run(".star files that load each other along many paths", func(t *testing.T) {
+		w := newWorld(t)
+		w.GivenTheRegistryListsTags("<registry>/base", "v1")
+		project := files{"WORKSPACE": "", "m0.star": `M = dep("//.shared:base")`}
+		for i := 1; i <= 40; i++ {
+			project[fmt.Sprintf("m%d.star", i)] = fmt.Sprintf(
+				"load(\"//:m%d.star\", A = \"M\")\nload(\"//:m%d.star\", B = \"M\")\nM = A", i-1, i-1)
+		}
+		w.GivenTheProjectHolds(project)
+		w.GivenThePackageDeclares(".shared", pullOfBase("v1"))
+		w.GivenThePackageDeclares("ui", `
+			load("//:m40.star", "M")
+			layer(name="app", params={"mode": "plain"}, base=lambda ctx: "scratch" if ctx.mode == "plain" else M)
+		`)
+		w.WhenIUpdate()
+		w.ThenItSucceeds()
+		w.ThenTheLockfileIs(lockfilePinning(pin{"<registry>/base:v1", "v1", "<digest of <registry>/base:v1>"}))
+	})
+
+	t.Run("A pull that a dep() made as the BUILD file ran names, which another configuration uses, is pinned",
+		func(t *testing.T) {
+			w := newWorld(t)
+			w.GivenTheRegistryListsTags("<registry>/base", "v1")
+			w.GivenTheProjectHolds(files{"WORKSPACE": ""})
+			w.GivenThePackageDeclares(".shared", pullOfBase("v1"))
+			w.GivenThePackageDeclares("ui", `
+				shared = dep("//.shared:base")
+				layer(name="app", params={"mode": "plain"},
+				      base=lambda ctx: "scratch" if ctx.mode == "plain" else shared)
+			`)
+			w.WhenIUpdate()
+			w.ThenItSucceeds()
+			w.ThenTheLockfileIs(lockfilePinning(pin{"<registry>/base:v1", "v1", "<digest of <registry>/base:v1>"}))
+		})
+
+	t.Run("A pull in a hidden folder that an index also given a function of ctx names is pinned", func(t *testing.T) {
+		w := newWorld(t)
+		w.GivenTheRegistryListsTags("<registry>/base", "v1")
+		w.GivenTheProjectHolds(files{"WORKSPACE": ""})
+		w.GivenThePackageDeclares(".shared", pullOfBase("v1"))
+		w.GivenThePackageDeclares("ui", `
+			index(name="app", params={"arches": param(type="list")}, layer="//.shared:base",
+			      platforms=lambda ctx: ["linux/" + arch for arch in ctx.arches])
+		`)
+		w.WhenIUpdate()
+		w.ThenItSucceeds()
+		w.ThenTheLockfileIs(lockfilePinning(pin{"<registry>/base:v1", "v1", "<digest of <registry>/base:v1>"}))
+	})
+
+	t.Run("A mistake in a target's rule fails, as building it would", func(t *testing.T) {
+		w := newWorld(t)
+		w.GivenTheRegistryListsTags("<registry>/base", "v1")
+		w.GivenTheProjectHolds(files{"WORKSPACE": ""})
+		w.GivenThePackageDeclares(".shared", pullOfBase("v1"))
+		w.GivenThePackageDeclares("ui", `layer(name="app", base="//.shared:bsae")`)
+		w.WhenIUpdate()
+		w.ThenItFailsWith(`/project/ui/BUILD:1:6: layer: base "//.shared:bsae": /project/.shared/BUILD has no ` +
+			`target "bsae"; did you mean "base"?`)
+	})
+
 	t.Run("A package whose BUILD file is a link is found", func(t *testing.T) {
 		w := newWorld(t)
 		w.GivenTheRegistryListsTags("<registry>/base", "v1")
@@ -484,22 +888,53 @@ func TestUpdate_ReResolvesPinsAndReportsWhatChanged(t *testing.T) {
 			"couldn't be configured as building it would, may use a pull that does\n")
 	})
 
-	t.Run("A package that fails to load leaves no package that names its targets", func(t *testing.T) {
-		// .a loads .b, which names .a's x, before .a fails: .b, configured on its own, would name a target
-		// that was never declared.
-		w := newWorld(t)
-		w.GivenTheProjectHolds(files{"WORKSPACE": ""})
-		w.GivenThePackageDeclares(".a", `
-			layer(name="x", base="scratch")
-			layer(name="y", base="//.b:z")
-			fail("broken")
-		`)
-		w.GivenThePackageDeclares(".b", `layer(name="z", base="//.a:x")`)
-		w.GivenThePackageDeclares("ui", `layer(name="app", base=lambda ctx: "//.a:y")`)
-		w.WhenIUpdate(dryRun())
-		w.ThenItSucceeds()
-		w.ThenTheOutputIncludes("vamos.lock is up to date\n")
-	})
+	t.Run("A package that only a function of ctx uses, which fails to load, keeps the pins no pull found uses",
+		func(t *testing.T) {
+			w := newWorld(t)
+			w.GivenTheRegistryListsTags("<registry>/base", "v1")
+			w.GivenTheProjectHolds(files{"WORKSPACE": ""})
+			w.GivenThePackageDeclares(".a", `
+				layer(name="y", base="scratch")
+				fail("broken")
+			`)
+			w.GivenThePackageDeclares("ui", `layer(name="app", base=lambda ctx: "//.a:y")`)
+			old := pin{"<registry>/old:v1", "v1", "sha256:" + strings.Repeat("0", 64)}
+			w.GivenTheLockfileHolds(lockfilePinning(old))
+			w.WhenIUpdate()
+			w.ThenItSucceeds()
+			w.ThenTheLockfileIs(lockfilePinning(old))
+			w.ThenTheOutputIncludes(`kept <registry>/old:v1, which no pull uses here, since "//ui:app", ` +
+				"which couldn't be configured as building it would, may use a pull that does\n")
+		})
+
+	t.Run("A package that only a function of ctx uses, which fails to load, leaves a dry run up to date",
+		func(t *testing.T) {
+			w := newWorld(t)
+			w.GivenTheProjectHolds(files{"WORKSPACE": ""})
+			w.GivenThePackageDeclares(".a", `
+				layer(name="y", base="scratch")
+				fail("broken")
+			`)
+			w.GivenThePackageDeclares("ui", `layer(name="app", base=lambda ctx: "//.a:y")`)
+			w.WhenIUpdate(dryRun())
+			w.ThenItSucceeds()
+			w.ThenTheOutputIncludes("vamos.lock is up to date\n")
+		})
+
+	t.Run("A layer on a hidden base for another platform, which can't be built, pins none of its pulls",
+		func(t *testing.T) {
+			w := newWorld(t)
+			w.GivenTheRegistryListsTags("<registry>/base", "v1")
+			w.GivenTheProjectHolds(files{"WORKSPACE": ""})
+			w.GivenThePackageDeclares(".shared", `
+				pull(name="base", image="<registry>/base",
+				     tag=lambda ctx: {"linux/amd64": "v1", "linux/arm64": "v2"}[ctx.platform])
+			`)
+			w.GivenThePackageDeclares("ui", `layer(name="app", base=dep("//.shared:base", platform="linux/arm64"))`)
+			w.WhenIUpdate(forPlatform("linux/amd64"))
+			w.ThenItSucceeds()
+			w.ThenTheLockfileIs(lockfilePinning(pin{"<registry>/base:v1", "v1", "<digest of <registry>/base:v1>"}))
+		})
 
 	t.Run("A pull whose tag is a function of ctx is pinned for the platform the command gives", func(t *testing.T) {
 		w := newWorld(t)

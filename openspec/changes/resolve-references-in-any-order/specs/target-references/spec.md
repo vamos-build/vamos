@@ -11,8 +11,9 @@ the target a command names.
 ### Requirement: Running a BUILD file declares its targets without evaluating them
 
 Running a BUILD file SHALL declare each target its rule calls name, checking only each call's shape: that its keywords
-are the rule's, its required arguments are given, its name is a string unique in the package, and its `params` are
-valid. It SHALL NOT read the arguments' values, resolve references or load other packages. A `tool_cache()` call,
+are the rule's, its required arguments are given, its name is a string unique in the package, its `params` are valid,
+and a function of `ctx` gives a whole argument, never a value within one. It SHALL NOT otherwise read the arguments'
+values, resolve references or load other packages. A `tool_cache()` call,
 which declares no target, SHALL still be checked in full as it is made.
 
 #### Scenario: A missing required argument of an unused target
@@ -182,7 +183,8 @@ whether the references are given as the BUILD file runs or by functions of `ctx`
 
 The values passed to a rule call SHALL be frozen as the call is made, with every list and dict they hold, so that the
 target is evaluated from the values the call was given. Changing one afterwards SHALL fail at the change, with
-Starlark's error for a frozen value. The check that every `run()` step is in some target's `steps` SHALL read the same
+Starlark's error for a frozen value. A function of `ctx` given as an argument, and the variables it captures, SHALL be
+left as they are. The check that every `run()` step is in some target's `steps` SHALL read the same
 values.
 
 #### Scenario: Appending to a list after passing it as steps
@@ -197,6 +199,13 @@ values.
 - **GIVEN** a BUILD file with `s = run(["true"])`, `st = [s]`, a layer `x` given `steps=st`, and then `st.pop()`
 - **WHEN** I run `vamos graph x`
 - **THEN** it fails at the `pop()`, saying the list is frozen
+
+#### Scenario: A function within an argument
+
+- **GIVEN** a BUILD file with `st = [print, run(["true"])]` and a layer `x` given `steps=st`
+- **WHEN** I run `vamos graph x`
+- **THEN** it fails at the `layer()` call, saying `steps[0]` is a function and that a function of `ctx` must give the
+  whole `steps`
 
 #### Scenario: A list shared by two targets
 
