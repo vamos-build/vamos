@@ -94,9 +94,18 @@ A tag that covers no other, or that isn't a version, SHALL resolve to itself. Co
 
 ### Requirement: `vamos update` re-resolves pins and reports what changed
 
-`vamos update [pull...]` SHALL resolve the tag of every pull loaded, or only of the pulls named,
+`vamos update [pull...]` SHALL resolve the tag of every pull it discovers, or only of the pulls named,
 rewrite their lockfile entries, and report each entry it added or changed, with the tags and digests before and
-after. A full update SHALL remove entries no pull uses. Updating SHALL change no other entry.
+after. A full update SHALL discover pulls by walking the workspace and following targets' references,
+including labels passed to `add()` and `dep()` and references produced by functions of `ctx` in configurations it evaluates.
+It SHALL resolve pulls in each configuration in which a target uses them and in the command-line configuration
+for pulls found by the walk or not configured by any target.
+
+A full update SHALL remove entries no discovered pull uses unless a pull with a function of `ctx` may use them in
+another configuration, or a target or package reached during discovery could not be configured or loaded and may
+use a pull the update did not find. In those cases it SHALL keep unused entries and report why.
+A reference produced only in a configuration the update does not evaluate is not followed.
+Updating SHALL change no other entry.
 
 #### Scenario: A moved tag is updated and reported
 

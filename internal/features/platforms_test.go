@@ -394,8 +394,8 @@ func TestPlatforms_ALayersBaseIsForItsPlatform(t *testing.T) {
 		w.GivenTheBuildFileDeclares(fmt.Sprintf(`layer(name="app", base=dep("busybox", platform=%q))`,
 			anotherPlatform()))
 		w.WhenISave("app")
-		w.ThenItFailsWith(fmt.Sprintf(`layer "app": its base busybox is for %s, not %s; `+
-			"a layer's base must be for its platform", anotherPlatform(), thisPlatform()))
+		w.ThenItFailsWith(fmt.Sprintf(`/project/BUILD:2:6: layer: its base busybox is for %s, not %s; `+
+			"a layer's base must be for its platform (configuring //:app)", anotherPlatform(), thisPlatform()))
 		w.ThenNothingIsSaved()
 	})
 }

@@ -36,17 +36,18 @@ func (stepBase) source() *fileSet      { return nil }
 // addStep copies files from a package or a task's output into the container.
 type addStep struct {
 	stepBase
-	target  targetRef // the glob or task whose files to add
-	display string    // target, as given, for messages
-	set     *fileSet  // of an instance, configured: the files, placed beneath dest at their relative paths
-	dest    string    // as given: absolute once its variables are expanded
-	owner   string    // user or ID that owns the files, as named in the image; root if empty
-	group   string    // group or ID; the owner's group if empty, or root's if owner is too
+	target targetRef       // the glob or task whose files to add, resolved once the target adding it is made
+	given  starlark.Value  // target, as given, a label or dep(), which froze its arguments as it was called
+	pos    syntax.Position // of the call to add(), where a mistake in target is reported
+	set    *fileSet        // of an instance, configured: the files, placed beneath dest at their relative paths
+	dest   string          // as given: absolute once its variables are expanded
+	owner  string          // user or ID that owns the files, as named in the image; root if empty
+	group  string          // group or ID; the owner's group if empty, or root's if owner is too
 }
 
 func (s *addStep) String() string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "add(%s, %s", s.display, starlark.String(s.dest))
+	fmt.Fprintf(&b, "add(%s, %s", s.given, starlark.String(s.dest))
 	if s.owner != "" {
 		fmt.Fprintf(&b, ", owner=%s", starlark.String(s.owner))
 	}
@@ -58,6 +59,9 @@ func (s *addStep) String() string {
 }
 
 func (s *addStep) source() *fileSet { return s.set }
+
+// Freeze freezes the values of the arguments that a dep() giving the source passes, as freezeValueIn does.
+func (s *addStep) Freeze() { s.target.freeze() }
 
 func (s *addStep) lower() graph.Step {
 	return graph.Step{Op: graph.OpAdd, Display: s.String(), Dest: s.dest, Owner: s.owner, Group: s.group}
@@ -253,8 +257,10 @@ func newWorkdir(
 	return &workdirStep{dir: dir}, nil
 }
 
-// stepList converts an optional steps argument of a call to fnName.
-func stepList(fnName string, list *starlark.List) ([]step, error) {
+// stepList converts an optional steps argument of a call to fnName, as the target is made in c,
+// resolving the source of each add() step in a copy of its own, since a step may be listed by several targets.
+// A source that can't be resolved is reported where add() was called.
+func (w *workspace) stepList(c *evalContext, fnName string, list *starlark.List) ([]step, error) {
 	if list == nil {
 		return nil, nil
 	}
@@ -264,6 +270,19 @@ func stepList(fnName string, list *starlark.List) ([]step, error) {
 		if !ok {
 			return nil, fmt.Errorf("%s: steps[%d] is %s, want a step, such as add() or run()%s",
 				fnName, i, list.Index(i).Type(), functionHint(list.Index(i)))
+		}
+		if add, ok := in.(*addStep); ok {
+			resolved := *add
+			if _, err := w.resolveAs(c, "add", "source", &resolved.target, useFiles); err != nil {
+				if nested, ok := errors.AsType[*loadError](err); ok { // which says where it is
+					return nil, nested
+				}
+				if _, ok := errors.AsType[*posError](err); ok { // a mistake in a dep() giving the source
+					return nil, err
+				}
+				return nil, &posError{pos: add.pos, err: err}
+			}
+			in = &resolved
 		}
 		out = append(out, in)
 	}

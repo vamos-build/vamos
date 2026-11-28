@@ -108,13 +108,29 @@ so renaming the workspace rebuilds the targets that use that glob.
 
 ### Cross-package dependencies
 
-Packages can reference each other's targets.
-A package's `BUILD` file is loaded when another file first references one of its targets.
-If the loaded package references targets back in the first package,
-those targets must already be declared above the referencing line.
-References produced by functions of `ctx` are evaluated after all `BUILD` files are loaded,
-allowing them to reference targets declared anywhere in the workspace.
-Circular target dependencies produce an error during graph construction.
+Packages can reference each other's targets, declared anywhere in either package.
+Running a `BUILD` file only declares its targets:
+each call checks its shape, such as the names of its arguments and the target's own,
+and keeps its arguments.
+A target is evaluated when a command needs it,
+because the command names it or a target being configured references it:
+its arguments are read, the targets they name are found, and the packages declaring those are loaded.
+So a reference can name a target declared above or below it, in its own package or another,
+and whether a target builds doesn't depend on the order targets are declared in or `BUILD` files run in.
+A mistake in a target is reported when a command builds it, at the call that makes it, which may be in a `.star` file,
+and a target that no command needs is checked only for its shape,
+but by a full [`vamos update`](cli/update.md#workspace-discovery),
+which checks the rule of every target of the packages it walks, and of the targets those use as given.
+
+The values passed to a rule that declares a target, and to `dep()`, are frozen as the call is made,
+with every list and dictionary they hold,
+so that the target is built from the values the call was given:
+changing one afterwards fails, at the change, with Starlark's error for a frozen value.
+A function of `ctx` gives a whole argument, never a value within a list or dictionary,
+and isn't frozen; it may run more than once for a target, so it should give the same result each time.
+
+Targets that use each other in a cycle fail as they are configured, naming the cycle,
+at the declaration of the target whose reference closes it.
 
 On the command line, unqualified target names resolve against the package selected by `-C`:
 

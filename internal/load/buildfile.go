@@ -34,8 +34,6 @@ type workspace struct {
 	name         string                // that the WORKSPACE file gives with workspace(), or "" for an unnamed workspace
 	current      string                // the package of -C, whose targets are named without a label
 	packages     map[string]*buildFile // those loaded, by package
-	stored       []string              // the keys of packages, in the order loaded
-	loading      []*buildFile          // BUILD files running, innermost last, which others may name targets of
 	modules      map[string]*module    // .star files loaded, by label
 	execPlatform *platformValue        // the executor's, which run() steps run on without emulation, as EXEC_PLATFORM
 	platform     *platformValue        // the command's, given with --platform: the named target's, unless an index
@@ -51,41 +49,44 @@ type buildFile struct {
 	path  string                  // of the BUILD file, for messages
 	names []string                // of every target, globs included, in the order declared
 	decls map[string]*declaration // each target, by name
-
-	// While the file runs: the thread running it, which says how far it has run, for a package it loads that names
-	// a target it hasn't declared yet, and the name of the target it is declaring, if any, to report a cycle.
-	thread    *starlark.Thread
-	declaring string
+	// The labels given to add() and dep() as the file ran, or as a function of ctx it gave a target ran, for vamos
+	// update to follow.
+	refs refSet
 }
 
-// declaration records a target of a BUILD file: where it was declared, by which builtin,
-// and its template, the target as the call declaring it describes it.
-// In a template, targets that it uses are named by targetRefs;
+// declaration records a target of a BUILD file: where it was declared, by which builtin, and the call's arguments,
+// from which template makes its template, the target as the call describes it.
+// In a template, targets that it uses are named by targetRefs, resolved as it is made;
 // configuring the target then makes an instance of it, in which they are targets in configurations.
 //
-// The template is made, and checked, as the BUILD file runs, unless an attribute is given by a function of ctx.
-// Then the call's arguments are kept instead, and a template is made in each configuration the target is needed in.
+// Running the BUILD file only declares the target, checking the call's shape and keeping its arguments, frozen.
+// Its template is made as the target is configured: once, if no argument is a function of ctx,
+// and otherwise in each configuration the target is needed in.
+// A tool cache, which is no target and names none, is made as the BUILD file runs.
 type declaration struct {
 	kind      string // "glob", "pull", "layer", "task", "index", "publication" or "tool_cache"
 	pos       syntax.Position
 	file      *buildFile
 	params    []*param // that params declares, in order, which are known before any configuration
 	hasOutput bool     // a glob, or a task given source, whose files add() can name
-	// the template, if no attribute is a function: a *fileSet, *pullSpec, *targetSpec, *indexSpec, *publicationSpec
-	// or *toolCacheSpec, whose attributes are never functions
+	usesCtx   bool     // some argument is a function of ctx, so that the template depends on the configuration
+	// the template, once made, if it doesn't depend on the configuration: a *fileSet, *pullSpec, *targetSpec,
+	// *indexSpec, *publicationSpec or *toolCacheSpec, whose attributes are never functions
 	static any
 
-	// Otherwise, the call's arguments, of which some are functions of ctx, and how to make the template.
+	// The call's arguments, frozen, of which some may be functions of ctx, and how to make the template;
+	// none for a tool cache, made as it is declared.
 	fn     *starlark.Builtin
 	args   starlark.Tuple
 	kwargs []starlark.Tuple
 	make   makeFunc
+	given  map[string]starlark.Value // the arguments, by parameter, for givenRefs
 }
 
-// makeFunc makes the template of a target from the arguments of the call to fn that declares it, checking them,
-// and returns the target's name too.
-// It runs in c: as the BUILD file declares the target,
-// or in a configuration, with what the functions of ctx among the arguments return in their place.
+// makeFunc makes the template of a target from the arguments of the call to fn that declares it, checking them and
+// resolving the targets they name, and returns the target's name too.
+// It runs in c: as the target is configured, with what the functions of ctx among the arguments return in their
+// place, or, for a tool cache, as the BUILD file declares it.
 // The arguments don't include params, which the declaration holds.
 type makeFunc func(c *evalContext, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (
 	string, any, error)
@@ -94,7 +95,8 @@ type makeFunc func(c *evalContext, fn *starlark.Builtin, args starlark.Tuple, kw
 type module struct {
 	globals starlark.StringDict
 	err     error
-	loading bool // while it runs, to report a cycle of loads
+	loading bool       // while it runs, to report a cycle of loads
+	refs    []refLabel // the labels given to dep() as it ran, or a .star file it loaded did
 }
 
 // evalMode says what Starlark code is running, which decides what builtins may do.
@@ -102,7 +104,7 @@ type evalMode int
 
 const (
 	declaring     evalMode = iota // a BUILD file, declaring its targets
-	configuring                   // a function of ctx, giving an attribute of a target being configured
+	configuring                   // a target being configured: its rule, and the functions of ctx it was given
 	loadingModule                 // the top level of a .star file, as load() runs it
 )
 
@@ -116,6 +118,42 @@ type evalContext struct {
 	made     []madeStep    // while declaring: every step made, in order
 	listed   map[step]bool // while declaring: steps in some target's list
 	deferred bool          // while declaring: some target's steps are given by a function of ctx
+	target   *declaration  // while configuring: the target being made
+	refs     refSet        // while declaring or loading a module: the labels given to add() and dep()
+	clean    map[any]bool  // the values that rule calls and dep() froze, which hold no function
+}
+
+// addRef records ref among the labels given to add() and dep(): while declaring or loading a module, in c, and while
+// configuring, in the BUILD file declaring the target, since a function of ctx may name a package nothing else does,
+// which vamos update must load to find the pulls it declares.
+// Only the label is kept, not what dep() gives the target, which nothing else may hold.
+func (c *evalContext) addRef(ref refLabel) {
+	if c.mode == configuring {
+		c.file.refs.add(ref)
+		return
+	}
+	c.refs.add(ref)
+}
+
+// refLabel is a label given to add() or dep(), and the package it is relative to.
+type refLabel struct{ pkg, ref string }
+
+// refSet is labels given to add() and dep(), each once, in the order first given.
+type refSet struct {
+	refs []refLabel
+	has  map[refLabel]bool // each of refs
+}
+
+// add records ref, unless it is there already.
+func (s *refSet) add(ref refLabel) {
+	if s.has[ref] {
+		return
+	}
+	if s.has == nil {
+		s.has = map[refLabel]bool{}
+	}
+	s.has[ref] = true
+	s.refs = append(s.refs, ref)
 }
 
 // contextKey is the thread local holding a thread's evalContext.
@@ -308,17 +346,12 @@ func (w *workspace) display(l string) string {
 }
 
 // load returns the BUILD file of package pkg, loading it if it hasn't been.
-// Loading it loads the packages whose targets it names too, before the targets that name them are declared,
-// so every target is declared after those it uses.
-// A package still loading, because the file of one it loaded names its targets, is returned as it is so far:
-// its targets declared above the point where it loaded the other can be named, as within one file;
-// resolve reports the others, which are those declared below it, a cycle of targets, or none.
+// Loading it runs it, which declares its targets and names no other package's,
+// so that a package is loaded whole, never while another is part way through, and is complete once returned.
+// The packages its targets name are loaded as those targets are configured.
 func (w *workspace) load(pkg string) (*buildFile, error) {
 	if f, ok := w.packages[pkg]; ok {
 		return f, nil
-	}
-	if i := slices.IndexFunc(w.loading, func(f *buildFile) bool { return f.pkg == pkg }); i >= 0 {
-		return w.loading[i], nil
 	}
 	if err := w.checkPackageDir(pkg); err != nil {
 		return nil, err
@@ -334,16 +367,7 @@ func (w *workspace) load(pkg string) (*buildFile, error) {
 	}
 
 	f := &buildFile{pkg: pkg, dir: dir, path: buildPath, decls: map[string]*declaration{}}
-	w.loading = append(w.loading, f)
-	defer func() { w.loading = w.loading[:len(w.loading)-1] }()
-	stored := len(w.stored)
 	if err := w.exec(f, src); err != nil {
-		// The packages this one loaded may name its targets, which are now never declared, so they go with it:
-		// one named again is loaded again, and fails on this one.
-		for _, p := range w.stored[stored:] {
-			delete(w.packages, p)
-		}
-		w.stored = w.stored[:stored]
 		var nested *loadError
 		if !errors.As(err, &nested) {
 			nested = &loadError{err}
@@ -351,7 +375,6 @@ func (w *workspace) load(pkg string) (*buildFile, error) {
 		return nil, nested
 	}
 	w.packages[pkg] = f
-	w.stored = append(w.stored, pkg)
 	return f, nil
 }
 
@@ -412,8 +435,8 @@ func (w *workspace) checkPackageDir(pkg string) error {
 }
 
 // lookup returns the BUILD file that declares the target ref names from package from, and the target's name there,
-// which it may lack: f, a BUILD file that may be being loaded, has only the targets declared so far.
-// Another package is loaded if it hasn't been.
+// which it may lack: f, the BUILD file of the target naming it, if ref names a target of its own package.
+// Another package is loaded if it hasn't been, whole, so the file returned has every target it declares.
 func (w *workspace) lookup(f *buildFile, ref, from string) (*buildFile, string, error) {
 	pkg, name, err := parseLabel(ref, from)
 	if err != nil {
@@ -433,31 +456,25 @@ func labelHint(name string) string {
 	return fmt.Sprintf(`; a label starts with "//", as in "//%s"`, name)
 }
 
-// namesOf returns the names of f's targets of the given kinds, in the order declared.
-func (f *buildFile) namesOf(kinds ...string) []string {
-	var names []string
-	for _, name := range f.names {
-		if slices.Contains(kinds, f.decls[name].kind) {
-			names = append(names, name)
-		}
-	}
-	return names
-}
-
 // missing reports that f has no target name, or no tool cache if cache is set, as mount() names one, suggesting the
 // one meant from those alone: a tool cache is no target, and only a tool cache can be mounted.
 func (f *buildFile) missing(name string, cache bool) error {
-	what, plural := "target", "targets"
-	isCache := func(n string) bool { return f.decls[n].kind == "tool_cache" }
-	names := slices.DeleteFunc(slices.Clone(f.names), isCache)
 	if cache {
-		what, plural, names = "tool cache", "tool caches", f.namesOf("tool_cache")
+		isCache := func(d *declaration) bool { return d.kind == "tool_cache" }
+		return f.missingOf(name, "tool cache", "tool caches", "none", isCache)
 	}
+	return f.missingOf(name, "target", "targets", "none", func(d *declaration) bool { return d.kind != "tool_cache" })
+}
+
+// missingOf reports that f has no what name, suggesting the one meant, or else listing them, from those that usable
+// accepts, which are plural, as what a reference may name; or saying that it declares none of them, as none puts it.
+func (f *buildFile) missingOf(name, what, plural, none string, usable func(*declaration) bool) error {
+	names := slices.DeleteFunc(slices.Clone(f.names), func(n string) bool { return !usable(f.decls[n]) })
 	hint := fmt.Sprintf("; its %s are %s", plural, fileset.QuoteNames(names))
 	if strings.Contains(name, ":") {
 		hint = labelHint(name)
 	} else if len(names) == 0 {
-		hint = "; it declares none"
+		hint = "; it declares " + none
 	} else if closest := closestName(name, names); closest != "" {
 		hint = fmt.Sprintf("; did you mean %q?", closest)
 	}
@@ -467,16 +484,15 @@ func (f *buildFile) missing(name string, cache bool) error {
 // exec executes the BUILD file f, whose source is src, declaring its targets in f.
 // The files named by its globs are read only once a build needs them, by readGlobs.
 func (w *workspace) exec(f *buildFile, src []byte) error {
-	c := &evalContext{mode: declaring, file: f, listed: map[step]bool{}}
+	c := &evalContext{mode: declaring, file: f, listed: map[step]bool{}, clean: map[any]bool{}}
 	thread := &starlark.Thread{Name: f.path, Load: w.loadModule}
 	thread.SetLocal(contextKey, c)
 	defer cancelWith(w.ctx, thread)()
-	f.thread = thread
-	defer func() { f.thread, f.declaring = nil, "" }()
 	if _, err := starlark.ExecFileOptions(&syntax.FileOptions{}, thread, f.path, src, w.predeclared()); err != nil {
 		return w.interrupted(describeExecError(err))
 	}
 
+	f.refs = c.refs
 	// A step made as the file runs may be listed only by a function of ctx giving steps, which runs later.
 	if c.deferred {
 		return nil
@@ -503,7 +519,7 @@ func describeExecError(err error) error {
 
 // loadModule implements load(): it returns the globals of the .star file that label names, such as "//:defs.star",
 // running it the first time it is named.
-func (w *workspace) loadModule(_ *starlark.Thread, label string) (starlark.StringDict, error) {
+func (w *workspace) loadModule(caller *starlark.Thread, label string) (starlark.StringDict, error) {
 	if !strings.HasPrefix(label, "//") {
 		return nil, fmt.Errorf(`a .star file is named by its label, which starts with "//" and ends with ".star", ` +
 			`such as "//:defs.star"`)
@@ -524,6 +540,7 @@ func (w *workspace) loadModule(_ *starlark.Thread, label string) (starlark.Strin
 		if m.loading {
 			return nil, fmt.Errorf("%s loads itself, through the files it loads", label)
 		}
+		w.passRefs(caller, m)
 		return m.globals, m.err
 	}
 	if err := w.checkPackageDir(pkg); err != nil {
@@ -540,14 +557,28 @@ func (w *workspace) loadModule(_ *starlark.Thread, label string) (starlark.Strin
 	m := &module{loading: true}
 	w.modules[label] = m
 	thread := &starlark.Thread{Name: path, Load: w.loadModule}
-	thread.SetLocal(contextKey, &evalContext{mode: loadingModule})
+	mc := &evalContext{mode: loadingModule}
+	thread.SetLocal(contextKey, mc)
 	defer cancelWith(w.ctx, thread)()
 	m.globals, m.err = starlark.ExecFileOptions(&syntax.FileOptions{}, thread, path, src, w.predeclared())
 	if m.err != nil {
 		m.err = w.interrupted(describeExecError(m.err))
 	}
 	m.loading = false
+	m.refs = mc.refs.refs
+	w.passRefs(caller, m)
 	return m.globals, m.err
+}
+
+// passRefs gives the BUILD or .star file that caller runs, which loads m, the labels given to dep() as m ran,
+// since what m defines may use them there.
+// Each is passed once, so that modules loaded along many paths pass on no more than they hold.
+func (w *workspace) passRefs(caller *starlark.Thread, m *module) {
+	if c := contextOf(caller); c.mode == declaring || c.mode == loadingModule {
+		for _, ref := range m.refs {
+			c.addRef(ref)
+		}
+	}
 }
 
 // predeclared returns the builtins of BUILD and .star files,
@@ -608,8 +639,10 @@ func track(b *starlark.Builtin) *starlark.Builtin {
 
 // declarer returns the builtin kind, which declares a target, taking params, as starlark.UnpackArgs names them,
 // of which the first is the target's name, and the target's own params, unless it is a pull.
-// makeTemplate makes the target's template from the call's other arguments: as it is called,
-// or, if an argument is a function of ctx, in each configuration the target is needed in.
+// A call checks only its shape: its keywords, its required arguments, a string name, unique in the package, and
+// params. It keeps its arguments, frozen, from which makeTemplate makes the target's template as the target is
+// configured: once, or, if an argument is a function of ctx, in each configuration the target is needed in.
+// A tool cache, which is no target and names none, is made, and checked in full, as it is called.
 func (w *workspace) declarer(kind string, params []string, makeTemplate makeFunc) *starlark.Builtin {
 	return starlark.NewBuiltin(kind, func(
 		thread *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple,
@@ -624,10 +657,9 @@ func (w *workspace) declarer(kind string, params []string, makeTemplate makeFunc
 				"declare it in a function that a BUILD file calls", fn.Name())
 		}
 		d := &declaration{kind: kind, pos: thread.CallFrame(1).Pos, file: c.file}
-		// Say which target the file is declaring while it names others, which may name it back.
-		outer := c.file.declaring
-		c.file.declaring = nameArg(args, kwargs)
-		defer func() { c.file.declaring = outer }()
+		if kind != "tool_cache" {
+			freeze(args, kwargs, c.clean)
+		}
 		// A pull or tool cache refuses params as given, before its value is parsed, even an empty dict.
 		isParams := func(kv starlark.Tuple) bool { return kv[0] == starlark.String("params") }
 		givesParams := slices.ContainsFunc(kwargs, isParams)
@@ -643,90 +675,313 @@ func (w *workspace) declarer(kind string, params []string, makeTemplate makeFunc
 			return nil, err
 		}
 		var name string
-		// A tool cache's arguments are checked as the BUILD file runs, so a function among them is refused there.
-		if kind != "tool_cache" && hasFunction(args, kwargs) {
-			// The tool caches are checked now, below, so the target is made later from the list as it is now, which a
-			// BUILD file appending to it can't change. Its other lists are read when it is made, as they always were.
-			args, kwargs = copyToolCaches(params, args, kwargs)
-			// Check what can be checked now: the parameters given, and the name.
-			values := make([]starlark.Value, len(params))
-			pairs := make([]any, 0, 2*len(params))
-			for i, p := range params {
-				pairs = append(pairs, p, &values[i])
-			}
-			if err := starlark.UnpackArgs(fn.Name(), args, kwargs, pairs...); err != nil {
-				return nil, err
-			}
-			n, ok := values[0].(starlark.String)
-			if !ok {
-				return nil, fmt.Errorf("%s: name is %s, want string; a target's name can't depend on ctx",
-					fn.Name(), values[0].Type())
-			}
-			name = string(n)
-			// A base given as it is, not by a function, must name an earlier target, as when nothing is a function.
-			if i := slices.Index(params, "base"); i >= 0 {
-				if _, ok := values[i].(starlark.Callable); !ok {
-					if _, err := w.makeBase(c, fn, values[i]); err != nil {
-						return nil, err
-					}
-				}
-			}
-			d.hasOutput = kind == "glob"
-			// A task has output given both source and include, as functions or not:
-			// makeTask refuses one without the other, and include can't be None.
-			if i := slices.Index(params, "source?"); i >= 0 {
-				d.hasOutput = values[i] != nil && values[slices.Index(params, "include?")] != nil
-			}
-			// Tool caches given as they are, not by a function, must name earlier tool caches, as when nothing is one.
-			if i := slices.Index(params, "tool_caches?"); i >= 0 {
-				if list, ok := values[i].(*starlark.List); ok {
-					if _, err := w.resolveMounts(c, fmt.Sprintf("%s %q", fn.Name(), name), list); err != nil {
-						return nil, err
-					}
-				}
-			}
-			// Steps listed by a function are known only once it runs; those in a list, now.
-			if i := slices.Index(params, "steps?"); i >= 0 {
-				switch v := values[i].(type) {
-				case starlark.Callable:
-					c.deferred = true
-				case *starlark.List:
-					for e := range v.Elements() {
-						if in, ok := e.(step); ok {
-							c.listed[in] = true
-						}
-					}
-				}
-			}
-			d.fn, d.args, d.kwargs, d.make = fn, args, kwargs, makeTemplate
-		} else {
+		if kind == "tool_cache" {
+			// A tool cache's arguments are checked as the BUILD file runs, so a function among them is refused there.
 			if name, d.static, err = makeTemplate(c, fn, args, kwargs); err != nil {
 				return nil, err
 			}
-			if s, ok := d.static.(*targetSpec); ok {
-				d.hasOutput = s.output != nil
-				for _, in := range s.steps {
-					c.listed[in] = true
-				}
-			} else {
-				d.hasOutput = kind == "glob"
+		} else {
+			if name, err = w.record(c, d, params, fn, args, kwargs); err != nil {
+				return nil, err
 			}
-		}
-		// The arg()s given by functions are checked as they run, in template.
-		var values []starlark.Value
-		for _, v := range append(slices.Clone(args), kwargValues(kwargs)...) {
-			if _, ok := v.(starlark.Callable); !ok {
-				values = append(values, v)
-			}
-		}
-		if err := checkArgNames(w.display(label(c.file.pkg, name)), d.params, values...); err != nil {
-			return nil, err
+			d.fn, d.args, d.kwargs, d.make = fn, args, kwargs, makeTemplate
 		}
 		if err := w.declare(c.file, name, d); err != nil {
 			return nil, fmt.Errorf("%s: %w", fn.Name(), err)
 		}
 		return starlark.None, nil
 	})
+}
+
+// record checks the shape of a call to fn declaring a target, whose parameters are params, as d records it: that it
+// gives only fn's keywords, every argument fn requires, and a string name, which it returns.
+// It reads no argument's value but to say what it can before the target is made: whether one is a function of ctx,
+// whether a task's files can be added, and which steps are listed, for the BUILD file to check that every step it
+// makes is.
+func (w *workspace) record(
+	c *evalContext, d *declaration, params []string, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple,
+) (string, error) {
+	values := make([]starlark.Value, len(params))
+	pairs := make([]any, 0, 2*len(params))
+	for i, p := range params {
+		pairs = append(pairs, p, &values[i])
+	}
+	if err := starlark.UnpackArgs(fn.Name(), args, kwargs, pairs...); err != nil {
+		return "", err
+	}
+	name, ok := values[0].(starlark.String)
+	if !ok {
+		hint := ""
+		if _, ok := values[0].(starlark.Callable); ok {
+			hint = "; a target's name can't depend on ctx"
+		}
+		return "", fmt.Errorf("%s: name is %s, want string%s", fn.Name(), values[0].Type(), hint)
+	}
+	d.usesCtx = hasFunction(args, kwargs)
+	d.given = map[string]starlark.Value{}
+	for i, p := range params {
+		if values[i] == nil {
+			continue
+		}
+		param := strings.TrimSuffix(p, "?")
+		d.given[param] = values[i]
+		// A function gives a whole argument, or none of it, so that the rest is data, which the call freezes.
+		if _, isFunction := values[i].(starlark.Callable); !isFunction {
+			if where, ok := functionWithin(values[i], c.clean, map[any]bool{}); ok {
+				slices.Reverse(where)
+				return "", fmt.Errorf("%s: %s%s is a function; a function of ctx must give the whole %s, "+
+					"not a value within it", fn.Name(), param, strings.Join(where, ""), param)
+			}
+		}
+	}
+	d.hasOutput = d.kind == "glob"
+	// A task has output given both source and include, as functions or not:
+	// makeTask refuses one without the other, and include can't be None.
+	if i := slices.Index(params, "source?"); i >= 0 {
+		d.hasOutput = values[i] != nil && values[slices.Index(params, "include?")] != nil
+	}
+	// Steps listed by a function are known only once it runs; those given as they are, now,
+	// even in a value that isn't a list, which making the target then refuses.
+	if i := slices.Index(params, "steps?"); i >= 0 {
+		if _, ok := values[i].(starlark.Callable); ok {
+			c.deferred = true
+		} else {
+			listSteps(c, values[i], map[any]bool{})
+		}
+	}
+	return string(name), nil
+}
+
+// identity returns what tells v apart from other values as a map key: v itself, but for a tuple, a slice, which its
+// first element and its length name, as a value of no other type.
+func identity(v starlark.Value) any {
+	type slice struct {
+		first *starlark.Value
+		n     int
+	}
+	if t, ok := v.(starlark.Tuple); ok {
+		if len(t) == 0 {
+			return slice{} // every empty tuple is alike
+		}
+		return slice{&t[0], len(t)}
+	}
+	return v
+}
+
+// functionWithin reports whether v holds a function, through lists, tuples, dicts, their keys too, dep()s and add()s,
+// skipping the values in clean, which hold none, frozen dep()s and add()s of them, whose arguments dep() checked as
+// it froze them, and the values in seen, which it has walked; and where, as the parts of a path
+// within v, innermost first, such as "[1]", which the caller puts after the argument's name.
+func functionWithin(v starlark.Value, clean, seen map[any]bool) ([]string, bool) {
+	if _, ok := v.(starlark.Callable); ok {
+		return nil, true
+	}
+	switch v := v.(type) {
+	case *depValue:
+		if v.target.frozen { // dep() refused a function among its arguments as it froze them
+			return nil, false
+		}
+	case *addStep:
+		if v.target.frozen {
+			return nil, false
+		}
+	}
+	key := identity(v)
+	switch v.(type) {
+	case *starlark.List, *starlark.Dict, *starlark.Set, starlark.Tuple, *depValue, *addStep:
+		if clean[key] || seen[key] {
+			return nil, false
+		}
+		seen[key] = true
+	}
+	var held []starlark.Value
+	var part func(i int) string
+	switch v := v.(type) {
+	case *starlark.List, starlark.Tuple:
+		held = slices.Collect(starlark.Elements(v.(starlark.Iterable)))
+		part = func(i int) string { return fmt.Sprintf("[%d]", i) }
+	case *starlark.Set:
+		held = slices.Collect(starlark.Elements(v))
+		part = func(i int) string { return fmt.Sprintf("'s element %s", held[i]) }
+	case *starlark.Dict:
+		items := v.Items()
+		for _, item := range items {
+			held = append(held, item[0], item[1])
+		}
+		part = func(i int) string {
+			if i%2 == 0 {
+				return fmt.Sprintf("'s key %s", items[i/2][0])
+			}
+			return fmt.Sprintf("[%s]", items[i/2][0])
+		}
+	case *depValue:
+		held, part = v.target.values(), func(i int) string { return "'s dep() argument " + v.target.args[i].name }
+	case *addStep:
+		held, part = v.target.values(), func(i int) string { return "'s dep() argument " + v.target.args[i].name }
+	}
+	for i, h := range held {
+		if where, ok := functionWithin(h, clean, seen); ok {
+			return append(where, part(i)), true
+		}
+	}
+	return nil, false
+}
+
+// listSteps records the steps that v, a target's steps as given, holds as listed in c, even within a list, tuple or
+// dict within it, or v itself, which making the target refuses, so that it is refused for what it is, not as unlisted.
+func listSteps(c *evalContext, v starlark.Value, seen map[any]bool) {
+	switch v := v.(type) {
+	case step:
+		c.listed[v] = true
+	case *starlark.List, starlark.Tuple:
+		if key := identity(v); !seen[key] {
+			seen[key] = true
+			for e := range starlark.Elements(v.(starlark.Iterable)) {
+				listSteps(c, e, seen)
+			}
+		}
+	case *starlark.Dict:
+		if !seen[v] {
+			seen[v] = true
+			for _, item := range v.Items() {
+				listSteps(c, item[1], seen)
+			}
+		}
+	}
+}
+
+// freeze freezes the arguments of a call, and every list and dict they hold, as freezeValueIn does,
+// so that the target they declare is made from the values the call was given:
+// a BUILD file that changes one afterwards fails where it does.
+// clean holds the values that earlier calls froze, which hold no function, so that they aren't walked again.
+func freeze(args starlark.Tuple, kwargs []starlark.Tuple, clean map[any]bool) {
+	for _, v := range args {
+		freezeValueIn(v, clean)
+	}
+	for _, kv := range kwargs {
+		freezeValueIn(kv[1], clean)
+	}
+}
+
+// freezeValueIn freezes the lists, dicts and sets that v is or holds, through lists, dicts, sets, tuples, dep()s and
+// add()s, unless one holds a function, directly or through others: a function, and the variables it captures, are left
+// as they are, as are the values that hold one.
+// Starlark's Freeze of a function freezes what it captures without noting what it has frozen, so it would never end
+// where a function captures itself, and would take time exponential in functions that share what they capture.
+// A function can only be a whole argument, so a value holding one is refused as its target is made.
+// Each value is walked once and frozen after what it holds, so that freezing takes time linear in what v holds, but
+// for Starlark's own Freeze of a list or dict, which walks a tuple it holds anew along every path to it.
+// It skips the values in clean, which are frozen and hold no function, and adds to it those it freezes.
+func freezeValueIn(v starlark.Value, clean map[any]bool) {
+	fz := &freezer{index: map[any]int{}, clean: clean}
+	fz.walk(v)
+	// A value holds a function if one it holds does, which a value it holds back may not have known as it was walked.
+	var spread []int
+	for i, n := range fz.nodes {
+		if n.function {
+			spread = append(spread, i)
+		}
+	}
+	for len(spread) > 0 {
+		i := spread[len(spread)-1]
+		spread = spread[:len(spread)-1]
+		for _, h := range fz.nodes[i].holders {
+			if !fz.nodes[h].function {
+				fz.nodes[h].function = true
+				spread = append(spread, h)
+			}
+		}
+	}
+	for _, i := range fz.order {
+		if n := fz.nodes[i]; !n.function {
+			if _, isTuple := n.value.(starlark.Tuple); !isTuple { // immutable, and frozen with what holds it
+				n.value.Freeze()
+			}
+			clean[identity(n.value)] = true
+		}
+	}
+}
+
+// freezer walks the values that a rule's argument holds, for freezeValueIn.
+type freezer struct {
+	nodes []freezeNode // each value walked
+	index map[any]int  // of each value in nodes, by identity
+	order []int        // the nodes, each after those it holds but itself, as they are frozen
+	clean map[any]bool // values frozen already that hold no function, which aren't walked
+}
+
+// freezeNode is a value that holds others, which freezeValueIn freezes unless it holds a function.
+type freezeNode struct {
+	value    starlark.Value
+	holders  []int // the nodes holding it
+	function bool  // it holds a function
+}
+
+// walk adds v, if it holds other values, and those it holds, to fz.nodes, returning its index there, or -1 for a value
+// that holds none, and whether v is a function.
+func (fz *freezer) walk(v starlark.Value) (int, bool) {
+	switch v := v.(type) {
+	case starlark.Callable:
+		return -1, true
+	case *starlark.List, *starlark.Dict, *starlark.Set:
+	case starlark.Tuple:
+		if len(v) == 0 {
+			return -1, false
+		}
+	case *depValue:
+		if v.target.frozen {
+			return -1, false
+		}
+	case *addStep:
+		if v.target.frozen {
+			return -1, false
+		}
+	default:
+		return -1, false
+	}
+	key := identity(v)
+	if fz.clean[key] {
+		return -1, false
+	}
+	if i, ok := fz.index[key]; ok {
+		return i, false
+	}
+	var held []starlark.Value
+	switch v := v.(type) {
+	case *starlark.List:
+		held = slices.Collect(v.Elements())
+	case *starlark.Dict:
+		for _, item := range v.Items() {
+			held = append(held, item[0], item[1])
+		}
+	case *starlark.Set:
+		held = slices.Collect(starlark.Elements(v))
+	case starlark.Tuple:
+		held = v
+	case *depValue:
+		held = v.target.values()
+	case *addStep:
+		held = v.target.values()
+	}
+	// Indexed before what it holds is walked, so that a value holding itself is walked once.
+	i := len(fz.nodes)
+	fz.index[key] = i
+	fz.nodes = append(fz.nodes, freezeNode{value: v})
+	var holds []int
+	function := false
+	for _, h := range held {
+		j, isFunction := fz.walk(h)
+		function = function || isFunction
+		if j >= 0 {
+			holds = append(holds, j)
+		}
+	}
+	fz.nodes[i].function = function
+	for _, j := range holds {
+		fz.nodes[j].holders = append(fz.nodes[j].holders, i)
+	}
+	fz.order = append(fz.order, i)
+	return i, false
 }
 
 // takeParams returns kwargs, the keyword arguments of a call to fnName,
@@ -738,41 +993,6 @@ func takeParams(fnName string, kwargs []starlark.Tuple) ([]starlark.Tuple, []*pa
 	}
 	params, err := parseParams(fnName, kwargs[i][1])
 	return slices.Delete(slices.Clone(kwargs), i, i+1), params, err
-}
-
-// copyToolCaches returns a call's arguments with its tool_caches, if params has it and the call gives a list, replaced
-// by a copy of its own, leaving the call's own untouched.
-func copyToolCaches(params []string, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Tuple, []starlark.Tuple) {
-	i := slices.Index(params, "tool_caches?")
-	if i < 0 {
-		return args, kwargs
-	}
-	copied := func(v starlark.Value) starlark.Value {
-		if list, ok := v.(*starlark.List); ok {
-			return starlark.NewList(slices.Collect(list.Elements()))
-		}
-		return v
-	}
-	if i < len(args) {
-		args = slices.Clone(args)
-		args[i] = copied(args[i])
-	}
-	kwargs = slices.Clone(kwargs)
-	for k, kv := range kwargs {
-		if kv[0] == starlark.String("tool_caches") {
-			kwargs[k] = starlark.Tuple{kv[0], copied(kv[1])}
-		}
-	}
-	return args, kwargs
-}
-
-// kwargValues returns the values of a call's keyword arguments.
-func kwargValues(kwargs []starlark.Tuple) []starlark.Value {
-	values := make([]starlark.Value, len(kwargs))
-	for i, kv := range kwargs {
-		values[i] = kv[1]
-	}
-	return values
 }
 
 // hasFunction reports whether one of a call's arguments is a function, as of ctx.
@@ -854,8 +1074,9 @@ const (
 // resolve finds the target that ref, the argument param of a call to fn, names, setting ref.label:
 // one of the kinds that use allows, returning its declaration.
 // It checks the arguments ref gives the target too.
-// As a BUILD file runs, targets of its own must be declared earlier,
-// so targets it names outside functions of ctx can't form a cycle.
+// It runs as the target naming ref is made, as it is configured, once every BUILD file it names has run whole,
+// so ref may name a target declared anywhere: above or below it, in its own package or another.
+// Configuration reports targets that use each other in a cycle.
 // No target can name a publication, which only the command line names, and only mount() names a tool cache.
 func (w *workspace) resolve(
 	c *evalContext, fn *starlark.Builtin, param string, ref *targetRef, use refUse,
@@ -865,40 +1086,64 @@ func (w *workspace) resolve(
 
 // resolveAs is resolve, with errors saying they are of who, such as a builtin's name, rather than fn.
 func (w *workspace) resolveAs(c *evalContext, who, param string, ref *targetRef, use refUse) (*declaration, error) {
-	image := use == useImage
 	var kinds []string
-	var listed, scratchHint, want, rule string
+	// plural lists the targets of kinds, and none says there are none, for a reference naming none.
+	var want, rule, plural, none string
 	switch use {
 	case useFiles:
-		kinds, listed, want = []string{"glob", "task"}, "globs and tasks", "glob() or task()"
+		kinds, want = []string{"glob", "task"}, "glob() or task()"
+		plural, none = "globs and tasks with output", "no globs or tasks with output"
 	case useImage:
-		kinds, listed, want, scratchHint = []string{"pull", "layer"}, "targets", "pull() or layer()", `"scratch" or `
+		kinds, want = []string{"pull", "layer"}, "pull() or layer()"
+		plural, none = "pulls and layers", "no pulls or layers"
 	case useCheck:
-		kinds, listed, want, rule = []string{"task"}, "tasks", "task()", "; a check must be a task"
+		kinds, want, rule, plural, none = []string{"task"}, "task()", "; a check must be a task", "tasks", "no tasks"
 	case usePublished:
-		kinds, listed = []string{"pull", "layer", "index"}, "pulls, layers and indexes"
+		kinds = []string{"pull", "layer", "index"}
+		plural, none = "pulls, layers and indexes", "no pulls, layers or indexes"
 		want, rule = "pull(), layer() or index()", "; a published target must be a pull, layer or index"
 	case useCache:
-		kinds, listed, want = []string{"tool_cache"}, "tool caches", "tool_cache()"
+		kinds, want, plural, none = []string{"tool_cache"}, "tool_cache()", "tool caches", "none"
 		rule = "; mount() names a tool cache"
+	}
+	// A target being made can't use itself, even in another configuration, which would only be a cycle.
+	usable := func(d *declaration) bool {
+		return slices.Contains(kinds, d.kind) && (use != useFiles || d.hasOutput) && d != c.target
 	}
 	from, name, err := w.lookup(c.file, ref.ref, ref.pkg)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %s %q: %w", who, param, ref.ref, err)
 	}
 	d, ok := from.decls[name]
-	declaring := from == c.file && c.mode == declaring
+	// The names the reference could have meant, which a hint chooses from.
+	var usableNames []string
+	if !ok {
+		for _, n := range from.names {
+			if usable(from.decls[n]) {
+				usableNames = append(usableNames, n)
+			}
+		}
+	}
 	switch {
-	case !ok && from.thread != nil && from != c.file:
-		return nil, fmt.Errorf("%s: %s %q: %w", who, param, ref.ref, w.notDeclaredYet(from, name))
-	case !ok && declaring && !image && strings.Contains(name, ":"):
-		return nil, fmt.Errorf("%s: %s %q is not an earlier %s%s",
-			who, param, ref.ref, want, labelHint(name))
-	case !ok && declaring:
-		return nil, fmt.Errorf("%s: %s %q is not %san earlier %s%s",
-			who, param, ref.ref, scratchHint, want, describeNames(listed, from.namesOf(kinds...)))
+	case !ok && param == "base" && !ref.viaDep && !strings.HasPrefix(ref.ref, "//") &&
+		closestName(name, append(slices.Clone(usableNames), scratch)) == scratch:
+		// Only a base given as a string can be scratch.
+		return nil, fmt.Errorf("%s: %s %q: %s has no target %q; did you mean %q, the empty image?",
+			who, param, ref.ref, from.path, name, scratch)
+	case !ok && use == useImage && !strings.HasPrefix(ref.ref, "//") && strings.ContainsAny(name, "/:") &&
+		closestName(name, usableNames) == "":
+		// No name holds either, so this is likely an image, such as busybox:1.36, which only a pull() names,
+		// or a label missing its leading "//".
+		return nil, fmt.Errorf("%s: %s %q: %s has no target %q; to build on an image, declare a pull() of it, "+
+			`or name a target of another package by a label starting with "//"`, who, param, ref.ref, from.path, name)
+	case !ok && use == useCache:
+		return nil, fmt.Errorf("%s: %s %q: %w", who, param, ref.ref, from.missing(name, true))
 	case !ok:
-		return nil, fmt.Errorf("%s: %s %q: %w", who, param, ref.ref, from.missing(name, use == useCache))
+		// What the reference can't use isn't suggested, since naming it would only fail again.
+		err := from.missingOf(name, "target", plural, none, usable)
+		return nil, fmt.Errorf("%s: %s %q: %w", who, param, ref.ref, err)
+	case d.kind == "tool_cache" && use != useCache && ref.pos.IsValid():
+		return nil, &posError{pos: ref.pos, err: fmt.Errorf("dep: %w", noTarget(ref.ref))}
 	case d.kind == "tool_cache" && use != useCache:
 		return nil, fmt.Errorf("%s: %s: %w", who, param, noTarget(ref.ref))
 	case d.kind == "publication" && use != useCache:
@@ -912,54 +1157,17 @@ func (w *workspace) resolveAs(c *evalContext, who, param string, ref *targetRef,
 		return nil, fmt.Errorf("%s: %s %q is a task() without output; give it source and include",
 			who, param, ref.ref)
 	}
-	if err := d.checkArgs(ref); err != nil {
+	if err := d.checkArgs(ref); err != nil && ref.pos.IsValid() {
+		return nil, &posError{pos: ref.pos, err: fmt.Errorf("dep: %w", err)}
+	} else if err != nil {
 		return nil, fmt.Errorf("%s: %s: %w", who, param, err)
 	}
 	ref.label = label(from.pkg, name)
 	return d, nil
 }
 
-// notDeclaredYet explains why the file from, which is still running, has no target name yet:
-// from is declaring it, so the targets that name it name each other in a cycle;
-// or it declares it, if at all, below the point where it loaded the package naming it.
-func (w *workspace) notDeclaredYet(from *buildFile, name string) error {
-	if from.declaring == name {
-		var cycle []string
-		for _, f := range w.loading[slices.Index(w.loading, from):] {
-			cycle = append(cycle, label(f.pkg, f.declaring))
-		}
-		return fmt.Errorf("targets name each other in a cycle: %s -> %s", strings.Join(cycle, " -> "),
-			label(from.pkg, name))
-	}
-	at := from.path
-	for depth := 0; depth < from.thread.CallStackDepth(); depth++ {
-		if pos := from.thread.CallFrame(depth).Pos; pos.Filename() == from.path {
-			at = pos.String()
-			break
-		}
-	}
-	return fmt.Errorf("%s isn't declared yet: its BUILD file is stopped at %s, loading this package; "+
-		"declare %s above that line, or name it from a function of ctx, which runs once every BUILD file has run",
-		label(from.pkg, name), at, name)
-}
-
-// nameArg returns the name a call declaring a target gives, as its first argument or by name, or "" if it gives none
-// that is a string, which the declarer then reports.
-func nameArg(args starlark.Tuple, kwargs []starlark.Tuple) string {
-	if len(args) > 0 {
-		s, _ := starlark.AsString(args[0])
-		return s
-	}
-	for _, kv := range kwargs {
-		if string(kv[0].(starlark.String)) == "name" {
-			s, _ := starlark.AsString(kv[1])
-			return s
-		}
-	}
-	return ""
-}
-
-// newAdd implements add(source, dest, owner, group), checking the target it names as it is called.
+// newAdd implements add(source, dest, owner, group).
+// The target that adds it resolves its source as it is made, reporting a mistake where add() is called.
 func (w *workspace) newAdd(
 	thread *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple,
 ) (starlark.Value, error) {
@@ -983,8 +1191,8 @@ func (w *workspace) newAdd(
 	if err != nil {
 		return nil, err
 	}
-	if _, err := w.resolve(c, fn, "source", &ref, useFiles); err != nil {
-		return nil, err
+	if _, _, err := parseLabel(ref.ref, ref.pkg); err != nil {
+		return nil, fmt.Errorf("%s: source %q: %w", fn.Name(), ref.ref, err)
 	}
 	if err := graph.CheckPath("dest", dest); err != nil {
 		return nil, fmt.Errorf("%s: %w", fn.Name(), err)
@@ -998,7 +1206,21 @@ func (w *workspace) newAdd(
 			return nil, fmt.Errorf("%s: %s %q must not contain a NUL byte", fn.Name(), id[0], id[1])
 		}
 	}
-	return &addStep{target: ref, display: source.String(), dest: dest, owner: owner, group: group}, nil
+	c.addRef(refLabel{ref.pkg, ref.ref})
+	return &addStep{
+		target: ref, given: source, dest: dest, owner: owner, group: group, pos: callerPos(thread),
+	}, nil
+}
+
+// callerPos returns the position of the call to the builtin that thread is running, in the innermost BUILD or .star
+// file calling it, as describeEvalError reports an error of the builtin.
+func callerPos(thread *starlark.Thread) syntax.Position {
+	for depth := 1; depth < thread.CallStackDepth(); depth++ {
+		if pos := thread.CallFrame(depth).Pos; pos.Filename() != "<builtin>" && pos.IsValid() {
+			return pos
+		}
+	}
+	return thread.CallFrame(1).Pos
 }
 
 // makeBase returns the base of a target made by a call to fn, as base, the argument, gives it.
@@ -1034,7 +1256,7 @@ func (w *workspace) makeLayer(
 
 	s := &targetSpec{label: label(c.file.pkg, name)}
 	var err error
-	if s.steps, err = stepList(fn.Name(), steps); err != nil {
+	if s.steps, err = w.stepList(c, fn.Name(), steps); err != nil {
 		return "", nil, err
 	}
 	if s.command, err = stringList(fn.Name(), "command", command); err != nil {
@@ -1076,7 +1298,7 @@ func (w *workspace) makeTask(
 
 	s := &targetSpec{label: label(c.file.pkg, name), task: true, source: source}
 	var err error
-	if s.steps, err = stepList(fn.Name(), steps); err != nil {
+	if s.steps, err = w.stepList(c, fn.Name(), steps); err != nil {
 		return "", nil, err
 	}
 	// A task makes files for add() only if it says where they are.
@@ -1282,7 +1504,8 @@ func parseRepository(repo string) (reference.Named, error) {
 }
 
 // target returns the label and kind of the target that ref, given on the command line,
-// names from the package of -C, loading the BUILD file that declares it.
+// names from the package of -C, loading the BUILD file that declares it, and making its template unless that needs a
+// configuration.
 // A tool cache is refused, since it is no target, whatever the command does with what it names.
 func (w *workspace) target(ref string) (string, string, error) {
 	pkg, name, err := parseLabel(ref, w.current)
@@ -1299,6 +1522,13 @@ func (w *workspace) target(ref string) (string, string, error) {
 	}
 	if d.kind == "tool_cache" {
 		return "", "", noTarget(ref)
+	}
+	// A mistake in the target's rule is reported before what the command makes of its kind,
+	// as it is for a target whose rule needs a configuration, made as the command line configures it.
+	if !d.usesCtx {
+		if _, err := w.template(d, confLabel{label: label(pkg, name)}); err != nil {
+			return "", "", err
+		}
 	}
 	return label(pkg, name), d.kind, nil
 }
@@ -1492,14 +1722,6 @@ func article(kind string) string {
 		return "an"
 	}
 	return "a"
-}
-
-// describeNames lists the targets of a kind, such as "globs", declared so far, for an error about an unknown name.
-func describeNames(kind string, names []string) string {
-	if len(names) == 0 {
-		return "; there are none before this"
-	}
-	return "; earlier " + kind + " are " + fileset.QuoteNames(names)
 }
 
 // describeEvalError reports e at the innermost position within a BUILD file,

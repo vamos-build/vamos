@@ -6,7 +6,8 @@
 // A package's BUILD file is named BUILD or BUILD.vms, never both; findBuildFile owns the names.
 // Package loading is demand-driven, including labels discovered while configuring;
 // there is no workspace-wide validation pass.
-// A package still loading, because one it loaded names its targets, gives the targets it has declared so far.
+// A package's BUILD file runs whole, never while another is part way through: running it only declares its targets,
+// whose rules are evaluated, resolving their references, as they are configured.
 // BUILD mistakes retain source positions here rather than becoming executor graph-validation errors.
 // The WORKSPACE file at the root of the workspace holding Request.Dir, and no other, is evaluated as the workspace
 // opens, before any BUILD file loads, on a thread of its own whose only builtin is workspace(), which may name the
@@ -22,6 +23,10 @@
 // # Lifecycle
 //
 // Declaration, configuration, lowering and source capture are separate stages.
+// Declaration runs each BUILD file whole, checking each rule call's shape and keeping its arguments, frozen;
+// configuration makes each target's template from them, once or per configuration,
+// which resolves the references they give, loading the packages those name,
+// so that no package is ever loaded part way.
 // Each honours the load's context: cancelWith stops a Starlark thread when it ends, and the load reports
 // the interruption as the context's error, not the BUILD file's.
 // Their state is private to one Load call.

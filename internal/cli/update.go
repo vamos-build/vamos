@@ -54,8 +54,7 @@ func (inv *invocation) update(names []string) error {
 	if i := slices.IndexFunc(pulls, func(p load.Pull) bool { return p.Configured }); i >= 0 {
 		keptFor = fmt.Sprintf("pull %q may in another configuration", pulls[i].Label)
 	} else if unsure != "" {
-		keptFor = fmt.Sprintf("%q, which couldn't be configured as building it would, may use a pull that does",
-			unsure)
+		keptFor = unsure
 	}
 	if keptFor != "" {
 		remove = false
@@ -193,9 +192,10 @@ type pinChange struct {
 	keptFor       string
 }
 
-// keptPins returns the pins of l that pins doesn't have, which a full update keeps, for the reason keptFor: that a
-// pull whose image or tag is a function of ctx may use them in another configuration than this machine's, or that a
-// target that couldn't be configured may use a pull that does.
+// keptPins returns the pins of l that pins doesn't have, which a full update keeps, for the reason keptFor, which
+// load.Pulls gives as unsure: such as that a pull whose image or tag is a function of ctx may use them in another
+// configuration than this machine's, or that a target that couldn't be configured, or a package that couldn't be
+// loaded, may use a pull that does.
 func keptPins(l *load.Lock, pins map[string]load.Pin, keptFor string) []pinChange {
 	var kept []pinChange
 	for _, image := range slices.Sorted(maps.Keys(l.Pulls)) {

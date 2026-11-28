@@ -332,8 +332,8 @@ task(name = "build", base = "scratch", tool_caches = [` + tc.mounts + `], steps 
 
 // TestToolCacheDeclarations checks what declaring tool caches and the targets that mount them refuses or keeps:
 // task()'s arguments given by position, which tool_caches follows; params, even empty, given to tool_cache(); a dep()
-// that names a tool cache; and a literal tool_caches of a target given by a function of ctx, resolved as it is
-// declared, so that it names only caches declared before it.
+// that names a tool cache; and a literal tool_caches of a target given by a function of ctx, resolved as the target is
+// made, so that it may name a cache declared below it.
 func TestToolCacheDeclarations(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
@@ -404,8 +404,7 @@ task(name = "build", base = "scratch", tool_caches = [mount("tool")], steps = [r
 		{
 			name: "a dep() of a tool cache",
 			build: `tool_cache(name = "tool", path = "/cache")
-d = dep("tool")
-task(name = "build", base = "scratch", steps = [run(["true"])])`,
+task(name = "build", base = dep("tool"), steps = [run(["true"])])`,
 			err: `dep: "tool" is a tool_cache(), which is no target`,
 		},
 		{
@@ -413,7 +412,6 @@ task(name = "build", base = "scratch", steps = [run(["true"])])`,
 			build: `task(name = "build", base = "scratch", tool_caches = [mount("tool")],
      steps = lambda ctx: [run(["true"])])
 tool_cache(name = "tool", path = "/cache")`,
-			err: `task "build": tool_caches[0] "tool" is not an earlier tool_cache(); there are none before this`,
 		},
 		{
 			name: "a cache path with a function of ctx",
@@ -456,46 +454,26 @@ task(name = "app", base = "base", tool_caches = [mount("tool")], steps = [run(["
 	}
 }
 
-// TestToolCachesOfAConfiguredTarget checks that a target given by a function of ctx keeps the tool_caches it was
-// declared with, by name or by position, which a later append doesn't change, even one list given for two arguments,
-// while its other lists are read as it is configured, as they always were; and that tool_caches given by a function
-// resolve as the target is configured, once every BUILD file has run.
+// TestToolCachesOfAConfiguredTarget checks that a target given by a function of ctx mounts the tool caches of its
+// tool_caches, whether a list given as it is, by name or by position, or a function, each naming a cache declared
+// below it, which resolves as the target is configured, once every BUILD file has run.
 func TestToolCachesOfAConfiguredTarget(t *testing.T) {
 	g, err := loadNamed(t, `
-caches = []
-include = ["a"]
-task(name = "appended", base = "scratch", tool_caches = caches, steps = lambda ctx: [run(["true"])],
-     source = "/out", include = include)
+task(name = "listed", base = "scratch", tool_caches = [mount("tool")], steps = lambda ctx: [run(["true"])])
 task(name = "given", base = "scratch", tool_caches = lambda ctx: [mount("tool")], steps = [run(["true"])])
-shared = []
-layer(name = "aliased", base = "scratch", command = shared, tool_caches = shared, steps = lambda ctx: [])
-positional = []
-layer("positional", "scratch", lambda ctx: [], [], [], positional)
+layer("positional", "scratch", lambda ctx: [run(["true"])], [], [], [mount("tool")])
 tool_cache(name = "tool", path = "/cache")
-caches.append(mount("tool"))
-include.append("b")
-shared.append("echo")
-positional.append(mount("tool"))
-`, nil, "appended", "given", "aliased", "positional")
+`, nil, "listed", "given", "positional")
 	testenv.Must(t, err)
-	appended := g.Node(g.Roots[0]).Task
-	if appended.ToolCaches != nil {
-		t.Errorf("appended mounts %+v; want none, as declared", appended.ToolCaches)
-	}
-	if got := appended.Output.Selection.Include; !reflect.DeepEqual(got, []string{"a", "b"}) {
-		t.Errorf("appended includes %q; want [a b], as appended", got)
-	}
-	aliased := g.Node(g.Roots[2]).Layer
-	if !reflect.DeepEqual(aliased.Command, []string{"echo"}) || aliased.ToolCaches != nil {
-		t.Errorf("aliased's command = %q, mounts %+v; want [echo], as appended, and none, as declared",
-			aliased.Command, aliased.ToolCaches)
-	}
-	if got := g.Node(g.Roots[3]).Layer.ToolCaches; got != nil {
-		t.Errorf("positional mounts %+v; want none, as declared", got)
-	}
 	want := []graph.ToolCache{{Path: "/cache", Label: "//:tool"}}
-	if got := g.Node(g.Roots[1]).Task.ToolCaches; !reflect.DeepEqual(got, want) {
-		t.Errorf("given mounts %+v; want %+v", got, want)
+	for i, got := range [][]graph.ToolCache{
+		g.Node(g.Roots[0]).Task.ToolCaches,
+		g.Node(g.Roots[1]).Task.ToolCaches,
+		g.Node(g.Roots[2]).Layer.ToolCaches,
+	} {
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("%s mounts %+v; want %+v", []string{"listed", "given", "positional"}[i], got, want)
+		}
 	}
 }
 

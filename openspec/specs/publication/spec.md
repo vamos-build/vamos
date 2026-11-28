@@ -12,7 +12,7 @@ and carry it out with one command that publishes nothing unless everything it de
 A BUILD file SHALL be able to declare `publication(name, images, checks?, params?)`,
 where the optional `checks` is a list of task targets and `images` is a nonempty dictionary from a repository,
 a lowercase registry repository name without a tag or digest, to the pull, layer or index target published there.
-Mistakes in a publication SHALL be reported as the BUILD file loads, before anything is built,
+Mistakes in a publication SHALL be reported when a command builds or publishes it, before anything is built,
 naming the file, line and column.
 
 #### Scenario: A publication names its checks and images
@@ -70,7 +70,7 @@ publishing it again pushes again, while its checks and images are reused from th
 
 - **GIVEN** a layer whose base names the publication `release`
 - **WHEN** I build that layer
-- **THEN** it fails as the BUILD file loads, saying that a publication can't be depended on
+- **THEN** it fails before anything is built, saying that a publication can't be depended on
 
 #### Scenario: Publishing again pushes again from the cache
 
