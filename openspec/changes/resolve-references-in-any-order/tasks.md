@@ -56,14 +56,14 @@
 
 ## 4. Documentation
 
-- [ ] 4.1 Rewrite "Cross-package dependencies" in `docs/user/reference/configuration.md`: a BUILD file declares its
+- [x] 4.1 Rewrite "Cross-package dependencies" in `docs/user/reference/configuration.md`: a BUILD file declares its
   targets, each is evaluated when a command needs it, a reference may name any target declared anywhere, a mistake in
   a target is reported when it is built, and a rule's arguments, and `dep()`'s as it is called, are frozen; drop the
   advice to declare targets above, there and in `docs/user/reference/build/README.md`, and check `docs/user/` for
   other mentions of declaration order. Update
   `internal/load/doc.go`'s invariants and lifecycle: declaration and evaluation as separate stages, and no partially
   loaded package. Verify with `scripts/check`'s markdownlint and `go doc ./internal/load`.
-- [ ] 4.2 Update `docs/user/reference/cli/update.md` for how a full update finds pulls now: it checks the rules of the
+- [x] 4.2 Update `docs/user/reference/cli/update.md` for how a full update finds pulls now: it checks the rules of the
   targets the walk finds and of what they use as given, failing on a mistake there or on targets that use each other so
   in a cycle; follows the labels given to `add()`
   and `dep()` as BUILD and `.star` files run; and keeps the pins no pull found uses, with a "kept ..., since ..." line,

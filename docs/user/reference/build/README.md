@@ -9,8 +9,10 @@ to prevent naming collisions on case-insensitive filesystems;
 see [workspaces](../configuration.md#workspaces).
 You can use Starlark lists, dictionaries, functions, and comprehensions to compose target declarations.
 
-Syntax errors or invalid target arguments halt execution as the file loads, before any build steps run.
-Error messages report the file, line, and column of the invalid call.
+Syntax errors and mistakes in how a call is made, such as a misspelled argument or a duplicate name,
+halt execution as the file loads.
+A mistake in a target's values or references is reported when a command needs the target, before any build steps run.
+Error messages report the file, line, and column of the invalid call, which may be in a `.star` file.
 Strings passed to targets and steps—including names, arguments, paths, owners, and environment variables—must
 not contain NUL bytes.
 
@@ -21,9 +23,11 @@ Names cannot contain `:` or `/`, and `scratch` is reserved to represent an empty
 Target declarations register targets in the build graph; they do not return artifact objects.
 Refer to targets by name or by [workspace label](../configuration.md#workspaces), optionally wrapped in `dep()`.
 
-Declare local targets before any targets that consume them.
-References created inside a function of `ctx` can resolve targets declared later in the file.
-Dependency cycles produce an error during graph construction.
+A reference can name a target declared above or below it, in its own file or another package's;
+see [cross-package dependencies](../configuration.md#cross-package-dependencies).
+The values passed to a rule, or to `dep()`, are frozen as it is called, so a list can't be changed after passing it;
+see [cross-package dependencies](../configuration.md#cross-package-dependencies) for both.
+Dependency cycles produce an error as the targets are configured.
 
 | Target | Produces | Can be a `base` | Can be an `add()` source |
 | --- | --- | --- | --- |

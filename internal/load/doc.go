@@ -23,6 +23,10 @@
 // # Lifecycle
 //
 // Declaration, configuration, lowering and source capture are separate stages.
+// Declaration runs each BUILD file whole, checking each rule call's shape and keeping its arguments, frozen;
+// configuration makes each target's template from them, once or per configuration,
+// which resolves the references they give, loading the packages those name,
+// so that no package is ever loaded part way.
 // Each honours the load's context: cancelWith stops a Starlark thread when it ends, and the load reports
 // the interruption as the context's error, not the BUILD file's.
 // Their state is private to one Load call.
