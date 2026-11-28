@@ -106,6 +106,13 @@ function it calls, or by a function of `ctx`.
 - **WHEN** I save `app`, and separately `app` with `--set mode=debug`
 - **THEN** both succeed, the first image holding `release` under `/app` and the second `debug`
 
+#### Scenario: A publication's check and image, and an index's manifest, declared below
+
+- **GIVEN** a BUILD file declaring `publication(name="release", checks=["test"], images={".../server": "server"})`,
+  and then an index `server` whose manifest is the layer `app`, a task `test` on `app`, and the layer `app`
+- **WHEN** I publish `release`
+- **THEN** it succeeds, running `test` and publishing the index with `app`'s manifest
+
 #### Scenario: A tool cache declared below
 
 - **GIVEN** a BUILD file declaring a task that mounts `mount("go-build")` and then `tool_cache(name="go-build", ...)`

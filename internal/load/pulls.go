@@ -91,9 +91,9 @@ func (w *workspace) commandPull(l string, req Request) (Pull, error) {
 // configuration can build. Then every target is configured as building it would, until no new
 // package is loaded, so that a package used only through a function of ctx is found. What else these lead to is unsure,
 // never a failure, since unsure keeps every pin: a target that can't be configured so, a target that only a function
-// of ctx leads to whose rule has a mistake, and a package that a label given to add() or dep() as a BUILD file or a
-// .star file it loads ran names, which a function of ctx that can't run here may use, and which is loaded only to find
-// it, but can't be.
+// of ctx leads to whose rule has a mistake, and a package that a label given to add() or dep() names, as a BUILD file,
+// a .star file it loads or a function of ctx it gives ran, which a function of ctx that can't run here may use, and
+// which is loaded only to find it, but can't be.
 func (w *workspace) everyPull(req Request) (pulls []Pull, unsure string, err error) {
 	pkgs, err := w.packageDirs()
 	if err != nil {
@@ -143,16 +143,18 @@ func (w *workspace) everyPull(req Request) (pulls []Pull, unsure string, err err
 	cr := &configurer{w: w, pulls: map[confLabel]*pullSpec{}, targets: map[confLabel]*targetSpec{},
 		globs: map[confLabel]*fileSet{}, indexes: map[confLabel][]confLabel{}, pinning: true}
 	configured := map[string]bool{}
-	searched := map[string]bool{}   // packages whose labels given to add() and dep() are followed
+	searched := map[string]int{}    // by package, how many of its labels given to add() and dep() are followed
 	unloadable := map[string]bool{} // packages those labels name that couldn't be loaded
 	broken := map[string]bool{}     // targets beyond those checked whose rules have a mistake
 	for grew := true; grew; {
 		grew = false
 		for _, pkg := range slices.Sorted(maps.Keys(w.packages)) {
 			f := w.packages[pkg]
-			if !searched[pkg] {
-				searched[pkg], grew = true, true
-				for _, named := range w.namedPackages(f) {
+			// Configuring a target may give its BUILD file more labels, from a function of ctx, which are followed too.
+			if n := len(f.refs.refs); searched[pkg] < n {
+				named := w.namedPackages(f, searched[pkg])
+				searched[pkg], grew = n, true
+				for _, named := range named {
 					if unloadable[named] {
 						continue
 					}
@@ -347,10 +349,11 @@ func usedBy(tmpl any) []use {
 	return used
 }
 
-// namedPackages returns the packages that the labels given to add() and dep() as f ran name, sorted, but f's own.
-func (w *workspace) namedPackages(f *buildFile) []string {
+// namedPackages returns the packages that the labels of f given to add() and dep(), from the one at from on, name,
+// sorted, but f's own.
+func (w *workspace) namedPackages(f *buildFile, from int) []string {
 	var pkgs []string
-	for _, ref := range f.refs {
+	for _, ref := range f.refs.refs[from:] {
 		if pkg, _, err := parseLabel(ref.ref, ref.pkg); err == nil && pkg != f.pkg && !slices.Contains(pkgs, pkg) {
 			pkgs = append(pkgs, pkg)
 		}

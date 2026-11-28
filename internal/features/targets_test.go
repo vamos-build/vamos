@@ -107,7 +107,8 @@ func TestTargets_NamesAreNotLabelsOrScratch(t *testing.T) {
 }
 
 // TestTargets_ReferencesNameTargetsDeclaredAnywhere specifies that a reference names the target its label names,
-// whether that target is declared above or below it, as a base, an add() source or a dep() with arguments.
+// whether that target is declared above or below it, as a base, an add() source, a dep() with arguments, an index's
+// manifest, or a publication's check or image.
 func TestTargets_ReferencesNameTargetsDeclaredAnywhere(t *testing.T) {
 	parallelRule(t)
 	t.Run("A base declared below in the same file", func(t *testing.T) {
@@ -171,6 +172,21 @@ func TestTargets_ReferencesNameTargetsDeclaredAnywhere(t *testing.T) {
 		w.WhenISave("app", setting("mode=debug"))
 		w.ThenItSucceeds()
 		w.ThenTheImageHolds(under("/app"), files{"/app/mode.txt": nonce + " debug\n"})
+	})
+
+	t.Run("A publication's check and image, and an index's manifest, declared below", func(t *testing.T) {
+		w := newTargetWorld(t)
+		w.GivenARegistry()
+		w.GivenTheBuildFileDeclares(fmt.Sprintf(`
+			publication(name="release", checks=["test"], images={"<registry>/team/server": "server"})
+			index(name="server", layer="app", platforms=[%q])
+			task(name="test", base="app", steps=[run(["echo", %q])])
+			layer(name="app", base="busybox", command=["echo", "app"])
+		`, thisPlatform(), testenv.NewNonce()))
+		w.WhenIPublish("release", taggedAs("v1"))
+		w.ThenItSucceeds()
+		w.ThenTheTargetsWere(statuses{task("test"): ran, layer("app"): ranOrReused})
+		w.ThenTheIndexManifestsAre(manifest{platform: thisPlatform(), command: []string{"echo", "app"}})
 	})
 }
 

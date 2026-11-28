@@ -49,7 +49,9 @@ type buildFile struct {
 	path  string                  // of the BUILD file, for messages
 	names []string                // of every target, globs included, in the order declared
 	decls map[string]*declaration // each target, by name
-	refs  []targetRef             // the labels given to add() and dep() as the file ran, for vamos update to follow
+	// The labels given to add() and dep() as the file ran, or as a function of ctx it gave a target ran, for vamos
+	// update to follow.
+	refs refSet
 }
 
 // declaration records a target of a BUILD file: where it was declared, by which builtin, and the call's arguments,
@@ -93,8 +95,8 @@ type makeFunc func(c *evalContext, fn *starlark.Builtin, args starlark.Tuple, kw
 type module struct {
 	globals starlark.StringDict
 	err     error
-	loading bool        // while it runs, to report a cycle of loads
-	refs    []targetRef // the labels given to dep() as it ran, or a .star file it loaded did
+	loading bool       // while it runs, to report a cycle of loads
+	refs    []refLabel // the labels given to dep() as it ran, or a .star file it loaded did
 }
 
 // evalMode says what Starlark code is running, which decides what builtins may do.
@@ -112,27 +114,46 @@ const (
 // not the module defining it.
 type evalContext struct {
 	mode     evalMode
-	file     *buildFile         // the BUILD file running, or declaring the target being configured; nil in a module
-	made     []madeStep         // while declaring: every step made, in order
-	listed   map[step]bool      // while declaring: steps in some target's list
-	deferred bool               // while declaring: some target's steps are given by a function of ctx
-	target   *declaration       // while configuring: the target being made
-	refs     []targetRef        // while declaring or loading a module: the labels given to add() and dep()
-	hasRef   map[[2]string]bool // the package and label of each of refs
-	clean    map[any]bool       // while declaring: the values that rule calls froze, which hold no function
+	file     *buildFile    // the BUILD file running, or declaring the target being configured; nil in a module
+	made     []madeStep    // while declaring: every step made, in order
+	listed   map[step]bool // while declaring: steps in some target's list
+	deferred bool          // while declaring: some target's steps are given by a function of ctx
+	target   *declaration  // while configuring: the target being made
+	refs     refSet        // while declaring or loading a module: the labels given to add() and dep()
+	clean    map[any]bool  // the values that rule calls and dep() froze, which hold no function
 }
 
-// addRef records ref among the labels given to add() and dep(), unless it is there already.
-func (c *evalContext) addRef(ref targetRef) {
-	key := [2]string{ref.pkg, ref.ref}
-	if c.hasRef[key] {
+// addRef records ref among the labels given to add() and dep(): while declaring or loading a module, in c, and while
+// configuring, in the BUILD file declaring the target, since a function of ctx may name a package nothing else does,
+// which vamos update must load to find the pulls it declares.
+// Only the label is kept, not what dep() gives the target, which nothing else may hold.
+func (c *evalContext) addRef(ref refLabel) {
+	if c.mode == configuring {
+		c.file.refs.add(ref)
 		return
 	}
-	if c.hasRef == nil {
-		c.hasRef = map[[2]string]bool{}
+	c.refs.add(ref)
+}
+
+// refLabel is a label given to add() or dep(), and the package it is relative to.
+type refLabel struct{ pkg, ref string }
+
+// refSet is labels given to add() and dep(), each once, in the order first given.
+type refSet struct {
+	refs []refLabel
+	has  map[refLabel]bool // each of refs
+}
+
+// add records ref, unless it is there already.
+func (s *refSet) add(ref refLabel) {
+	if s.has[ref] {
+		return
 	}
-	c.hasRef[key] = true
-	c.refs = append(c.refs, ref)
+	if s.has == nil {
+		s.has = map[refLabel]bool{}
+	}
+	s.has[ref] = true
+	s.refs = append(s.refs, ref)
 }
 
 // contextKey is the thread local holding a thread's evalContext.
@@ -544,7 +565,7 @@ func (w *workspace) loadModule(caller *starlark.Thread, label string) (starlark.
 		m.err = w.interrupted(describeExecError(m.err))
 	}
 	m.loading = false
-	m.refs = mc.refs
+	m.refs = mc.refs.refs
 	w.passRefs(caller, m)
 	return m.globals, m.err
 }
@@ -748,11 +769,22 @@ func identity(v starlark.Value) any {
 }
 
 // functionWithin reports whether v holds a function, through lists, tuples, dicts, their keys too, dep()s and add()s,
-// skipping the values in clean, which hold none, and in seen, which it has walked; and where, as the parts of a path
+// skipping the values in clean, which hold none, frozen dep()s and add()s of them, whose arguments dep() checked as
+// it froze them, and the values in seen, which it has walked; and where, as the parts of a path
 // within v, innermost first, such as "[1]", which the caller puts after the argument's name.
 func functionWithin(v starlark.Value, clean, seen map[any]bool) ([]string, bool) {
 	if _, ok := v.(starlark.Callable); ok {
 		return nil, true
+	}
+	switch v := v.(type) {
+	case *depValue:
+		if v.target.frozen { // dep() refused a function among its arguments as it froze them
+			return nil, false
+		}
+	case *addStep:
+		if v.target.frozen {
+			return nil, false
+		}
 	}
 	key := identity(v)
 	switch v.(type) {
@@ -1162,9 +1194,6 @@ func (w *workspace) newAdd(
 	if _, _, err := parseLabel(ref.ref, ref.pkg); err != nil {
 		return nil, fmt.Errorf("%s: source %q: %w", fn.Name(), ref.ref, err)
 	}
-	if c.mode == declaring {
-		c.addRef(ref)
-	}
 	if err := graph.CheckPath("dest", dest); err != nil {
 		return nil, fmt.Errorf("%s: %w", fn.Name(), err)
 	}
@@ -1177,6 +1206,7 @@ func (w *workspace) newAdd(
 			return nil, fmt.Errorf("%s: %s %q must not contain a NUL byte", fn.Name(), id[0], id[1])
 		}
 	}
+	c.addRef(refLabel{ref.pkg, ref.ref})
 	return &addStep{
 		target: ref, given: source, dest: dest, owner: owner, group: group, pos: callerPos(thread),
 	}, nil

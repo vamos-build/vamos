@@ -565,6 +565,14 @@ func TestBuildFile_StepsAreMadeInAStepsList(t *testing.T) {
 				"is not in the steps of any layer()",
 		},
 		{
+			name: "An add() outside any steps, given a dep() twice over, shows it in full both times",
+			build: "d = dep(\"lib\", platform=\"linux/arm64\")\nadd(dep(\"code\", a=[d, d]), \"/app\")\n" +
+				`layer(name="app", base="busybox")`,
+			error: `/project/BUILD:4:4: add: add(dep("code", a = [dep("lib", platform = "linux/arm64"), ` +
+				`dep("lib", platform = "linux/arm64")]), "/app") ` +
+				"is not in the steps of any layer()",
+		},
+		{
 			name:  "A list given to dep() can't be changed to hold it",
 			build: "l = []\nd = dep(\"code\", a=l)\nl.append(d)\nlayer(name=\"app\", base=\"busybox\")",
 			error: "/project/BUILD:5:9: append: cannot append to frozen list",

@@ -116,7 +116,7 @@ targets elsewhere.
 - **GIVEN** a workspace named `com.acme.shop` that declares `tool_cache(name = "tool", path = "/cache")`, and a task
   `app` whose step adds `dep("tool")`
 - **WHEN** I build `app`
-- **THEN** it fails as the BUILD file loads, naming `tool` and saying that a tool cache is mounted with `mount()`
+- **THEN** it fails before anything runs, naming `tool` and saying that a tool cache is mounted with `mount()`
 
 ### Requirement: What a cache holds is outside every key
 

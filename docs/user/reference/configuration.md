@@ -119,7 +119,8 @@ So a reference can name a target declared above or below it, in its own package 
 and whether a target builds doesn't depend on the order targets are declared in or `BUILD` files run in.
 A mistake in a target is reported when a command builds it, at the call that makes it, which may be in a `.star` file,
 and a target that no command needs is checked only for its shape,
-but by a full [`vamos update`](cli/update.md#workspace-discovery), which checks every target it finds.
+but by a full [`vamos update`](cli/update.md#workspace-discovery),
+which checks the rule of every target of the packages it walks, and of the targets those use as given.
 
 The values passed to a rule that declares a target, and to `dep()`, are frozen as the call is made,
 with every list and dictionary they hold,

@@ -192,9 +192,10 @@ type pinChange struct {
 	keptFor       string
 }
 
-// keptPins returns the pins of l that pins doesn't have, which a full update keeps, for the reason keptFor: that a
-// pull whose image or tag is a function of ctx may use them in another configuration than this machine's, or that a
-// target that couldn't be configured may use a pull that does.
+// keptPins returns the pins of l that pins doesn't have, which a full update keeps, for the reason keptFor, which
+// load.Pulls gives as unsure: such as that a pull whose image or tag is a function of ctx may use them in another
+// configuration than this machine's, or that a target that couldn't be configured, or a package that couldn't be
+// loaded, may use a pull that does.
 func keptPins(l *load.Lock, pins map[string]load.Pin, keptFor string) []pinChange {
 	var kept []pinChange
 	for _, image := range slices.Sorted(maps.Keys(l.Pulls)) {

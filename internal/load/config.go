@@ -624,11 +624,14 @@ func (v *depValue) Truth() starlark.Bool  { return true }
 func (v *depValue) Hash() (uint32, error) { return 0, errors.New("unhashable type: dep") }
 
 func (v *depValue) String() string {
-	// A dep() is shown in full the first time one being printed holds it, and by its label alone after, so that one
-	// held many times over is printed once.
+	// A dep() is shown in full the first time one being printed holds it, and by its label alone after, if it has
+	// arguments, so that one held many times over is printed once.
 	if v.printed != nil {
 		if (*v.printed)[v] {
-			return fmt.Sprintf("dep(%s, ...)", starlark.String(v.target.ref))
+			if len(v.target.args) > 0 {
+				return fmt.Sprintf("dep(%s, ...)", starlark.String(v.target.ref))
+			}
+			// Without arguments, it holds no dep() to print again, so it is printed in full, as short.
 		}
 		(*v.printed)[v] = true
 	} else {
@@ -704,9 +707,6 @@ func (w *workspace) newDep(
 				fn.Name(), v.Type())
 		}
 	}
-	if c.mode == declaring || c.mode == loadingModule {
-		c.addRef(target)
-	}
 	// A parameter's value is never a function, so one within an argument is refused now, which leaves the arguments
 	// data, which are fixed as dep() is called, as a rule's are, so that the target is configured with them.
 	for _, a := range target.args {
@@ -716,11 +716,12 @@ func (w *workspace) newDep(
 				strings.Join(where, ""))
 		}
 	}
-	if c.clean != nil {
-		target.freezeIn(c.clean)
-	} else {
-		target.freeze()
+	c.addRef(refLabel{target.pkg, target.ref})
+	// What one dep() froze, another, given the same values, as a loop or a function of ctx may give them, skips.
+	if c.clean == nil {
+		c.clean = map[any]bool{}
 	}
+	target.freezeIn(c.clean)
 	return &depValue{target: target}, nil
 }
 
@@ -1228,8 +1229,9 @@ func (cr *configurer) image(cl confLabel) error {
 	// A layer's base must be for its platform, since the base's files are; dep() can give it another. A task's base
 	// may be for any, since only its output, if any, is kept.
 	if !t.task && base.label != scratch && base.cfg.platform.String() != cl.cfg.platform.String() {
-		return fmt.Errorf("%s: its base %s is for %s, not %s; a layer's base must be for its platform",
-			cr.w.describe("layer", cl), cr.w.display(base.label), base.cfg.platform, cl.cfg.platform)
+		return fmt.Errorf("%s: layer: its base %s is for %s, not %s; a layer's base must be for its platform "+
+			"(configuring %s)", d.pos, cr.w.display(base.label), base.cfg.platform, cl.cfg.platform,
+			cr.w.describeConfigured(cl))
 	}
 	s.base = base
 	for _, in := range t.steps {

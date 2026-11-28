@@ -699,6 +699,26 @@ func TestUpdate_ReResolvesPinsAndReportsWhatChanged(t *testing.T) {
 		w.ThenTheLockfileIs(lockfilePinning(old))
 	})
 
+	t.Run("A hidden pull that a target configures is pinned, but not as a later target that fails configures it",
+		func(t *testing.T) {
+			w := newWorld(t)
+			w.GivenTheRegistryListsTags("<registry>/base", "v1", "v2")
+			w.GivenTheProjectHolds(files{"WORKSPACE": ""})
+			w.GivenThePackageDeclares(".shared", `
+				pull(name="base", image="<registry>/base",
+				     tag=lambda ctx: {"linux/arm64": "v1", "linux/arm/v7": "v2"}[ctx.platform])
+				glob(name="files", params={"kind": param(default="a", values=["a"])}, include=["."])
+			`)
+			w.GivenThePackageDeclares("ui", `
+				task(name="app", base=dep("//.shared:base", platform="linux/arm64"), steps=[run(["true"])])
+				task(name="check", params={"mode": "x"}, base=dep("//.shared:base", platform="linux/arm/v7"),
+				     steps=[add(dep("//.shared:files", kind=arg("mode")), "/f"), run(["true"])])
+			`)
+			w.WhenIUpdate(forPlatform("linux/amd64"))
+			w.ThenItSucceeds()
+			w.ThenTheLockfileIs(lockfilePinning(pin{"<registry>/base:v1", "v1", "<digest of <registry>/base:v1>"}))
+		})
+
 	t.Run("A pull given a function of ctx is pinned in the command line's configuration and those its users give",
 		func(t *testing.T) {
 			w := newWorld(t)
@@ -821,6 +841,35 @@ func TestUpdate_ReResolvesPinsAndReportsWhatChanged(t *testing.T) {
 			w.ThenItSucceeds()
 			w.ThenTheLockfileIs(lockfilePinning(pin{"<registry>/base:v1", "v1", "<digest of <registry>/base:v1>"}))
 		})
+
+	t.Run("A pull that a dep() made by a function of ctx names is pinned, though the configuration made doesn't use it",
+		func(t *testing.T) {
+			w := newWorld(t)
+			w.GivenTheRegistryListsTags("<registry>/base", "v1")
+			w.GivenTheProjectHolds(files{"WORKSPACE": ""})
+			w.GivenThePackageDeclares(".shared", pullOfBase("v1"))
+			w.GivenThePackageDeclares("ui", `
+				layer(name="app", params={"mode": "plain"},
+				      base=lambda ctx: {"plain": "scratch", "shared": dep("//.shared:base")}[ctx.mode])
+			`)
+			w.WhenIUpdate()
+			w.ThenItSucceeds()
+			w.ThenTheLockfileIs(lockfilePinning(pin{"<registry>/base:v1", "v1", "<digest of <registry>/base:v1>"}))
+		})
+
+	t.Run("A pull that an add() a function of ctx makes and drops leads to is pinned", func(t *testing.T) {
+		w := newWorld(t)
+		w.GivenTheRegistryListsTags("<registry>/base", "v1")
+		w.GivenTheProjectHolds(files{"WORKSPACE": ""})
+		w.GivenThePackageDeclares(".shared", pullOfBase("v1")+"\n"+
+			`task(name="out", base="base", source="/out", include=["."])`)
+		w.GivenThePackageDeclares("ui", `
+			layer(name="app", base="scratch", steps=lambda ctx: [add("//.shared:out", "/o")][:0])
+		`)
+		w.WhenIUpdate()
+		w.ThenItSucceeds()
+		w.ThenTheLockfileIs(lockfilePinning(pin{"<registry>/base:v1", "v1", "<digest of <registry>/base:v1>"}))
+	})
 
 	t.Run("A pull in a hidden folder that an index also given a function of ctx names is pinned", func(t *testing.T) {
 		w := newWorld(t)

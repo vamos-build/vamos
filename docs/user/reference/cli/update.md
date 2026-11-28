@@ -32,7 +32,7 @@ skipping hidden directories, linked directories and other workspaces, those with
 It checks the rule of each of their targets, and of each target those use as given, as building it would,
 and of a target given a function of `ctx`, the targets it is given as they are:
 a mistake there, or targets that name each other there in a cycle, fails the update.
-It then configures every target as building it would, loading the packages it uses,
+It then configures every layer, task, index and publication as building it would, loading the packages it uses,
 including those that only a function of `ctx`, or a label given to `add()` or `dep()`, reaches.
 A pull of a package the walk found is pinned in the configuration that the command line gives it
 and in each that the targets using it give it;
@@ -42,6 +42,9 @@ It removes the pins that no pull uses, unless one may still be used:
 by a pull given a function of `ctx`, which may pull another image in another configuration,
 or by a target it couldn't configure, or a package it couldn't load, which may use a pull it didn't find.
 Then it removes no pin, and says why it keeps those.
+A function of `ctx` that names a target only in a configuration that the update doesn't configure,
+such as only for another platform, names nothing the update follows,
+so a pin that only that target's pulls use is removed.
 Naming specific targets updates only the specified pulls.
 
 `update` prints each pin added, changed, or removed:

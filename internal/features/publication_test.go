@@ -64,7 +64,8 @@ func aReleaseOfTwoImages(nonce string) string {
 // TestPublication_DeclaresItsChecksAndImages specifies that a BUILD file declares a publication with a name, the
 // optional tasks that it checks, and its images, a nonempty dictionary from a repository, a lowercase registry
 // repository name without a tag or digest, to the pull, layer or index published there,
-// and that a mistake in one is reported as the BUILD file loads, naming the file, line and column.
+// and that a mistake in one is reported when a command builds or publishes it, before anything is built, naming the
+// file, line and column.
 func TestPublication_DeclaresItsChecksAndImages(t *testing.T) {
 	parallelRule(t)
 	t.Run("A publication names its checks and images", func(t *testing.T) {
